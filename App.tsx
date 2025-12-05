@@ -1,1841 +1,3511 @@
 // @ts-nocheck
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Calendar,
-  ShoppingCart,
-  Users,
-  Bell,
-  ChefHat,
-  ClipboardList,
-  FolderClock,
-  Settings,
-  Upload,
-  Download,
-  Home,
-  Lock,
-  LogOut,
-  KeyRound,
-  Trash2,
-  Plus,
-  Camera,
-} from "lucide-react";
+import React, { useState } from "react";
 
-/**
- * FamilyHub – Single-file React PWA – ver. 1.4.2 (stabile, no preview)
- *
- * - Login obbligatorio (niente modalità "anteprima").
- * - Utenti/ruoli reali con credenziali salt+hash (PIN numerico forzato per Bimbo).
- * - Calendario condiviso con ricorrenze settimanali e mensili (31 ⇒ ultimo giorno mese, 30 resta 30).
- * - Pasti settimanali con COLAZIONE, MERENDA, PRANZO (primo/secondo/contorno), CENA (primo/secondo/contorno).
- * - Filtri per categoria piatti nei menu a tendina e nella libreria piatti.
- * - Lista spesa + dispensa.
- * - Compiti & Paghette (saldo mensile + registrazione pagamenti).
- * - Promemoria locali (notifiche) con pianificazione a minuti.
- * - Dashboard con widget e carosello foto (autoplay infinito).
- * - Opzionale: Sync Supabase tabella kv(id text pk, payload jsonb) via REST.
- */
+// FAMILY HUB - Versione completa per anteprima
+// - Login (Admin/admin, Famiglia/famiglia)
+// - Tema chiaro / scuro
+// - Home con riepilogo di oggi (pasti, impegni, scadenze, spesa, compiti)
+// - Utenti con password, saldo paghetta, cambio password
+// - Calendario stile Google Calendar (lista / mese / settimana) CON ORA
+// - Scadenze assegnate a utente
+// - Dispensa con categorie + Lista spesa collegata
+// - Pasti & Pianificazione con griglia settimanale 7x5 e gestione ingredienti
+// - Compiti & paghette con storico movimenti e pagamenti liberi
+// - ToDo List con archivio
 
-/********************* UTILS & STORAGE ************************/
-const LS_KEY = "familyhub:data:v11";
-const LS_SESSION = "familyhub:session:v2";
+// ----------------- Costanti & helper -----------------
 
-const giorni = [1, 2, 3, 4, 5, 6, 7];
-const dayNameShort = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
-const dayNameFull = [
-  "Lunedì",
-  "Martedì",
-  "Mercoledì",
-  "Giovedì",
-  "Venerdì",
-  "Sabato",
-  "Domenica",
+const NAV_ITEMS = [
+  "Home",
+  "Utenti",
+  "Calendario",
+  "Scadenze",
+  "Dispensa",
+  "Lista spesa",
+  "Pasti",
+  "Compiti & paghette",
+  "ToDo List",
+  "Impostazioni"
 ];
 
-function uid(prefix = "id") {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
-}
-function formatDateInput(d) {
-  try {
-    return new Date(d).toISOString().slice(0, 10);
-  } catch {
-    return new Date().toISOString().slice(0, 10);
-  }
-}
-function today() {
-  return formatDateInput(new Date());
-}
-function fmtDM(d) {
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}/${mm}`;
-}
+const MEAL_TYPES = ["Antipasto", "Primo", "Secondo", "Contorno", "Dolce", "Altro"];
+const MEAL_SLOTS = ["Colazione", "II Colazione", "Pranzo", "Merenda", "Cena"];
 
-// Crypto helper per password/PIN (sha256 hex)
-async function sha256Hex(str) {
-  const enc = new TextEncoder();
-  const buf = await crypto.subtle.digest("SHA-256", enc.encode(str));
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/********************* DEFAULT DATA ************************/
-const DEFAULT_DATA = {
-  settings: {
-    famiglia: "Famiglia Verdolini",
-    valuta: "€",
-    inizioSettimana: 1,
-    numeroWhatsApp: "",
-    fuso: "Europe/Rome",
-    oraPromemoria: "20:00",
-    allowanceSettimanaleBase: 5,
-    google: { clientId: "", calendarId: "primary" },
-    carousel: { enabled: true, intervalMs: 4000 },
-    themeBg: "#f9fafb",
-    supabase: {
-      enabled: true,
-      url: "https://bmxkrmsiywdsjnyyokgt.supabase.co",
-      anonKey:
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJteGtybXNpeXdkc2pueXlva2d0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIyNTcyMzAsImV4cCI6MjA3NzgzMzIzMH0.l5zWMCyydtAKIJUDq5XCWzqH_wzr_d-X7JiERINKEC0",
-      table: "kv",
-      recordId: "default",
-      status: "idle",
-    },
-  },
-  utenti: [
-    {
-      id: "u-admin",
-      nome: "Admin",
-      ruolo: "Admin",
-      username: "admin",
-      salt: null,
-      pwHash: null,
-      mustChange: false,
-    },
-    {
-      id: "u-adulto",
-      nome: "Genitore",
-      ruolo: "Adulto",
-      username: "genitore",
-      salt: null,
-      pwHash: null,
-      mustChange: false,
-    },
-  ],
-  permessi: {
-    Admin: ["tutto"],
-    Adulto: [
-      "calendario",
-      "spesa",
-      "pasti",
-      "compiti",
-      "scadenze",
-      "notifiche",
-      "impostazioni",
-    ],
-    Teen: ["pasti", "compiti", "calendario"],
-    Bimbo: ["compiti"],
-    Ospite: ["pasti"],
-  },
-  eventi: [],
-  scadenze: [],
-  dispensa: [],
-  piatti: [
-    {
-      id: "pasta-al-pomodoro",
-      nome: "Pasta al pomodoro",
-      categoria: "Primi",
-      richiede: [
-        { nome: "Pasta", qta: 100, unita: "g" },
-        { nome: "Passata", qta: 100, unita: "ml" },
-      ],
-    },
-    {
-      id: "pollo-griglia",
-      nome: "Pollo alla griglia",
-      categoria: "Secondi",
-      richiede: [{ nome: "Petto di pollo", qta: 1, unita: "pz" }],
-    },
-    {
-      id: "insalata-mista",
-      nome: "Insalata mista",
-      categoria: "Contorni",
-      richiede: [{ nome: "Insalata", qta: 1, unita: "pz" }],
-    },
-    {
-      id: "yogurt",
-      nome: "Yogurt bianco",
-      categoria: "Altro",
-      richiede: [{ nome: "Yogurt", qta: 1, unita: "pz" }],
-    },
-  ],
-  menuSettimanale: [1, 2, 3, 4, 5, 6, 7].reduce(
-    (acc, g) => ({
-      ...acc,
-      [g]: {
-        colazione: [],
-        merenda: [],
-        pranzo: { primo: [], secondo: [], contorno: [] },
-        cena: { primo: [], secondo: [], contorno: [] },
-      },
-    }),
-    {}
-  ),
-  listaSpesa: [],
-  compiti: [],
-  cassaFigli: {},
-  pagamenti: [],
-  schedules: [],
-  homePhotos: [
-    {
-      id: uid("ph"),
-      url: "https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1280",
-      titolo: "Benvenuti in FamilyHub",
-    },
-  ],
+const slotOrder = {
+  Colazione: 0,
+  "II Colazione": 1,
+  Pranzo: 2,
+  Merenda: 3,
+  Cena: 4
 };
 
-function loadData() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : DEFAULT_DATA;
-  } catch (e) {
-    console.warn("Errore loadData", e);
-    return DEFAULT_DATA;
+const weekdayLabels = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(dateStr, days) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function getWeekDates(anyDateStr) {
+  const base = new Date(anyDateStr);
+  const day = base.getDay(); // 0=Sun..6=Sat
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(base);
+  monday.setDate(base.getDate() + diffToMonday);
+  const res = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    res.push(d.toISOString().slice(0, 10));
   }
-}
-function saveData(d) {
-  localStorage.setItem(LS_KEY, JSON.stringify(d));
+  return res;
 }
 
-/********************* UI PRIMITIVES ************************/
-const Section = ({ title, icon, actions, children }) => (
-  <div className="bg-white shadow-sm rounded-2xl p-4 md:p-6 mb-6">
-    <div className="flex items-center justify-between mb-4">
-      <div className="flex items-center gap-2">
-        {icon}
-        <h2 className="text-xl md:text-2xl font-semibold">{title}</h2>
-      </div>
-      <div className="flex gap-2">{actions}</div>
-    </div>
-    {children}
-  </div>
-);
+function nextId(list) {
+  return list.length ? Math.max(...list.map(i => i.id)) + 1 : 1;
+}
 
-const Pill = ({ children }) => (
-  <span className="px-2 py-1 rounded-full text-xs bg-gray-100">{children}</span>
-);
+function parseIngredients(text) {
+  if (!text || !text.trim()) return [];
+  return text
+    .split(";")
+    .map(c => c.trim())
+    .filter(Boolean)
+    .map(chunk => {
+      const parts = chunk.split("=");
+      const name = (parts[0] || "").trim();
+      const qtyStr = (parts[1] || "").trim();
+      const unit = (parts[2] || "").trim() || "pz";
+      return { name, qty: Number(qtyStr) || 0, unit };
+    })
+    .filter(i => i.name);
+}
 
-const Logo = () => (
-  <div className="flex items-center gap-2">
-    <ChefHat className="w-5 h-5" />
-    <span className="font-semibold">FamilyHub</span>
-  </div>
-);
+// ----------------- Dati iniziali -----------------
 
-const StatCard = ({ title, value }) => (
-  <div className="bg-white rounded-2xl p-4 shadow-sm">
-    <div className="text-sm text-gray-500">{title}</div>
-    <div className="text-3xl font-semibold">{value}</div>
-  </div>
-);
+const initialUsers = [
+  { id: 1, name: "Admin", role: "admin", balance: 0, password: "admin" },
+  { id: 2, name: "Famiglia", role: "adulto", balance: 0, password: "famiglia" }
+];
 
-/********************* LOGIN ************************/
-function LoginScreen({ data, setSession }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+const initialMeals = [
+  {
+    id: 1,
+    name: "Pasta",
+    type: "Primo",
+    variant: "Pomodoro",
+    ingredients: [
+      { name: "Pasta", qty: 80, unit: "g" },
+      { name: "Passata di pomodoro", qty: 100, unit: "g" }
+    ]
+  }
+];
 
-  const utentiConCred = data.utenti.filter((u) => u.username && u.salt && u.pwHash);
+const initialCategories = ["Generico", "Fresco", "Dispensa", "Detersivi"];
 
-  const tryLogin = async () => {
-    const u = data.utenti.find(
-      (x) => x.username && x.username.toLowerCase() === username.toLowerCase()
+// ----------------- Layout helpers -----------------
+
+const baseStyles = {
+  appShell: {
+    minHeight: "100vh",
+    padding: 16,
+    boxSizing: "border-box",
+    fontFamily:
+      'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  },
+  appInner: {
+    maxWidth: 1200,
+    margin: "0 auto",
+    borderRadius: 16,
+    overflow: "hidden",
+    display: "flex",
+    flexDirection: "column",
+    boxShadow: "0 20px 40px rgba(0,0,0,0.35)"
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "12px 20px"
+  },
+  headerLeft: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12
+  },
+  headerRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13
+  },
+  logoCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 700,
+    fontSize: 16
+  },
+  body: {
+    display: "flex",
+    minHeight: 560
+  },
+  sidebar: {
+    width: 220,
+    padding: 12,
+    boxSizing: "border-box"
+  },
+  navList: {
+    listStyle: "none",
+    padding: 0,
+    margin: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    marginTop: 8
+  },
+  navButton: {
+    width: "100%",
+    textAlign: "left",
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: "none",
+    cursor: "pointer",
+    fontSize: 13
+  },
+  main: {
+    flex: 1,
+    padding: 16,
+    boxSizing: "border-box",
+    overflow: "auto"
+  },
+  pageTitle: {
+    fontSize: 20,
+    fontWeight: 600,
+    marginBottom: 4
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    marginBottom: 16
+  },
+  card: {
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12
+  },
+  cardHeaderRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: 600
+  },
+  tag: {
+    padding: "2px 8px",
+    borderRadius: 999,
+    fontSize: 11
+  },
+  twoCols: {
+    display: "flex",
+    gap: 16,
+    alignItems: "flex-start",
+    flexWrap: "wrap"
+  },
+  col: {
+    flex: 1,
+    minWidth: 260
+  },
+  formRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    marginBottom: 8
+  },
+  label: {
+    fontSize: 12
+  },
+  input: {
+    borderRadius: 8,
+    padding: "6px 8px",
+    fontSize: 13,
+    border: "1px solid",
+    outline: "none"
+  },
+  select: {
+    borderRadius: 8,
+    padding: "6px 8px",
+    fontSize: 13,
+    border: "1px solid",
+    outline: "none"
+  },
+  textarea: {
+    borderRadius: 8,
+    padding: "6px 8px",
+    fontSize: 13,
+    border: "1px solid",
+    outline: "none",
+    resize: "vertical"
+  },
+  primaryButton: {
+    borderRadius: 999,
+    border: "none",
+    padding: "6px 12px",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 500,
+    marginRight: 6
+  },
+  ghostButton: {
+    borderRadius: 999,
+    border: "1px solid",
+    padding: "6px 12px",
+    cursor: "pointer",
+    fontSize: 13,
+    marginRight: 6,
+    background: "transparent"
+  }
+};
+
+// ----------------- Component principale -----------------
+
+function FamilyHubApp() {
+  // Tema & impostazioni generali
+  const [settings, setSettings] = useState({
+    theme: "dark",
+    notifications: { email: true, whatsapp: true, popup: true }
+  });
+
+  const palette =
+    settings.theme === "dark"
+      ? {
+          appBg: "linear-gradient(135deg,#0f172a,#020617)",
+          appText: "#e5e7eb",
+          innerBg: "rgba(15,23,42,0.98)",
+          headerBg: "linear-gradient(135deg,#0ea5e9,#6366f1)",
+          headerText: "#f9fafb",
+          sidebarBg: "rgba(15,23,42,0.98)",
+          sidebarBorder: "rgba(31,41,55,0.95)",
+          mainBg: "#020617",
+          cardBg: "rgba(15,23,42,0.96)",
+          cardBorder: "rgba(55,65,81,0.9)",
+          textMuted: "#9ca3af",
+          navActiveBg: "linear-gradient(135deg,#0ea5e9,#6366f1)",
+          navActiveText: "#f9fafb",
+          inputBg: "#020617",
+          inputBorder: "rgba(75,85,99,0.9)",
+          buttonPrimaryBg: "linear-gradient(135deg,#0ea5e9,#6366f1)",
+          buttonPrimaryText: "#f9fafb",
+          buttonGhostBorder: "rgba(148,163,184,0.7)",
+          tagBg: "rgba(15,23,42,0.7)",
+          tableHeaderBg: "rgba(15,23,42,0.9)",
+          tableBorder: "rgba(31,41,55,0.9)"
+        }
+      : {
+          appBg: "linear-gradient(135deg,#e5e7eb,#f9fafb)",
+          appText: "#020617",
+          innerBg: "#ffffff",
+          headerBg: "linear-gradient(135deg,#38bdf8,#6366f1)",
+          headerText: "#f9fafb",
+          sidebarBg: "#f3f4f6",
+          sidebarBorder: "#d1d5db",
+          mainBg: "#f9fafb",
+          cardBg: "#ffffff",
+          cardBorder: "#e5e7eb",
+          textMuted: "#6b7280",
+          navActiveBg: "linear-gradient(135deg,#38bdf8,#6366f1)",
+          navActiveText: "#f9fafb",
+          inputBg: "#ffffff",
+          inputBorder: "#d1d5db",
+          buttonPrimaryBg: "linear-gradient(135deg,#38bdf8,#6366f1)",
+          buttonPrimaryText: "#f9fafb",
+          buttonGhostBorder: "#9ca3af",
+          tagBg: "#e5e7eb",
+          tableHeaderBg: "#e5e7eb",
+          tableBorder: "#d1d5db"
+        };
+
+  // Navigazione & login
+  const [activeNav, setActiveNav] = useState("Home");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginForm, setLoginForm] = useState({ name: "", password: "" });
+  const [loginError, setLoginError] = useState("");
+
+  // Dati principali
+  const [users, setUsers] = useState(initialUsers);
+  const [selectedUserId, setSelectedUserId] = useState(1);
+
+  // Calendario
+  const [calendarEvents, setCalendarEvents] = useState([]); // {id,title,date,time,userId}
+  const [calendarForm, setCalendarForm] = useState({
+    title: "",
+    date: todayStr(),
+    time: "18:00",
+    userId: 1
+  });
+  const [calendarViewMode, setCalendarViewMode] = useState("month"); // list | month | week
+  const [calendarCurrentDate, setCalendarCurrentDate] = useState(todayStr());
+
+  // Scadenze
+  const [deadlines, setDeadlines] = useState([]); // {id,title,date,userId}
+  const [deadlinesForm, setDeadlinesForm] = useState({
+    title: "",
+    date: todayStr(),
+    userId: 1
+  });
+
+  // Dispensa
+  const [categories, setCategories] = useState(initialCategories);
+  const [newCategory, setNewCategory] = useState("");
+  const [pantry, setPantry] = useState([]); // {id,name,qty,unit,category}
+  const [pantryForm, setPantryForm] = useState({
+    name: "",
+    qty: 1,
+    unit: "pz",
+    category: initialCategories[0]
+  });
+
+  // Lista spesa
+  const [shopping, setShopping] = useState([]); // {id,name,qty,unit,taken}
+  const [shoppingForm, setShoppingForm] = useState({ name: "", qty: 1, unit: "pz" });
+
+  // Pasti
+  const [meals, setMeals] = useState(initialMeals); // {id,name,type,variant,ingredients[]}
+  const [mealForm, setMealForm] = useState({
+    name: "",
+    type: MEAL_TYPES[0],
+    variant: "",
+    ingredientsText: ""
+  });
+  const [editingMealId, setEditingMealId] = useState(null);
+
+  const [mealPlans, setMealPlans] = useState([]); // {id,date,userId,mealId,slot}
+  const [planForm, setPlanForm] = useState({
+    date: todayStr(),
+    userId: 1,
+    mealId: "",
+    slot: "Pranzo"
+  });
+  const [planViewDate, setPlanViewDate] = useState(todayStr());
+
+  // Compiti & paghette
+  const [chores, setChores] = useState([]); // {id,title,deadline,userId,amount,done}
+  const [choresForm, setChoresForm] = useState({
+    title: "",
+    deadline: todayStr(),
+    userId: 1,
+    amount: 1
+  });
+  const [transactions, setTransactions] = useState([]); // {id,userId,type,amount,date,note}
+  const [paymentInputs, setPaymentInputs] = useState({}); // userId -> string
+
+  // ToDo
+  const [todos, setTodos] = useState([]); // {id,title,userId,done}
+  const [todoForm, setTodoForm] = useState({ title: "", userId: 1 });
+  const [showCompletedTodos, setShowCompletedTodos] = useState(false);
+
+  // Gestione utenti & password
+  const [newUser, setNewUser] = useState({ name: "", role: "adulto", password: "" });
+  const [selfPwdForm, setSelfPwdForm] = useState({ newPwd: "", confirm: "" });
+  const [adminPwdEdits, setAdminPwdEdits] = useState({});
+
+  const currentUser = users.find(u => u.id === selectedUserId) || users[0];
+
+  function getUserName(id) {
+    const u = users.find(x => x.id === id);
+    return u ? u.name : "Sconosciuto";
+  }
+
+  function getMealFullName(id) {
+    const m = meals.find(x => x.id === id);
+    if (!m) return "";
+    return m.variant ? m.name + " (" + m.variant + ")" : m.name;
+  }
+
+  function adjustPantryForIngredients(ings, factor) {
+    if (!ings || !ings.length) return;
+    setPantry(prev => {
+      const next = [...prev];
+      ings.forEach(ing => {
+        const idx = next.findIndex(
+          p => p.name.toLowerCase() === (ing.name || "").toLowerCase()
+        );
+        const delta = (Number(ing.qty) || 0) * factor;
+        if (idx === -1) {
+          if (factor > 0) {
+            next.push({
+              id: nextId(next),
+              name: ing.name,
+              qty: Number(ing.qty) || 0,
+              unit: ing.unit || "pz",
+              category: "Generico"
+            });
+          }
+        } else {
+          const item = next[idx];
+          const newQty = Math.max(0, (item.qty || 0) + delta);
+          next[idx] = { ...item, qty: newQty };
+        }
+      });
+      return next;
+    });
+  }
+
+  // --- Dati Home ---
+  const today = todayStr();
+  const todayMeals = mealPlans
+    .filter(p => p.date === today)
+    .sort((a, b) => {
+      const sa = slotOrder[a.slot] ?? 99;
+      const sb = slotOrder[b.slot] ?? 99;
+      if (sa !== sb) return sa - sb;
+      return getUserName(a.userId).localeCompare(getUserName(b.userId));
+    });
+
+  const todayEvents = calendarEvents
+    .filter(e => e.date === today)
+    .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+
+  const upcomingDeadlines = deadlines.filter(
+    d => d.date >= today && d.date <= addDays(today, 15)
+  );
+  const shoppingCount = shopping.filter(s => !s.taken).length;
+  const pendingChores = chores.filter(c => !c.done).length;
+
+  // ----------------- Login -----------------
+
+  function handleLogin() {
+    const user = users.find(
+      u => u.name === loginForm.name.trim() && u.password === loginForm.password
     );
-    if (!u || !u.salt || !u.pwHash) {
-      setError("Utente non trovato o credenziali mancanti");
+    if (!user) {
+      setLoginError("Utente o password non corretti");
       return;
     }
-    const hash = await sha256Hex(`${u.salt}:${password}`);
-    if (hash === u.pwHash) {
-      setSession({ userId: u.id, at: Date.now() });
-    } else {
-      setError("Password/PIN errato");
-    }
-  };
+    setSelectedUserId(user.id);
+    setIsAuthenticated(true);
+    setLoginError("");
+  }
 
-  return (
-    <div className="min-h-screen grid place-items-center bg-gray-50 p-6">
-      <div className="bg-white rounded-2xl shadow-sm p-6 w-full max-w-sm">
-        <div className="flex items-center gap-2 mb-4">
-          <Lock className="w-5 h-5" />
-          <h1 className="text-lg font-semibold">Accedi a FamilyHub</h1>
-        </div>
-        <div className="space-y-2">
-          <input
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <input
-            className="border rounded-lg px-3 py-2 w-full"
-            placeholder="Password/PIN"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          {error && <div className="text-sm text-red-600">{error}</div>}
+  function handleLogout() {
+    setIsAuthenticated(false);
+    setLoginForm({ name: "", password: "" });
+    setActiveNav("Home");
+  }
 
-          {utentiConCred.length === 0 && (
-            <p className="text-xs text-gray-500 mt-1">
-              Nessun utente con credenziali: chiedi all’<b>amministratore</b> di crearle in <b>Utenti</b> → <b>Credenziali</b>.
-            </p>
-          )}
-
-          <button
-            className="mt-3 w-full px-3 py-2 rounded-xl bg-black text-white"
-            onClick={tryLogin}
-          >
-            Entra
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/********************* APP ************************/
-export default function App() {
-  const [data, setData] = useState(loadData());
-  const [session, setSession] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(LS_SESSION) || "null");
-    } catch {
-      return null;
-    }
-  });
-  const [tab, setTab] = useState("dashboard");
-  const [currentUserId, setCurrentUserId] = useState(
-    () => session?.userId || loadData().utenti[0]?.id || "u-admin"
-  );
-
-  useEffect(() => {
-    saveData(data);
-  }, [data]);
-
-  // Supabase: push debounce
-  useEffect(() => {
-    const cfg = data.settings && data.settings.supabase;
-    if (!cfg || !cfg.enabled || !cfg.url || !cfg.anonKey) return;
-    const t = setTimeout(() => {
-      supaPush(cfg, data).catch(() => {});
-    }, 800);
-    return () => clearTimeout(t);
-  }, [data]);
-
-  // Supabase: pull all'avvio
-  useEffect(() => {
-    (async () => {
-      try {
-        const cfg = data.settings && data.settings.supabase;
-        if (cfg && cfg.enabled && cfg.url && cfg.anonKey) {
-          const remote = await supaPull(cfg);
-          if (remote && remote.settings) {
-            setData(remote);
-            saveData(remote);
-          }
-        }
-      } catch (e) {
-        /* silent */
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (session) localStorage.setItem(LS_SESSION, JSON.stringify(session));
-    else localStorage.removeItem(LS_SESSION);
-  }, [session]);
-
-  // HARD LOCK: impedisce accessi "anteprima"
-  useEffect(() => {
-    if (!session) return;
-    const u = data.utenti.find((x) => x.id === session.userId);
-    if (!u?.salt || !u?.pwHash) {
-      localStorage.removeItem(LS_SESSION);
-      setSession(null);
-    }
-  }, [session, data.utenti]);
-
-  // Promemoria schedulati: controllo ogni minuto
-  useEffect(() => {
-    const t = setInterval(() => {
-      const now = new Date();
-      const hh = String(now.getHours()).padStart(2, "0");
-      const mm = String(now.getMinutes()).padStart(2, "0");
-      const dow = ((now.getDay() + 6) % 7) + 1; // 1..7 (Lun..Dom)
-      setData((prev) => {
-        const due = prev.schedules.filter(
-          (s) => s.attivo && (s.giorni || []).includes(dow) && s.orario === `${hh}:${mm}`
-        );
-        if (
-          due.length &&
-          "Notification" in window &&
-          Notification.permission === "granted"
-        ) {
-          due.forEach((s) => new Notification("FamilyHub", { body: s.messaggio || s.titolo }));
-        }
-        return prev;
-      });
-    }, 60000);
-    return () => clearInterval(t);
-  }, []);
-
-  useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
-
-  useEffect(() => {
-    if (session?.userId && data.utenti.some((u) => u.id === session.userId)) {
-      setCurrentUserId(session.userId);
-    }
-  }, [session, data.utenti.length]);
-
-  const currentUser = useMemo(
-    () => data.utenti.find((u) => u.id === currentUserId),
-    [data.utenti, currentUserId]
-  );
-
-  const can = (feature) => {
-    const ruolo = currentUser?.ruolo || "Ospite";
-    const rules = data.permessi[ruolo] || [];
-    return rules.includes("tutto") || rules.includes(feature);
-  };
-
-  if (!session) return <LoginScreen data={data} setSession={setSession} />;
-
-  const nav = [
-    { id: "dashboard", label: "Riepilogo", icon: <Home className="w-4 h-4" /> },
-    { id: "utenti", label: "Utenti", icon: <Users className="w-4 h-4" /> },
-    { id: "calendario", label: "Calendario", icon: <Calendar className="w-4 h-4" /> },
-    { id: "scadenze", label: "Scadenze", icon: <FolderClock className="w-4 h-4" /> },
-    { id: "pasti", label: "Pasti & Dispensa", icon: <ChefHat className="w-4 h-4" /> },
-    { id: "spesa", label: "Lista spesa / OCR", icon: <ShoppingCart className="w-4 h-4" /> },
-    { id: "compiti", label: "Compiti & Paghette", icon: <ClipboardList className="w-4 h-4" /> },
-    { id: "notifiche", label: "Promemoria", icon: <Bell className="w-4 h-4" /> },
-    { id: "impostazioni", label: "Impostazioni", icon: <Settings className="w-4 h-4" /> },
-  ];
-
-  return (
-    <div className="min-h-screen" style={{ background: data.settings.themeBg }}>
-      <header className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b">
-        <div className="max-w-6xl mx-auto px-3 md:px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Logo />
-            <div>
-              <div className="font-semibold">FamilyHub</div>
-              <div className="text-xs text-gray-500">{data.settings.famiglia}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="text-sm text-gray-600">
-              Ciao, <b>{currentUser?.nome}</b> · <span className="text-xs">{currentUser?.ruolo}</span>
-            </div>
-            <button
-              className="px-2 py-1 rounded-lg bg-gray-100"
-              title="Esci"
-              onClick={() => {
-                localStorage.removeItem(LS_SESSION);
-                setSession(null);
+  function renderLogin() {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: palette.appBg,
+          color: palette.appText,
+          fontFamily: baseStyles.appShell.fontFamily,
+          padding: 16
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 380,
+            width: "100%",
+            borderRadius: 16,
+            padding: 20,
+            background: settings.theme === "dark" ? "rgba(15,23,42,0.98)" : "#ffffff",
+            border: "1px solid " + palette.cardBorder,
+            boxShadow: "0 20px 40px rgba(0,0,0,0.35)"
+          }}
+        >
+          <div style={{ textAlign: "center", marginBottom: 12 }}>
+            <div
+              style={{
+                ...baseStyles.logoCircle,
+                background: palette.headerBg,
+                color: palette.headerText,
+                margin: "0 auto 8px"
               }}
             >
-              <LogOut className="w-4 h-4" />
-            </button>
+              FH
+            </div>
+            <h1 style={{ margin: 0, fontSize: 20 }}>Family Hub</h1>
+            <p style={{ margin: "4px 0 0", fontSize: 13, color: palette.textMuted }}>
+              Accedi con il tuo utente per gestire casa, spesa, pasti e paghette.
+            </p>
           </div>
+
+          <div style={baseStyles.formRow}>
+            <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+              Nome utente
+            </label>
+            <input
+              style={{
+                ...baseStyles.input,
+                background: palette.inputBg,
+                borderColor: palette.inputBorder,
+                color: palette.appText
+              }}
+              value={loginForm.name}
+              onChange={e => setLoginForm(f => ({ ...f, name: e.target.value }))}
+            />
+          </div>
+          <div style={baseStyles.formRow}>
+            <label style={{ ...baseStyles.label, color: palette.textMuted }}>Password</label>
+            <input
+              type="password"
+              style={{
+                ...baseStyles.input,
+                background: palette.inputBg,
+                borderColor: palette.inputBorder,
+                color: palette.appText
+              }}
+              value={loginForm.password}
+              onChange={e => setLoginForm(f => ({ ...f, password: e.target.value }))}
+            />
+          </div>
+          {loginError && (
+            <div style={{ color: "#f97373", fontSize: 12, marginBottom: 8 }}>
+              {loginError}
+            </div>
+          )}
+          <button
+            onClick={handleLogin}
+            style={{
+              ...baseStyles.primaryButton,
+              width: "100%",
+              marginRight: 0,
+              background: palette.buttonPrimaryBg,
+              color: palette.buttonPrimaryText
+            }}
+          >
+            Entra in Family Hub
+          </button>
+          <p style={{ fontSize: 11, marginTop: 10, color: palette.textMuted }}>
+            Utenti demo: <strong>Admin / admin</strong>, <strong>Famiglia / famiglia</strong>
+          </p>
         </div>
-        <div className="bg-white border-t">
-          <div className="max-w-6xl mx-auto px-3 md:px-6 flex gap-2 overflow-x-auto py-2">
-            {nav.map((n) => (
-              <button
-                key={n.id}
-                onClick={() => setTab(n.id)}
-                className={`flex items-center gap-1 px-3 py-2 rounded-xl text-sm whitespace-nowrap ${
-                  tab === n.id ? "bg-black text-white" : "bg-gray-100"
-                }`}
+      </div>
+    );
+  }
+
+  // ----------------- Home -----------------
+
+  function renderHome() {
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Dashboard</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Riepilogo rapido della giornata: pasti, impegni, scadenze, spesa e compiti.
+        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))",
+            gap: 12
+          }}
+        >
+          <div
+            style={{
+              ...baseStyles.card,
+              background: palette.cardBg,
+              border: "1px solid " + palette.cardBorder
+            }}
+          >
+            <div style={baseStyles.cardHeaderRow}>
+              <span style={baseStyles.cardTitle}>Pasti di oggi</span>
+              <span
+                style={{
+                  ...baseStyles.tag,
+                  background: palette.tagBg,
+                  color: palette.textMuted
+                }}
               >
-                {n.icon}
-                {n.label}
-              </button>
-            ))}
+                {today}
+              </span>
+            </div>
+            {todayMeals.length === 0 ? (
+              <p style={{ fontSize: 13, color: palette.textMuted }}>
+                Nessun pasto pianificato.
+              </p>
+            ) : (
+              <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                {todayMeals.map(p => (
+                  <li key={p.id}>
+                    <strong>{p.slot}</strong>: {getMealFullName(p.mealId)}{" "}
+                    <span style={{ color: palette.textMuted }}>
+                      ({getUserName(p.userId)})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div
+            style={{
+              ...baseStyles.card,
+              background: palette.cardBg,
+              border: "1px solid " + palette.cardBorder
+            }}
+          >
+            <div style={baseStyles.cardHeaderRow}>
+              <span style={baseStyles.cardTitle}>Impegni di oggi</span>
+              <span
+                style={{
+                  ...baseStyles.tag,
+                  background: palette.tagBg,
+                  color: palette.textMuted
+                }}
+              >
+                Calendario
+              </span>
+            </div>
+            {todayEvents.length === 0 ? (
+              <p style={{ fontSize: 13, color: palette.textMuted }}>
+                Nessun impegno in calendario.
+              </p>
+            ) : (
+              <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                {todayEvents.map(e => (
+                  <li key={e.id}>
+                    {e.time ? e.time + " - " : ""}
+                    {e.title}{" "}
+                    <span style={{ color: palette.textMuted }}>
+                      ({getUserName(e.userId)})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div
+            style={{
+              ...baseStyles.card,
+              background: palette.cardBg,
+              border: "1px solid " + palette.cardBorder
+            }}
+          >
+            <div style={baseStyles.cardHeaderRow}>
+              <span style={baseStyles.cardTitle}>Scadenze prossimi 15 giorni</span>
+              <span
+                style={{
+                  ...baseStyles.tag,
+                  background: palette.tagBg,
+                  color: palette.textMuted
+                }}
+              >
+                Scadenze
+              </span>
+            </div>
+            {upcomingDeadlines.length === 0 ? (
+              <p style={{ fontSize: 13, color: palette.textMuted }}>
+                Nessuna scadenza in vista.
+              </p>
+            ) : (
+              <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                {upcomingDeadlines.map(d => (
+                  <li key={d.id}>
+                    <strong>{d.date}</strong> - {d.title}{" "}
+                    <span style={{ color: palette.textMuted }}>
+                      ({getUserName(d.userId)})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div
+            style={{
+              ...baseStyles.card,
+              background: palette.cardBg,
+              border: "1px solid " + palette.cardBorder
+            }}
+          >
+            <div style={baseStyles.cardHeaderRow}>
+              <span style={baseStyles.cardTitle}>Spesa</span>
+              <span
+                style={{
+                  ...baseStyles.tag,
+                  background: palette.tagBg,
+                  color: palette.textMuted
+                }}
+              >
+                Lista
+              </span>
+            </div>
+            <p style={{ fontSize: 28, margin: "4px 0" }}>{shoppingCount}</p>
+            <p style={{ fontSize: 13, color: palette.textMuted }}>
+              Prodotti ancora da comprare
+            </p>
+          </div>
+
+          <div
+            style={{
+              ...baseStyles.card,
+              background: palette.cardBg,
+              border: "1px solid " + palette.cardBorder
+            }}
+          >
+            <div style={baseStyles.cardHeaderRow}>
+              <span style={baseStyles.cardTitle}>Compiti</span>
+              <span
+                style={{
+                  ...baseStyles.tag,
+                  background: palette.tagBg,
+                  color: palette.textMuted
+                }}
+              >
+                Paghette
+              </span>
+            </div>
+            <p style={{ fontSize: 28, margin: "4px 0" }}>{pendingChores}</p>
+            <p style={{ fontSize: 13, color: palette.textMuted }}>
+              Compiti da completare
+            </p>
           </div>
         </div>
-      </header>
+      </div>
+    );
+  }
 
-      <main className="max-w-6xl mx-auto p-3 md:p-6">
-        {data.utenti.find((u) => u.id === currentUser?.id)?.mustChange && (
-          <ChangePasswordBanner currentUser={currentUser} setData={setData} />
-        )}
-        {tab === "dashboard" && <Dashboard data={data} />}
-        {tab === "utenti" && (
-          <UsersTab data={data} setData={setData} currentUserId={currentUserId} />
-        )}
-        {tab === "calendario" && <CalendarTab data={data} setData={setData} />}
-        {tab === "scadenze" && <ScadenzeTab data={data} setData={setData} />}
-        {tab === "pasti" && <PastiTab data={data} setData={setData} />}
-        {tab === "spesa" && <SpesaTab data={data} setData={setData} />}
-        {tab === "compiti" && (
-          <CompitiTab data={data} setData={setData} utenti={data.utenti} />
-        )}
-        {tab === "notifiche" && <NotificheTab data={data} setData={setData} />}
-        {tab === "impostazioni" && <ImpostazioniTab data={data} setData={setData} />}
+  // ----------------- Utenti -----------------
 
-        <ReadmeBox />
-        <DevTests />
-      </main>
-    </div>
-  );
-}
+  function renderUsers() {
+    const canAdmin = currentUser.role === "admin";
 
-/********************* DASHBOARD ************************/
-const PhotoCarousel = ({ items = [], intervalMs = 4000, pauseOnHover = true }) => {
-  const containerRef = useRef(null);
-  const [cw, setCw] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [paused, setPaused] = useState(false);
+    function addUser() {
+      if (!newUser.name.trim()) return;
+      setUsers(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          name: newUser.name.trim(),
+          role: newUser.role,
+          balance: 0,
+          password: newUser.password || ""
+        }
+      ]);
+      setNewUser({ name: "", role: "adulto", password: "" });
+    }
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const resize = () => setCw(el.clientWidth || 0);
-    resize();
-    const ro = new ResizeObserver(resize);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    function deleteUser(id) {
+      if (!canAdmin) return;
+      if (users.length === 1) return;
+      setUsers(prev => prev.filter(u => u.id !== id));
+      if (selectedUserId === id) {
+        const first = users.find(u => u.id !== id);
+        if (first) setSelectedUserId(first.id);
+      }
+    }
 
-  useEffect(() => {
-    if (!items || items.length === 0 || cw === 0) return;
-    let raf;
-    let last = 0;
-    const speedPxPerSec = cw / Math.max(0.2, intervalMs / 1000);
-    const total = cw * items.length;
-    const step = (ts) => {
-      if (!last) last = ts;
-      const dt = (ts - last) / 1000;
-      last = ts;
-      if (!paused) setOffset((p) => (p + speedPxPerSec * dt) % total);
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [items, cw, intervalMs, paused]);
+    function forcePassword(userId) {
+      const pwd = adminPwdEdits[userId];
+      if (!pwd) return;
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, password: pwd } : u)));
+      setAdminPwdEdits(prev => ({ ...prev, [userId]: "" }));
+    }
 
-  if (!items || items.length === 0) return null;
-  const activeIndex = cw ? Math.floor(offset / cw) % items.length : 0;
+    function changeOwnPassword() {
+      if (!selfPwdForm.newPwd || selfPwdForm.newPwd !== selfPwdForm.confirm) return;
+      setUsers(prev =>
+        prev.map(u => (u.id === currentUser.id ? { ...u, password: selfPwdForm.newPwd } : u))
+      );
+      setSelfPwdForm({ newPwd: "", confirm: "" });
+    }
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Utenti</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Gestisci utenti, ruoli, password e saldo paghetta.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Elenco utenti</span>
+                <span
+                  style={{
+                    ...baseStyles.tag,
+                    background: palette.tagBg,
+                    color: palette.textMuted
+                  }}
+                >
+                  Attivi
+                </span>
+              </div>
+              {users.map(u => (
+                <div
+                  key={u.id}
+                  style={{
+                    borderRadius: 10,
+                    padding: 8,
+                    marginBottom: 6,
+                    background:
+                      u.id === selectedUserId
+                        ? settings.theme === "dark"
+                          ? "rgba(59,130,246,0.25)"
+                          : "#dbebff"
+                        : settings.theme === "dark"
+                        ? "rgba(15,23,42,0.9)"
+                        : "#f3f4f6",
+                    border: "1px solid " + palette.cardBorder
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between"
+                    }}
+                  >
+                    <div>
+                      <div>
+                        <strong>{u.name}</strong>{" "}
+                        <span style={{ color: palette.textMuted, fontSize: 12 }}>
+                          ({u.role})
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: palette.textMuted }}>
+                        Saldo paghetta: {u.balance.toFixed(2)} €
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button
+                        style={{
+                          ...baseStyles.ghostButton,
+                          borderColor: palette.buttonGhostBorder,
+                          color: palette.appText
+                        }}
+                        onClick={() => setSelectedUserId(u.id)}
+                      >
+                        Attiva
+                      </button>
+                      {canAdmin && u.role !== "admin" && (
+                        <button
+                          style={{
+                            ...baseStyles.ghostButton,
+                            borderColor: palette.buttonGhostBorder,
+                            color: palette.appText
+                          }}
+                          onClick={() => deleteUser(u.id)}
+                        >
+                          Elimina
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {canAdmin && (
+                    <div style={{ marginTop: 6 }}>
+                      <input
+                        type="password"
+                        placeholder="Nuova password (admin)"
+                        style={{
+                          ...baseStyles.input,
+                          fontSize: 12,
+                          background: palette.inputBg,
+                          borderColor: palette.inputBorder,
+                          color: palette.appText
+                        }}
+                        value={adminPwdEdits[u.id] || ""}
+                        onChange={e =>
+                          setAdminPwdEdits(prev => ({ ...prev, [u.id]: e.target.value }))
+                        }
+                      />
+                      <button
+                        style={{
+                          ...baseStyles.ghostButton,
+                          marginTop: 4,
+                          borderColor: palette.buttonGhostBorder,
+                          color: palette.appText
+                        }}
+                        onClick={() => forcePassword(u.id)}
+                      >
+                        Forza password
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Nuovo utente</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Nome</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={newUser.name}
+                  onChange={e => setNewUser(p => ({ ...p, name: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Ruolo</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={newUser.role}
+                  onChange={e => setNewUser(p => ({ ...p, role: e.target.value }))}
+                >
+                  <option value="admin">Admin</option>
+                  <option value="adulto">Adulto</option>
+                  <option value="bambino">Bambino</option>
+                </select>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Password iniziale
+                </label>
+                <input
+                  type="password"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={newUser.password}
+                  onChange={e => setNewUser(p => ({ ...p, password: e.target.value }))}
+                />
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addUser}
+              >
+                Salva utente
+              </button>
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Cambia la tua password</span>
+                <span
+                  style={{
+                    ...baseStyles.tag,
+                    background: palette.tagBg,
+                    color: palette.textMuted
+                  }}
+                >
+                  {currentUser.name}
+                </span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Nuova password
+                </label>
+                <input
+                  type="password"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={selfPwdForm.newPwd}
+                  onChange={e => setSelfPwdForm(p => ({ ...p, newPwd: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Conferma
+                </label>
+                <input
+                  type="password"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={selfPwdForm.confirm}
+                  onChange={e => setSelfPwdForm(p => ({ ...p, confirm: e.target.value }))}
+                />
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={changeOwnPassword}
+              >
+                Aggiorna password
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Calendario -----------------
+
+  function renderCalendar() {
+    const sorted = [...calendarEvents].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (a.time || "").localeCompare(b.time || "");
+    });
+
+    const eventsByDate = {};
+    calendarEvents.forEach(ev => {
+      if (!eventsByDate[ev.date]) eventsByDate[ev.date] = [];
+      eventsByDate[ev.date].push(ev);
+    });
+    Object.keys(eventsByDate).forEach(d => {
+      eventsByDate[d].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+    });
+
+    const current = new Date(calendarCurrentDate);
+    const year = current.getFullYear();
+    const month = current.getMonth();
+
+    const firstOfMonth = new Date(year, month, 1);
+    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0=Mon..6=Sun
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const monthWeeks = [];
+    let dayCounter = 1 - firstWeekday;
+    for (let w = 0; w < 6; w++) {
+      const weekRow = [];
+      for (let d = 0; d < 7; d++) {
+        if (dayCounter < 1 || dayCounter > daysInMonth) {
+          weekRow.push(null);
+        } else {
+          const dateObj = new Date(year, month, dayCounter);
+          weekRow.push(dateObj.toISOString().slice(0, 10));
+        }
+        dayCounter++;
+      }
+      monthWeeks.push(weekRow);
+    }
+
+    const weekDates = getWeekDates(calendarCurrentDate);
+
+    function changeMonth(delta) {
+      const d = new Date(calendarCurrentDate);
+      d.setMonth(d.getMonth() + delta);
+      setCalendarCurrentDate(d.toISOString().slice(0, 10));
+    }
+
+    function changeWeek(delta) {
+      setCalendarCurrentDate(addDays(calendarCurrentDate, delta * 7));
+    }
+
+    function addEvent() {
+      if (!calendarForm.title.trim()) return;
+      setCalendarEvents(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          title: calendarForm.title.trim(),
+          date: calendarForm.date,
+          time: calendarForm.time || "",
+          userId: Number(calendarForm.userId)
+        }
+      ]);
+      setCalendarForm(f => ({ ...f, title: "" }));
+    }
+
+    function removeEvent(id) {
+      setCalendarEvents(prev => prev.filter(e => e.id !== id));
+    }
+
+    const monthLabel = current.toLocaleDateString("it-IT", {
+      month: "long",
+      year: "numeric"
+    });
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Calendario</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Vista stile Google Calendar: mensile, settimanale o lista. Ogni impegno ha anche l'ora.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Nuovo impegno</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Titolo</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={calendarForm.title}
+                  onChange={e => setCalendarForm(f => ({ ...f, title: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Data</label>
+                <input
+                  type="date"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={calendarForm.date}
+                  onChange={e => setCalendarForm(f => ({ ...f, date: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Ora</label>
+                <input
+                  type="time"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={calendarForm.time}
+                  onChange={e => setCalendarForm(f => ({ ...f, time: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={calendarForm.userId}
+                  onChange={e =>
+                    setCalendarForm(f => ({ ...f, userId: Number(e.target.value) }))
+                  }
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addEvent}
+              >
+                Aggiungi impegno
+              </button>
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Vista</span>
+                <span
+                  style={{
+                    ...baseStyles.tag,
+                    background: palette.tagBg,
+                    color: palette.textMuted
+                  }}
+                >
+                  {calendarViewMode}
+                </span>
+              </div>
+              <div style={{ marginBottom: 8, display: "flex", gap: 6 }}>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText,
+                    background:
+                      calendarViewMode === "list" ? palette.navActiveBg : "transparent"
+                  }}
+                  onClick={() => setCalendarViewMode("list")}
+                >
+                  Lista
+                </button>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText,
+                    background:
+                      calendarViewMode === "month" ? palette.navActiveBg : "transparent"
+                  }}
+                  onClick={() => setCalendarViewMode("month")}
+                >
+                  Mese
+                </button>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText,
+                    background:
+                      calendarViewMode === "week" ? palette.navActiveBg : "transparent"
+                  }}
+                  onClick={() => setCalendarViewMode("week")}
+                >
+                  Settimana
+                </button>
+              </div>
+
+              {calendarViewMode === "list" && (
+                <div
+                  style={{
+                    maxHeight: 260,
+                    overflow: "auto",
+                    fontSize: 13,
+                    borderTop: "1px solid " + palette.cardBorder,
+                    paddingTop: 6
+                  }}
+                >
+                  {sorted.length === 0 ? (
+                    <p style={{ color: palette.textMuted }}>
+                      Nessun impegno inserito.
+                    </p>
+                  ) : (
+                    <ul style={{ paddingLeft: 18 }}>
+                      {sorted.map(e => (
+                        <li key={e.id} style={{ marginBottom: 4 }}>
+                          <strong>
+                            {e.date} {e.time}
+                          </strong>{" "}
+                          - {e.title}{" "}
+                          <span style={{ color: palette.textMuted }}>
+                            ({getUserName(e.userId)})
+                          </span>
+                          <button
+                            style={{
+                              ...baseStyles.ghostButton,
+                              marginLeft: 6,
+                              borderColor: palette.buttonGhostBorder,
+                              color: palette.appText
+                            }}
+                            onClick={() => removeEvent(e.id)}
+                          >
+                            X
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {calendarViewMode === "month" && (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 6
+                    }}
+                  >
+                    <button
+                      style={{
+                        ...baseStyles.ghostButton,
+                        borderColor: palette.buttonGhostBorder,
+                        color: palette.appText
+                      }}
+                      onClick={() => changeMonth(-1)}
+                    >
+                      ←
+                    </button>
+                    <span style={{ fontSize: 13 }}>{monthLabel}</span>
+                    <button
+                      style={{
+                        ...baseStyles.ghostButton,
+                        borderColor: palette.buttonGhostBorder,
+                        color: palette.appText
+                      }}
+                      onClick={() => changeMonth(1)}
+                    >
+                      →
+                    </button>
+                  </div>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: 11,
+                      border: "1px solid " + palette.tableBorder
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        {weekdayLabels.map(d => (
+                          <th
+                            key={d}
+                            style={{
+                              padding: 4,
+                              borderBottom: "1px solid " + palette.tableBorder,
+                              background: palette.tableHeaderBg,
+                              textAlign: "center"
+                            }}
+                          >
+                            {d}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monthWeeks.map((week, wi) => (
+                        <tr key={wi}>
+                          {week.map((dateStr, di) => {
+                            if (!dateStr) {
+                              return (
+                                <td
+                                  key={wi + "-" + di}
+                                  style={{
+                                    border: "1px solid " + palette.tableBorder,
+                                    height: 60,
+                                    verticalAlign: "top"
+                                  }}
+                                />
+                              );
+                            }
+                            const isToday = dateStr === today;
+                            const dayNum = new Date(dateStr).getDate();
+                            const evs = eventsByDate[dateStr] || [];
+                            return (
+                              <td
+                                key={wi + "-" + di}
+                                style={{
+                                  border: "1px solid " + palette.tableBorder,
+                                  padding: 4,
+                                  verticalAlign: "top",
+                                  background: isToday
+                                    ? settings.theme === "dark"
+                                      ? "rgba(56,189,248,0.15)"
+                                      : "#e0f2fe"
+                                    : "transparent"
+                                }}
+                              >
+                                <div style={{ fontSize: 11, marginBottom: 2 }}>{dayNum}</div>
+                                {evs.map(ev => (
+                                  <div
+                                    key={ev.id}
+                                    style={{
+                                      fontSize: 10,
+                                      padding: "1px 3px",
+                                      borderRadius: 4,
+                                      background:
+                                        settings.theme === "dark"
+                                          ? "rgba(59,130,246,0.4)"
+                                          : "#dbeafe",
+                                      marginBottom: 2,
+                                      cursor: "pointer"
+                                    }}
+                                    title={ev.title + " (" + getUserName(ev.userId) + ")"}
+                                  >
+                                    {ev.time ? ev.time + " " : ""}
+                                    {ev.title}
+                                  </div>
+                                ))}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {calendarViewMode === "week" && (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 6
+                    }}
+                  >
+                    <button
+                      style={{
+                        ...baseStyles.ghostButton,
+                        borderColor: palette.buttonGhostBorder,
+                        color: palette.appText
+                      }}
+                      onClick={() => changeWeek(-1)}
+                    >
+                      ←
+                    </button>
+                    <span style={{ fontSize: 13 }}>
+                      Settimana di {weekDates[0]} - {weekDates[6]}
+                    </span>
+                    <button
+                      style={{
+                        ...baseStyles.ghostButton,
+                        borderColor: palette.buttonGhostBorder,
+                        color: palette.appText
+                      }}
+                      onClick={() => changeWeek(1)}
+                    >
+                      →
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12 }}>
+                    {weekDates.map(d => {
+                      const label = new Date(d).toLocaleDateString("it-IT", {
+                        weekday: "short",
+                        day: "2-digit",
+                        month: "2-digit"
+                      });
+                      const evs = (eventsByDate[d] || []).sort((a, b) =>
+                        (a.time || "").localeCompare(b.time || "")
+                      );
+                      return (
+                        <div
+                          key={d}
+                          style={{
+                            borderBottom: "1px solid " + palette.cardBorder,
+                            padding: "4px 0"
+                          }}
+                        >
+                          <div style={{ fontWeight: 600 }}>{label}</div>
+                          {evs.length === 0 ? (
+                            <div style={{ color: palette.textMuted }}>Nessun impegno</div>
+                          ) : (
+                            evs.map(ev => (
+                              <div
+                                key={ev.id}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  marginTop: 2
+                                }}
+                              >
+                                <span>
+                                  {ev.time ? ev.time + " - " : ""}
+                                  {ev.title}{" "}
+                                  <span style={{ color: palette.textMuted }}>
+                                    ({getUserName(ev.userId)})
+                                  </span>
+                                </span>
+                                <button
+                                  style={{
+                                    ...baseStyles.ghostButton,
+                                    borderColor: palette.buttonGhostBorder,
+                                    color: palette.appText
+                                  }}
+                                  onClick={() => removeEvent(ev.id)}
+                                >
+                                  X
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Impegni futuri</span>
+              </div>
+              {sorted.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun impegno registrato.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {sorted.slice(0, 10).map(e => (
+                    <li key={e.id}>
+                      <strong>
+                        {e.date} {e.time}
+                      </strong>{" "}
+                      - {e.title}{" "}
+                      <span style={{ color: palette.textMuted }}>
+                        ({getUserName(e.userId)})
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Scadenze -----------------
+
+  function renderDeadlines() {
+    const sorted = [...deadlines].sort((a, b) => a.date.localeCompare(b.date));
+
+    function addDeadline() {
+      if (!deadlinesForm.title.trim()) return;
+      setDeadlines(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          title: deadlinesForm.title.trim(),
+          date: deadlinesForm.date,
+          userId: Number(deadlinesForm.userId)
+        }
+      ]);
+      setDeadlinesForm(f => ({ ...f, title: "" }));
+    }
+
+    function removeDeadline(id) {
+      setDeadlines(prev => prev.filter(d => d.id !== id));
+    }
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Scadenze</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Tieni traccia delle scadenze importanti e assegna un referente.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Nuova scadenza</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Titolo</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={deadlinesForm.title}
+                  onChange={e => setDeadlinesForm(f => ({ ...f, title: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Data</label>
+                <input
+                  type="date"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={deadlinesForm.date}
+                  onChange={e => setDeadlinesForm(f => ({ ...f, date: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={deadlinesForm.userId}
+                  onChange={e =>
+                    setDeadlinesForm(f => ({ ...f, userId: Number(e.target.value) }))
+                  }
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addDeadline}
+              >
+                Aggiungi scadenza
+              </button>
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Elenco scadenze</span>
+              </div>
+              {sorted.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessuna scadenza inserita.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {sorted.map(d => (
+                    <li key={d.id} style={{ marginBottom: 4 }}>
+                      <strong>{d.date}</strong> - {d.title}{" "}
+                      <span style={{ color: palette.textMuted }}>
+                        ({getUserName(d.userId)})
+                      </span>
+                      <button
+                        style={{
+                          ...baseStyles.ghostButton,
+                          marginLeft: 6,
+                          borderColor: palette.buttonGhostBorder,
+                          color: palette.appText
+                        }}
+                        onClick={() => removeDeadline(d.id)}
+                      >
+                        X
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Dispensa -----------------
+
+  function renderPantry() {
+    function addCategory() {
+      const name = newCategory.trim();
+      if (!name) return;
+      if (categories.includes(name)) return;
+      setCategories(prev => [...prev, name]);
+      setNewCategory("");
+    }
+
+    function addPantryItem() {
+      if (!pantryForm.name.trim()) return;
+      setPantry(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          name: pantryForm.name.trim(),
+          qty: Number(pantryForm.qty) || 0,
+          unit: pantryForm.unit,
+          category: pantryForm.category
+        }
+      ]);
+      setPantryForm(p => ({ ...p, name: "", qty: 1 }));
+    }
+
+    function removeItem(id) {
+      setPantry(prev => prev.filter(p => p.id !== id));
+    }
+
+    function changeQty(id, delta) {
+      setPantry(prev =>
+        prev.map(p =>
+          p.id === id ? { ...p, qty: Math.max(0, (p.qty || 0) + delta) } : p
+        )
+      );
+    }
+
+    const grouped = {};
+    pantry.forEach(p => {
+      if (!grouped[p.category]) grouped[p.category] = [];
+      grouped[p.category].push(p);
+    });
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Dispensa</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Censimento prodotti food e no food, organizzati per categoria.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Categorie</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Nuova categoria
+                </label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={newCategory}
+                  onChange={e => setNewCategory(e.target.value)}
+                />
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addCategory}
+              >
+                Aggiungi categoria
+              </button>
+              <ul style={{ paddingLeft: 18, fontSize: 13, marginTop: 8 }}>
+                {categories.map(c => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Nuovo prodotto</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Nome</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={pantryForm.name}
+                  onChange={e => setPantryForm(p => ({ ...p, name: e.target.value }))}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Quantità
+                  </label>
+                  <input
+                    type="number"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={pantryForm.qty}
+                    onChange={e =>
+                      setPantryForm(p => ({ ...p, qty: Number(e.target.value) || 0 }))
+                    }
+                  />
+                </div>
+                <div style={{ ...baseStyles.formRow, width: 80 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Unità</label>
+                  <input
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={pantryForm.unit}
+                    onChange={e => setPantryForm(p => ({ ...p, unit: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Categoria
+                </label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={pantryForm.category}
+                  onChange={e => setPantryForm(p => ({ ...p, category: e.target.value }))}
+                >
+                  {categories.map(c => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addPantryItem}
+              >
+                Aggiungi in dispensa
+              </button>
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Prodotti in dispensa</span>
+              </div>
+              {pantry.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun prodotto inserito.
+                </p>
+              ) : (
+                <div style={{ maxHeight: 260, overflow: "auto", fontSize: 13 }}>
+                  {Object.keys(grouped).map(cat => (
+                    <div key={cat} style={{ marginBottom: 6 }}>
+                      <div style={{ fontWeight: 600 }}>{cat}</div>
+                      {grouped[cat].map(p => (
+                        <div
+                          key={p.id}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginTop: 2
+                          }}
+                        >
+                          <span>
+                            {p.name}: {p.qty} {p.unit}
+                          </span>
+                          <span>
+                            <button
+                              style={{
+                                ...baseStyles.ghostButton,
+                                borderColor: palette.buttonGhostBorder,
+                                color: palette.appText
+                              }}
+                              onClick={() => changeQty(p.id, -1)}
+                            >
+                              -
+                            </button>
+                            <button
+                              style={{
+                                ...baseStyles.ghostButton,
+                                borderColor: palette.buttonGhostBorder,
+                                color: palette.appText
+                              }}
+                              onClick={() => changeQty(p.id, 1)}
+                            >
+                              +
+                            </button>
+                            <button
+                              style={{
+                                ...baseStyles.ghostButton,
+                                borderColor: palette.buttonGhostBorder,
+                                color: palette.appText
+                              }}
+                              onClick={() => removeItem(p.id)}
+                            >
+                              X
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Lista spesa -----------------
+
+  function renderShopping() {
+    function addShopping() {
+      if (!shoppingForm.name.trim()) return;
+      setShopping(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          name: shoppingForm.name.trim(),
+          qty: Number(shoppingForm.qty) || 0,
+          unit: shoppingForm.unit,
+          taken: false
+        }
+      ]);
+      setShoppingForm({ name: "", qty: 1, unit: "pz" });
+    }
+
+    function toggleTaken(id) {
+      setShopping(prev =>
+        prev.map(s => (s.id === id ? { ...s, taken: !s.taken } : s))
+      );
+    }
+
+    function removeShopping(id) {
+      setShopping(prev => prev.filter(s => s.id !== id));
+    }
+
+    function confirmToPantry() {
+      const toTransfer = shopping.filter(s => s.taken);
+      if (!toTransfer.length) return;
+      setPantry(prev => {
+        const next = [...prev];
+        toTransfer.forEach(item => {
+          const idx = next.findIndex(
+            p =>
+              p.name.toLowerCase() === item.name.toLowerCase() &&
+              p.unit === item.unit
+          );
+          const qty = Number(item.qty) || 0;
+          if (idx === -1) {
+            next.push({
+              id: nextId(next),
+              name: item.name,
+              qty,
+              unit: item.unit,
+              category: "Generico"
+            });
+          } else {
+            const it = next[idx];
+            next[idx] = { ...it, qty: (it.qty || 0) + qty };
+          }
+        });
+        return next;
+      });
+      setShopping(prev => prev.filter(s => !s.taken));
+    }
+
+    const toBuy = shopping.filter(s => !s.taken).length;
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Lista spesa</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Genera la lista della spesa e invia automaticamente gli acquisti in dispensa.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Nuovo prodotto</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Nome</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={shoppingForm.name}
+                  onChange={e => setShoppingForm(f => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Quantità
+                  </label>
+                  <input
+                    type="number"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={shoppingForm.qty}
+                    onChange={e =>
+                      setShoppingForm(f => ({ ...f, qty: Number(e.target.value) || 0 }))
+                    }
+                  />
+                </div>
+                <div style={{ ...baseStyles.formRow, width: 80 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Unità</label>
+                  <input
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={shoppingForm.unit}
+                    onChange={e => setShoppingForm(f => ({ ...f, unit: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addShopping}
+              >
+                Aggiungi alla lista
+              </button>
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Lista spesa</span>
+              </div>
+              {shopping.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  La lista spesa è vuota.
+                </p>
+              ) : (
+                <>
+                  <ul style={{ paddingLeft: 0, listStyle: "none", fontSize: 13 }}>
+                    {shopping.map(s => (
+                      <li
+                        key={s.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          marginBottom: 4
+                        }}
+                      >
+                        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input
+                            type="checkbox"
+                            checked={s.taken}
+                            onChange={() => toggleTaken(s.id)}
+                          />
+                          <span
+                            style={{
+                              textDecoration: s.taken ? "line-through" : "none",
+                              color: s.taken ? palette.textMuted : palette.appText
+                            }}
+                          >
+                            {s.name} ({s.qty} {s.unit})
+                          </span>
+                        </label>
+                        <button
+                          style={{
+                            ...baseStyles.ghostButton,
+                            borderColor: palette.buttonGhostBorder,
+                            color: palette.appText
+                          }}
+                          onClick={() => removeShopping(s.id)}
+                        >
+                          X
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p style={{ fontSize: 12, color: palette.textMuted }}>
+                    Prodotti ancora da acquistare: {toBuy}
+                  </p>
+                  <button
+                    style={{
+                      ...baseStyles.primaryButton,
+                      background: palette.buttonPrimaryBg,
+                      color: palette.buttonPrimaryText
+                    }}
+                    onClick={confirmToPantry}
+                  >
+                    Conferma acquisti → dispensa
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Pasti & Pianificazione -----------------
+
+  function renderMeals() {
+    const weekDates = getWeekDates(planViewDate);
+
+    function saveMeal() {
+      if (!mealForm.name.trim()) return;
+      const ingredients = parseIngredients(mealForm.ingredientsText);
+      if (editingMealId) {
+        setMeals(prev =>
+          prev.map(m =>
+            m.id === editingMealId
+              ? {
+                  ...m,
+                  name: mealForm.name.trim(),
+                  type: mealForm.type,
+                  variant: mealForm.variant.trim(),
+                  ingredients
+                }
+              : m
+          )
+        );
+      } else {
+        setMeals(prev => [
+          ...prev,
+          {
+            id: nextId(prev),
+            name: mealForm.name.trim(),
+            type: mealForm.type,
+            variant: mealForm.variant.trim(),
+            ingredients
+          }
+        ]);
+      }
+      setMealForm({ name: "", type: MEAL_TYPES[0], variant: "", ingredientsText: "" });
+      setEditingMealId(null);
+    }
+
+    function editMeal(m) {
+      setEditingMealId(m.id);
+      setMealForm({
+        name: m.name,
+        type: m.type,
+        variant: m.variant,
+        ingredientsText: m.ingredients
+          .map(i => `${i.name}=${i.qty}=${i.unit}`)
+          .join("; ")
+      });
+    }
+
+    function deleteMeal(id) {
+      setMeals(prev => prev.filter(m => m.id !== id));
+      setMealPlans(prev => prev.filter(p => p.mealId !== id));
+      if (editingMealId === id) {
+        setEditingMealId(null);
+        setMealForm({
+          name: "",
+          type: MEAL_TYPES[0],
+          variant: "",
+          ingredientsText: ""
+        });
+      }
+    }
+
+    function addPlan() {
+      if (!planForm.mealId) return;
+      const mealId = Number(planForm.mealId);
+      const meal = meals.find(m => m.id === mealId);
+      if (meal && meal.ingredients && meal.ingredients.length) {
+        adjustPantryForIngredients(meal.ingredients, -1);
+      }
+      setMealPlans(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          date: planForm.date,
+          userId: Number(planForm.userId),
+          mealId,
+          slot: planForm.slot
+        }
+      ]);
+    }
+
+    function removePlan(id) {
+      setMealPlans(prev => {
+        const plan = prev.find(p => p.id === id);
+        if (plan) {
+          const meal = meals.find(m => m.id === plan.mealId);
+          if (meal && meal.ingredients && meal.ingredients.length) {
+            adjustPantryForIngredients(meal.ingredients, 1);
+          }
+        }
+        return prev.filter(p => p.id !== id);
+      });
+    }
+
+    function changeWeek(delta) {
+      setPlanViewDate(addDays(planViewDate, delta * 7));
+    }
+
+    const plansByDateSlot = {};
+    mealPlans.forEach(p => {
+      const key = p.date + "|" + p.slot;
+      if (!plansByDateSlot[key]) plansByDateSlot[key] = [];
+      plansByDateSlot[key].push(p);
+    });
+
+    const userOptions = [
+      { id: 0, name: "Famiglia" },
+      ...users.map(u => ({ id: u.id, name: u.name }))
+    ];
+
+    const allPlansSorted = [...mealPlans].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      const sa = slotOrder[a.slot] ?? 99;
+      const sb = slotOrder[b.slot] ?? 99;
+      if (sa !== sb) return sa - sb;
+      return getUserName(a.userId).localeCompare(getUserName(b.userId));
+    });
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Pasti &amp; pianificazione</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Censisci i piatti e pianifica i pasti settimanali per gli utenti o per la famiglia.
+        </p>
+        <div style={baseStyles.twoCols}>
+          {/* Colonna piatti */}
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>
+                  {editingMealId ? "Modifica piatto" : "Nuovo piatto"}
+                </span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Nome</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={mealForm.name}
+                  onChange={e => setMealForm(f => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Tipologia piatto
+                </label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={mealForm.type}
+                  onChange={e => setMealForm(f => ({ ...f, type: e.target.value }))}
+                >
+                  {MEAL_TYPES.map(t => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Variante (es. pomodoro, bianca...)
+                </label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={mealForm.variant}
+                  onChange={e => setMealForm(f => ({ ...f, variant: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Ingredienti (nome=quantità=unità; ...)
+                </label>
+                <textarea
+                  rows={3}
+                  style={{
+                    ...baseStyles.textarea,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={mealForm.ingredientsText}
+                  onChange={e =>
+                    setMealForm(f => ({ ...f, ingredientsText: e.target.value }))
+                  }
+                />
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={saveMeal}
+              >
+                {editingMealId ? "Salva modifiche" : "Salva piatto"}
+              </button>
+              {editingMealId && (
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText
+                  }}
+                  onClick={() => {
+                    setEditingMealId(null);
+                    setMealForm({
+                      name: "",
+                      type: MEAL_TYPES[0],
+                      variant: "",
+                      ingredientsText: ""
+                    });
+                  }}
+                >
+                  Annulla
+                </button>
+              )}
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Piatti censiti</span>
+              </div>
+              {meals.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun piatto inserito.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {meals.map(m => (
+                    <li key={m.id} style={{ marginBottom: 4 }}>
+                      <strong>{m.name}</strong>{" "}
+                      <span style={{ color: palette.textMuted }}>
+                        ({m.type}
+                        {m.variant ? ", " + m.variant : ""})
+                      </span>
+                      <button
+                        style={{
+                          ...baseStyles.ghostButton,
+                          marginLeft: 6,
+                          borderColor: palette.buttonGhostBorder,
+                          color: palette.appText
+                        }}
+                        onClick={() => editMeal(m)}
+                      >
+                        Modifica
+                      </button>
+                      <button
+                        style={{
+                          ...baseStyles.ghostButton,
+                          marginLeft: 4,
+                          borderColor: palette.buttonGhostBorder,
+                          color: palette.appText
+                        }}
+                        onClick={() => deleteMeal(m.id)}
+                      >
+                        X
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Colonna pianificazione */}
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Pianifica pasto</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Data</label>
+                <input
+                  type="date"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={planForm.date}
+                  onChange={e => setPlanForm(f => ({ ...f, date: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Pasto</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={planForm.slot}
+                  onChange={e => setPlanForm(f => ({ ...f, slot: e.target.value }))}
+                >
+                  {MEAL_SLOTS.map(s => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={planForm.userId}
+                  onChange={e => setPlanForm(f => ({ ...f, userId: Number(e.target.value) }))}
+                >
+                  <option value={0}>Famiglia</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Piatto</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={planForm.mealId}
+                  onChange={e => setPlanForm(f => ({ ...f, mealId: e.target.value }))}
+                >
+                  <option value="">Seleziona piatto...</option>
+                  {meals.map(m => (
+                    <option key={m.id} value={m.id}>
+                      {getMealFullName(m.id)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addPlan}
+              >
+                Aggiungi pianificazione
+              </button>
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Settimana pianificata</span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 6,
+                  fontSize: 12
+                }}
+              >
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText
+                  }}
+                  onClick={() => changeWeek(-1)}
+                >
+                  ←
+                </button>
+                <span>
+                  {weekDates[0]} - {weekDates[6]}
+                </span>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText
+                  }}
+                  onClick={() => changeWeek(1)}
+                >
+                  →
+                </button>
+              </div>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 11,
+                  border: "1px solid " + palette.tableBorder
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        padding: 4,
+                        borderBottom: "1px solid " + palette.tableBorder,
+                        background: palette.tableHeaderBg
+                      }}
+                    >
+                      Pasto
+                    </th>
+                    {weekDates.map(d => (
+                      <th
+                        key={d}
+                        style={{
+                          padding: 4,
+                          borderBottom: "1px solid " + palette.tableBorder,
+                          background: palette.tableHeaderBg,
+                          textAlign: "center"
+                        }}
+                      >
+                        {new Date(d).toLocaleDateString("it-IT", {
+                          weekday: "short",
+                          day: "2-digit"
+                        })}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {MEAL_SLOTS.map(slot => (
+                    <tr key={slot}>
+                      <td
+                        style={{
+                          border: "1px solid " + palette.tableBorder,
+                          padding: 4,
+                          fontWeight: 600
+                        }}
+                      >
+                        {slot}
+                      </td>
+                      {weekDates.map(d => {
+                        const key = d + "|" + slot;
+                        const plans = plansByDateSlot[key] || [];
+                        return (
+                          <td
+                            key={d}
+                            style={{
+                              border: "1px solid " + palette.tableBorder,
+                              padding: 4,
+                              verticalAlign: "top"
+                            }}
+                          >
+                            {plans.length === 0 ? (
+                              <span style={{ color: palette.textMuted }}>-</span>
+                            ) : (
+                              plans.map(p => (
+                                <div
+                                  key={p.id}
+                                  style={{
+                                    marginBottom: 2,
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    gap: 4
+                                  }}
+                                >
+                                  <span>
+                                    {getMealFullName(p.mealId)}{" "}
+                                    <span style={{ color: palette.textMuted }}>
+                                      ({p.userId === 0 ? "Famiglia" : getUserName(p.userId)})
+                                    </span>
+                                  </span>
+                                  <button
+                                    style={{
+                                      ...baseStyles.ghostButton,
+                                      borderColor: palette.buttonGhostBorder,
+                                      color: palette.appText
+                                    }}
+                                    onClick={() => removePlan(p.id)}
+                                  >
+                                    X
+                                  </button>
+                                </div>
+                              ))
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Elenco pianificazioni</span>
+              </div>
+              {allPlansSorted.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun pasto pianificato.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {allPlansSorted.map(p => (
+                    <li key={p.id}>
+                      <strong>
+                        {p.date} - {p.slot}
+                      </strong>{" "}
+                      {getMealFullName(p.mealId)}{" "}
+                      <span style={{ color: palette.textMuted }}>
+                        ({p.userId === 0 ? "Famiglia" : getUserName(p.userId)})
+                      </span>
+                      <button
+                        style={{
+                          ...baseStyles.ghostButton,
+                          marginLeft: 6,
+                          borderColor: palette.buttonGhostBorder,
+                          color: palette.appText
+                        }}
+                        onClick={() => removePlan(p.id)}
+                      >
+                        X
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Compiti & Paghette -----------------
+
+  function renderChores() {
+    function addChore() {
+      if (!choresForm.title.trim()) return;
+      setChores(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          title: choresForm.title.trim(),
+          deadline: choresForm.deadline,
+          userId: Number(choresForm.userId),
+          amount: Number(choresForm.amount) || 0,
+          done: false
+        }
+      ]);
+      setChoresForm({ title: "", deadline: todayStr(), userId: 1, amount: 1 });
+    }
+
+    function toggleDone(id) {
+      setChores(prev => {
+        const next = prev.map(c =>
+          c.id === id ? { ...c, done: !c.done } : c
+        );
+        const chore = prev.find(c => c.id === id);
+        if (chore && !chore.done) {
+          const amount = Number(chore.amount) || 0;
+          if (amount > 0) {
+            setUsers(us =>
+              us.map(u =>
+                u.id === chore.userId ? { ...u, balance: (u.balance || 0) + amount } : u
+              )
+            );
+            setTransactions(tr => [
+              ...tr,
+              {
+                id: nextId(tr),
+                userId: chore.userId,
+                type: "accredito",
+                amount,
+                date: todayStr(),
+                note: "Compito: " + chore.title
+              }
+            ]);
+          }
+        }
+        return next;
+      });
+    }
+
+    function payUser(userId) {
+      const input = paymentInputs[userId];
+      const amount = Number(input);
+      if (!amount || amount <= 0) return;
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
+      const maxPayable = user.balance || 0;
+      const realAmount = Math.min(amount, maxPayable);
+      if (realAmount <= 0) return;
+      setUsers(prev =>
+        prev.map(u =>
+          u.id === userId ? { ...u, balance: (u.balance || 0) - realAmount } : u
+        )
+      );
+      setTransactions(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          userId,
+          type: "pagamento",
+          amount: realAmount,
+          date: todayStr(),
+          note: "Pagamento paghetta"
+        }
+      ]);
+      setPaymentInputs(prev => ({ ...prev, [userId]: "" }));
+    }
+
+    const choresSorted = [...chores].sort((a, b) => a.deadline.localeCompare(b.deadline));
+    const usersWithBalance = users.filter(u => (u.balance || 0) > 0);
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Compiti &amp; paghette</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Assegna compiti, riconosci paghette e gestisci i pagamenti.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Nuovo compito</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Titolo</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={choresForm.title}
+                  onChange={e => setChoresForm(f => ({ ...f, title: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Scadenza</label>
+                <input
+                  type="date"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={choresForm.deadline}
+                  onChange={e => setChoresForm(f => ({ ...f, deadline: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={choresForm.userId}
+                  onChange={e =>
+                    setChoresForm(f => ({ ...f, userId: Number(e.target.value) }))
+                  }
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Importo paghetta (€)
+                </label>
+                <input
+                  type="number"
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={choresForm.amount}
+                  onChange={e =>
+                    setChoresForm(f => ({ ...f, amount: Number(e.target.value) || 0 }))
+                  }
+                />
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addChore}
+              >
+                Aggiungi compito
+              </button>
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Compiti assegnati</span>
+              </div>
+              {choresSorted.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun compito inserito.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {choresSorted.map(c => (
+                    <li key={c.id} style={{ marginBottom: 4 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={c.done}
+                          onChange={() => toggleDone(c.id)}
+                        />
+                        <span
+                          style={{
+                            textDecoration: c.done ? "line-through" : "none",
+                            color: c.done ? palette.textMuted : palette.appText
+                          }}
+                        >
+                          {c.title} ({getUserName(c.userId)}) - scade il {c.deadline} - {" "}
+                          {c.amount.toFixed(2)} €
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Pagamenti paghette</span>
+              </div>
+              {usersWithBalance.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun saldo da pagare.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {usersWithBalance.map(u => (
+                    <li key={u.id} style={{ marginBottom: 6 }}>
+                      <div>
+                        <strong>{u.name}</strong> - saldo {u.balance.toFixed(2)} €
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                        <input
+                          type="number"
+                          placeholder="Importo"
+                          style={{
+                            ...baseStyles.input,
+                            flex: 1,
+                            background: palette.inputBg,
+                            borderColor: palette.inputBorder,
+                            color: palette.appText
+                          }}
+                          value={paymentInputs[u.id] || ""}
+                          onChange={e =>
+                            setPaymentInputs(prev => ({
+                              ...prev,
+                              [u.id]: e.target.value
+                            }))
+                          }
+                        />
+                        <button
+                          style={{
+                            ...baseStyles.primaryButton,
+                            background: palette.buttonPrimaryBg,
+                            color: palette.buttonPrimaryText
+                          }}
+                          onClick={() => payUser(u.id)}
+                        >
+                          Paga
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Storico movimenti</span>
+              </div>
+              {transactions.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun movimento registrato.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {transactions
+                    .slice()
+                    .reverse()
+                    .slice(0, 20)
+                    .map(t => (
+                      <li key={t.id}>
+                        <strong>{t.date}</strong> - {t.type === "accredito" ? "+" : "-"}
+                        {t.amount.toFixed(2)} € a {getUserName(t.userId)} ({t.note})
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- ToDo List -----------------
+
+  function renderTodos() {
+    function addTodo() {
+      if (!todoForm.title.trim()) return;
+      setTodos(prev => [
+        ...prev,
+        {
+          id: nextId(prev),
+          title: todoForm.title.trim(),
+          userId: Number(todoForm.userId),
+          done: false
+        }
+      ]);
+      setTodoForm({ title: "", userId: 1 });
+    }
+
+    function toggleTodo(id) {
+      setTodos(prev => prev.map(t => (t.id === id ? { ...t, done: !t.done } : t)));
+    }
+
+    const visibleTodos = todos.filter(t => (showCompletedTodos ? true : !t.done));
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Cose da fare (ToDo List)</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Promemoria semplici, anche assegnati a un utente. Le attività completate vengono
+          archiviate.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Nuovo promemoria</span>
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Titolo</label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={todoForm.title}
+                  onChange={e => setTodoForm(f => ({ ...f, title: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
+                <select
+                  style={{
+                    ...baseStyles.select,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={todoForm.userId}
+                  onChange={e => setTodoForm(f => ({ ...f, userId: Number(e.target.value) }))}
+                >
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={addTodo}
+              >
+                Aggiungi promemoria
+              </button>
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Elenco cose da fare</span>
+                <label style={{ fontSize: 12, color: palette.textMuted }}>
+                  <input
+                    type="checkbox"
+                    checked={showCompletedTodos}
+                    onChange={e => setShowCompletedTodos(e.target.checked)}
+                    style={{ marginRight: 4 }}
+                  />
+                  Mostra anche completate
+                </label>
+              </div>
+              {visibleTodos.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun promemoria da mostrare.
+                </p>
+              ) : (
+                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                  {visibleTodos.map(t => (
+                    <li key={t.id} style={{ marginBottom: 4 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <input
+                          type="checkbox"
+                          checked={t.done}
+                          onChange={() => toggleTodo(t.id)}
+                        />
+                        <span
+                          style={{
+                            textDecoration: t.done ? "line-through" : "none",
+                            color: t.done ? palette.textMuted : palette.appText
+                          }}
+                        >
+                          {t.title} ({getUserName(t.userId)})
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Impostazioni -----------------
+
+  function renderSettings() {
+    function toggleTheme() {
+      setSettings(prev => ({
+        ...prev,
+        theme: prev.theme === "dark" ? "light" : "dark"
+      }));
+    }
+
+    function toggleNotif(key) {
+      setSettings(prev => ({
+        ...prev,
+        notifications: { ...prev.notifications, [key]: !prev.notifications[key] }
+      }));
+    }
+
+    return (
+      <div>
+        <h2 style={baseStyles.pageTitle}>Impostazioni</h2>
+        <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
+          Personalizza il tema e le modalità di notifica.
+        </p>
+        <div style={baseStyles.twoCols}>
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Tema</span>
+              </div>
+              <p style={{ fontSize: 13, color: palette.textMuted }}>
+                Scegli tra tema scuro e tema chiaro.
+              </p>
+              <button
+                style={{
+                  ...baseStyles.primaryButton,
+                  background: palette.buttonPrimaryBg,
+                  color: palette.buttonPrimaryText
+                }}
+                onClick={toggleTheme}
+              >
+                Passa a tema {settings.theme === "dark" ? "chiaro" : "scuro"}
+              </button>
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Notifiche (simboliche)</span>
+              </div>
+              <p style={{ fontSize: 13, color: palette.textMuted }}>
+                Qui puoi indicare come preferiresti ricevere le notifiche. In questa anteprima
+                non vengono ancora inviate realmente, ma le preferenze sono salvate.
+              </p>
+              <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={settings.notifications.email}
+                  onChange={() => toggleNotif("email")}
+                  style={{ marginRight: 4 }}
+                />
+                Email
+              </label>
+              <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={settings.notifications.whatsapp}
+                  onChange={() => toggleNotif("whatsapp")}
+                  style={{ marginRight: 4 }}
+                />
+                WhatsApp
+              </label>
+              <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={settings.notifications.popup}
+                  onChange={() => toggleNotif("popup")}
+                  style={{ marginRight: 4 }}
+                />
+                Notifiche a schermo (popup)
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ----------------- Layout principale -----------------
+
+  if (!isAuthenticated) {
+    return renderLogin();
+  }
+
+  let content = null;
+  if (activeNav === "Home") content = renderHome();
+  else if (activeNav === "Utenti") content = renderUsers();
+  else if (activeNav === "Calendario") content = renderCalendar();
+  else if (activeNav === "Scadenze") content = renderDeadlines();
+  else if (activeNav === "Dispensa") content = renderPantry();
+  else if (activeNav === "Lista spesa") content = renderShopping();
+  else if (activeNav === "Pasti") content = renderMeals();
+  else if (activeNav === "Compiti & paghette") content = renderChores();
+  else if (activeNav === "ToDo List") content = renderTodos();
+  else if (activeNav === "Impostazioni") content = renderSettings();
 
   return (
     <div
-      ref={containerRef}
-      className="relative w-full aspect-[16/9] bg-black/5 rounded-2xl overflow-hidden"
-      onMouseEnter={() => pauseOnHover && setPaused(true)}
-      onMouseLeave={() => pauseOnHover && setPaused(false)}
+      style={{
+        ...baseStyles.appShell,
+        background: palette.appBg,
+        color: palette.appText
+      }}
     >
       <div
-        className="absolute inset-0 whitespace-nowrap"
-        style={{ transform: `translateX(-${offset}px)` }}
+        style={{
+          ...baseStyles.appInner,
+          background: palette.innerBg
+        }}
       >
-        {[0, 1].map((rep) => (
-          <React.Fragment key={rep}>
-            {items.map((it, i) => (
-              <img
-                key={`${rep}-${it.id}`}
-                src={it.url}
-                alt={it.titolo || `foto-${i}`}
-                className="inline-block h-full object-cover"
-                style={{ width: cw || 1 }}
-              />
-            ))}
-          </React.Fragment>
-        ))}
-      </div>
-
-      {items[activeIndex]?.titolo && (
-        <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-sm p-2">
-          {items[activeIndex].titolo}
-        </div>
-      )}
-
-      <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
-        {items.map((_, i) => (
-          <span
-            key={i}
-            className={`w-2 h-2 rounded-full ${
-              i === activeIndex ? "bg-white" : "bg-white/50"
-            }`}
-          />
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const Dashboard = ({ data }) => {
-  const todayDate = new Date();
-  const dow = ((todayDate.getDay() + 6) % 7) + 1; // 1..7 (Lun..Dom)
-
-  const eventiOggi = instancesForDate(data.eventi, todayDate);
-  const prossimeScadenze = [...data.scadenze]
-    .sort((a, b) => a.data.localeCompare(b.data))
-    .filter((s) => new Date(s.data) >= new Date(today()))
-    .slice(0, 5);
-
-  const photos = data.homePhotos || [];
-  const carousel = (data.settings && data.settings.carousel) || {
-    enabled: true,
-    intervalMs: 4000,
-  };
-
-  const menuOggi =
-    data.menuSettimanale[dow] || {
-      colazione: [],
-      merenda: [],
-      pranzo: { primo: [], secondo: [], contorno: [] },
-      cena: { primo: [], secondo: [], contorno: [] },
-    };
-  const resolvePiatto = (id) => data.piatti.find((p) => p.id === id)?.nome || id;
-
-  const reminderOggi = (data.schedules || [])
-    .filter((s) => s.attivo && (s.giorni || []).includes(dow))
-    .sort((a, b) => (a.orario || "").localeCompare(b.orario))
-    .slice(0, 5);
-
-  const spesaDaComprare = data.listaSpesa.filter((i) => !i.preso);
-
-  return (
-    <div className="space-y-6">
-      {photos.length > 0 && carousel.enabled && (
-        <Section title="Foto di famiglia" icon={<Home className="w-5 h-5" />}>
-          <PhotoCarousel items={photos} intervalMs={carousel.intervalMs || 4000} />
-        </Section>
-      )}
-
-      <div className="grid md:grid-cols-4 gap-4">
-        <StatCard title="Utenti" value={data.utenti.length} />
-        <StatCard title="Eventi oggi" value={eventiOggi.length} />
-        <StatCard title="Promemoria oggi" value={reminderOggi.length} />
-        <StatCard title="Articoli da comprare" value={spesaDaComprare.length} />
-      </div>
-
-      <div className="grid xl:grid-cols-2 gap-4">
-        <div className="space-y-4">
-          <Section title={`Oggi · ${formatDateInput(todayDate)}`} icon={<Calendar className="w-5 h-5" />}>
-            {eventiOggi.length === 0 ? (
-              <p className="text-gray-500">Nessun impegno oggi.</p>
-            ) : (
-              <ul className="space-y-2">
-                {eventiOggi.map((ev) => (
-                  <li
-                    key={ev.id}
-                    className="flex items-center justify-between bg-gray-100 rounded-xl p-2"
-                  >
-                    <div>
-                      <div className="font-medium">{ev.titolo}</div>
-                      <div className="text-xs text-gray-600">{ev.ora || "All day"}</div>
-                    </div>
-                    <Pill>
-                      {ev.ripeti?.freq && ev.ripeti.freq !== "NONE"
-                        ? `Ripete ${ev.ripeti.freq}`
-                        : "Singolo"}
-                    </Pill>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          <Section title="Promemoria di oggi" icon={<Bell className="w-5 h-5" />}>
-            {reminderOggi.length === 0 ? (
-              <p className="text-gray-500">Nessun promemoria per oggi.</p>
-            ) : (
-              <ul className="space-y-2">
-                {reminderOggi.map((r) => (
-                  <li
-                    key={r.id}
-                    className="bg-gray-100 rounded-xl p-2 flex items-center justify-between"
-                  >
-                    <div>
-                      <div className="font-medium">{r.titolo}</div>
-                      <div className="text-xs text-gray-600">
-                        {r.orario} · {(r.giorni || [])
-                          .map((d) => dayNameShort[d - 1])
-                          .join(", ")}
-                      </div>
-                    </div>
-                    <Pill>{r.attivo ? "attivo" : "pausa"}</Pill>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-        </div>
-
-        <div className="space-y-4">
-          <Section title="Prossime scadenze" icon={<FolderClock className="w-5 h-5" />}>
-            {prossimeScadenze.length === 0 ? (
-              <p className="text-gray-500">Nessuna scadenza.</p>
-            ) : (
-              <ul className="space-y-2">
-                {prossimeScadenze.map((s) => (
-                  <li
-                    key={s.id}
-                    className="flex items-center justify-between bg-gray-100 rounded-xl p-2"
-                  >
-                    <div>
-                      <div className="font-medium">{s.titolo}</div>
-                      <div className="text-xs text-gray-600">{s.data}</div>
-                    </div>
-                    {s.note && <Pill>Note</Pill>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-
-          <Section title="A tavola oggi" icon={<ChefHat className="w-5 h-5" />}>
-            <div className="grid grid-cols-1 gap-3">
-              <div>
-                <div className="text-xs text-gray-600 mb-1">COLAZIONE</div>
-                {menuOggi.colazione?.length ? (
-                  <ul className="list-disc pl-5 text-sm">
-                    {menuOggi.colazione.map((id, i) => (
-                      <li key={i}>{resolvePiatto(id)}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="text-sm text-gray-500">—</div>
-                )}
-              </div>
-              <div>
-                <div className="text-xs text-gray-600 mb-1">MERENDA</div>
-                {menuOggi.merenda?.length ? (
-                  <ul className="list-disc pl-5 text-sm">
-                    {menuOggi.merenda.map((id, i) => (
-                      <li key={i}>{resolvePiatto(id)}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="text-sm text-gray-500">—</div>
-                )}
-              </div>
-              <div>
-                <div className="text-xs text-gray-600 mb-1">PRANZO</div>
-                <div className="grid grid-cols-1 gap-1 text-sm">
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Primo</div>
-                    <ul className="list-disc pl-4">
-                      {(menuOggi.pranzo.primo || []).map((id, i) => (
-                        <li key={i}>{resolvePiatto(id)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Secondo</div>
-                    <ul className="list-disc pl-4">
-                      {(menuOggi.pranzo.secondo || []).map((id, i) => (
-                        <li key={i}>{resolvePiatto(id)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Contorno</div>
-                    <ul className="list-disc pl-4">
-                      {(menuOggi.pranzo.contorno || []).map((id, i) => (
-                        <li key={i}>{resolvePiatto(id)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-600 mb-1">CENA</div>
-                <div className="grid grid-cols-1 gap-1 text-sm">
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Primo</div>
-                    <ul className="list-disc pl-4">
-                      {(menuOggi.cena.primo || []).map((id, i) => (
-                        <li key={i}>{resolvePiatto(id)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Secondo</div>
-                    <ul className="list-disc pl-4">
-                      {(menuOggi.cena.secondo || []).map((id, i) => (
-                        <li key={i}>{resolvePiatto(id)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Contorno</div>
-                    <ul className="list-disc pl-4">
-                      {(menuOggi.cena.contorno || []).map((id, i) => (
-                        <li key={i}>{resolvePiatto(id)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Section>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/********************* CALENDARIO ************************/
-function instancesForDate(eventi, date) {
-  const day = ((date.getDay() + 6) % 7) + 1; // 1..7 (Lun..Dom)
-  const ymd = formatDateInput(date);
-  return eventi.filter((ev) => {
-    if (ev.data === ymd) return true; // singolo
-    if (ev.ripeti?.freq === "WEEKLY" && ev.ripeti.byDay?.includes(day)) return true;
-    if (ev.ripeti?.freq === "MONTHLY") {
-      const origDay = new Date(ev.data).getDate();
-      const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-      if (origDay === 31 && date.getDate() === lastDay) return true; // 31 → ultimo giorno
-      if (origDay !== 31 && date.getDate() === origDay) return true; // 30 resta 30, altri uguale
-      return false;
-    }
-    return false;
-  });
-}
-
-const CalendarView = ({ events = [], onDelete }) => {
-  const [monthOffset, setMonthOffset] = useState(0);
-  const base = new Date();
-  const first = new Date(base.getFullYear(), base.getMonth() + monthOffset, 1);
-  const weeks = [];
-  const startDow = (first.getDay() + 6) % 7; // lun=0
-  let cursor = new Date(first);
-  cursor.setDate(cursor.getDate() - startDow);
-  for (let w = 0; w < 6; w++) {
-    const row = [];
-    for (let d = 0; d < 7; d++) {
-      row.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    weeks.push(row);
-  }
-  return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-2">
-        <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setMonthOffset((x) => x - 1)}>
-          ◀
-        </button>
-        <div className="font-medium">
-          {first.toLocaleString("it-IT", { month: "long", year: "numeric" })}
-        </div>
-        <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setMonthOffset((x) => x + 1)}>
-          ▶
-        </button>
-      </div>
-      <div className="grid grid-cols-7 text-xs text-gray-500 mb-1">
-        {dayNameFull.map((n) => (
-          <div key={n} className="p-1 text-center">
-            {n}
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {weeks.flat().map((d, i) => {
-          const sameMonth = d.getMonth() === first.getMonth();
-          const inst = instancesForDate(events, d);
-          return (
-            <div key={i} className={`border rounded-lg p-1 min-h-[68px] ${sameMonth ? "bg-white" : "bg-gray-50"}`}>
-              <div className="text-[11px] text-gray-500 mb-1">{fmtDM(d)}</div>
-              <div className="space-y-1">
-                {inst.slice(0, 3).map((ev) => (
-                  <div key={ev.id} className="text-[11px] bg-gray-100 rounded px-1 flex items-center justify-between">
-                    <span className="truncate">{ev.titolo}</span>
-                    {onDelete && (
-                      <button
-                        className="text-red-600 ml-1"
-                        title="Elimina"
-                        onClick={() => onDelete(ev.id)}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-/********************* GOOGLE CALENDAR SYNC (opzionale) ************************/
-const GCAL_SCOPES = "https://www.googleapis.com/auth/calendar";
-const GCAL_DISCOVERY = ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"];
-
-function loadGapiScript() {
-  return new Promise((resolve, reject) => {
-    if (document.getElementById("gapi-script")) return resolve();
-    const s = document.createElement("script");
-    s.id = "gapi-script";
-    s.src = "https://apis.google.com/js/api.js";
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("Impossibile caricare Google API"));
-    document.body.appendChild(s);
-  });
-}
-async function initGapi(clientId) {
-  await loadGapiScript();
-  const gapi = window.gapi;
-  if (!gapi) throw new Error("gapi non disponibile");
-  await new Promise((res) => gapi.load("client:auth2", () => res()));
-  await gapi.client.init({ discoveryDocs: GCAL_DISCOVERY, clientId, scope: GCAL_SCOPES });
-  return gapi;
-}
-function toRfc3339(dateStr, time) {
-  if (!time) return new Date(dateStr + "T00:00:00").toISOString();
-  return new Date(`${dateStr}T${time}`).toISOString();
-}
-function addMonths(date, n) {
-  return new Date(date.getFullYear(), date.getMonth() + n, date.getDate());
-}
-
-const GoogleSyncPanel = ({ data, setData }) => {
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const clientId = data.settings.google?.clientId || "";
-  const [localClientId, setLocalClientId] = useState(clientId);
-
-  const ensureAuth = async () => {
-    if (!localClientId.trim()) throw new Error("Inserisci un Client ID OAuth 2.0");
-    const gapi = await initGapi(localClientId.trim());
-    const auth = gapi.auth2.getAuthInstance();
-    if (!auth.isSignedIn.get()) {
-      await auth.signIn();
-    }
-    if (localClientId !== clientId) {
-      setData((prev) => ({
-        ...prev,
-        settings: {
-          ...prev.settings,
-          google: { ...(prev.settings.google || {}), clientId: localClientId },
-        },
-      }));
-    }
-    return gapi;
-  };
-
-  const importUpcoming = async () => {
-    try {
-      setBusy(true);
-      setMsg("Import in corso...");
-      const gapi = await ensureAuth();
-      const now = new Date();
-      const max = addMonths(now, 1);
-      const resp = await gapi.client.calendar.events.list({
-        calendarId: data.settings.google?.calendarId || "primary",
-        singleEvents: true,
-        orderBy: "startTime",
-        timeMin: now.toISOString(),
-        timeMax: max.toISOString(),
-        maxResults: 50,
-      });
-      const items = resp.result.items || [];
-      const nuovi = items
-        .map((ev) => {
-          const startISO = ev.start?.date || ev.start?.dateTime;
-          const d = new Date(startISO);
-          const dateStr = formatDateInput(d);
-          const time = ev.start?.dateTime
-            ? String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0")
-            : "";
-          return {
-            id: uid("gcal"),
-            titolo: ev.summary || "Evento",
-            data: dateStr,
-            ora: time,
-            ripeti: { freq: "NONE", byDay: [] },
-            _gcalId: ev.id,
-          };
-        })
-        .filter((x) => !data.eventi.some((e) => e._gcalId === x._gcalId));
-      setData((prev) => ({ ...prev, eventi: [...prev.eventi, ...nuovi] }));
-      setMsg(`Importati ${nuovi.length} eventi`);
-    } catch (e) {
-      setMsg(e.message || "Errore import");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const exportAll = async () => {
-    try {
-      setBusy(true);
-      setMsg("Esportazione in corso...");
-      const gapi = await ensureAuth();
-      const calId = data.settings.google?.calendarId || "primary";
-      let count = 0;
-      for (const ev of data.eventi) {
-        if (ev._gcalId) continue;
-        if (ev.ripeti?.freq === "NONE") {
-          await gapi.client.calendar.events.insert({
-            calendarId: calId,
-            resource: {
-              summary: ev.titolo,
-              start: ev.ora ? { dateTime: toRfc3339(ev.data, ev.ora) } : { date: ev.data },
-              end: ev.ora ? { dateTime: toRfc3339(ev.data, ev.ora) } : { date: ev.data },
-            },
-          });
-          count++;
-          continue;
-        }
-        if (ev.ripeti?.freq === "WEEKLY") {
-          const byDay = (ev.ripeti.byDay || [])
-            .map((d) => ["MO", "TU", "WE", "TH", "FR", "SA", "SU"][d - 1])
-            .join(",");
-          await gapi.client.calendar.events.insert({
-            calendarId: calId,
-            resource: {
-              summary: ev.titolo,
-              start: ev.ora ? { dateTime: toRfc3339(ev.data, ev.ora) } : { date: ev.data },
-              end: ev.ora ? { dateTime: toRfc3339(ev.data, ev.ora) } : { date: ev.data },
-              recurrence: byDay ? [`RRULE:FREQ=WEEKLY;BYDAY=${byDay}`] : ["RRULE:FREQ=WEEKLY"],
-            },
-          });
-          count++;
-          continue;
-        }
-        if (ev.ripeti?.freq === "MONTHLY") {
-          const origDay = new Date(ev.data).getDate();
-          if (origDay === 31) {
-            // workaround: genera 12 occorrenze, ultimo giorno del mese
-            let cursor = new Date();
-            for (let i = 0; i < 12; i++) {
-              const last = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
-              await gapi.client.calendar.events.insert({
-                calendarId: calId,
-                resource: {
-                  summary: ev.titolo,
-                  start: ev.ora
-                    ? { dateTime: toRfc3339(formatDateInput(last), ev.ora) }
-                    : { date: formatDateInput(last) },
-                  end: ev.ora
-                    ? { dateTime: toRfc3339(formatDateInput(last), ev.ora) }
-                    : { date: formatDateInput(last) },
-                },
-              });
-              cursor = addMonths(cursor, 1);
-              count++;
-            }
-          } else {
-            await gapi.client.calendar.events.insert({
-              calendarId: calId,
-              resource: {
-                summary: ev.titolo,
-                start: ev.ora ? { dateTime: toRfc3339(ev.data, ev.ora) } : { date: ev.data },
-                end: ev.ora ? { dateTime: toRfc3339(ev.data, ev.ora) } : { date: ev.data },
-                recurrence: [`RRULE:FREQ=MONTHLY;BYMONTHDAY=${origDay}`],
-              },
-            });
-            count++;
-          }
-        }
-      }
-      setMsg(`Esportati ${count} eventi`);
-    } catch (e) {
-      setMsg(e.message || "Errore export");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="bg-white rounded-xl border p-3 mt-4">
-      <div className="font-medium mb-2">Google Calendar</div>
-      <div className="grid md:grid-cols-3 gap-2 items-end">
-        <div className="md:col-span-2 space-y-2">
-          <input
-            className="border rounded-lg px-2 py-1 w-full"
-            placeholder="OAuth Client ID"
-            value={localClientId}
-            onChange={(e) => setLocalClientId(e.target.value)}
-          />
-          <input
-            className="border rounded-lg px-2 py-1 w-full"
-            placeholder="Calendar ID (primary)"
-            value={data.settings.google?.calendarId || "primary"}
-            onChange={(e) =>
-              setData((prev) => ({
-                ...prev,
-                settings: {
-                  ...prev.settings,
-                  google: { ...(prev.settings.google || {}), calendarId: e.target.value },
-                },
-              }))
-            }
-          />
-        </div>
-        <div className="flex gap-2">
-          <button className="px-3 py-2 rounded-xl bg-gray-100" onClick={importUpcoming} disabled={busy}>
-            <Download className="w-4 h-4 inline" /> Importa 30 giorni
-          </button>
-          <button className="px-3 py-2 rounded-xl bg-black text-white" onClick={exportAll} disabled={busy}>
-            <Upload className="w-4 h-4 inline" /> Esporta
-          </button>
-        </div>
-      </div>
-      {msg && <div className="text-xs text-gray-600 mt-2">{msg}</div>}
-      <p className="text-[11px] text-gray-500 mt-2">Suggerimento: crea su Google Cloud un OAuth Client ID (App Web) ed inseriscilo qui. Permessi richiesti: Calendar.</p>
-    </div>
-  );
-};
-
-const CalendarTab = ({ data, setData }) => {
-  const [titolo, setTitolo] = useState("");
-  const [dataStr, setDataStr] = useState(today());
-  const [ora, setOra] = useState("");
-  const [freq, setFreq] = useState("NONE");
-  const [wk, setWk] = useState([]);
-  const toggleWk = (d) => setWk((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
-
-  return (
-    <Section title="Calendario condiviso" icon={<Calendar className="w-5 h-5" />}>
-      <div className="grid md:grid-cols-2 gap-4">
-        <div className="md:col-span-1">
-          <div className="space-y-2">
-            <input className="border rounded-lg px-2 py-1 w-full" placeholder="Titolo" value={titolo} onChange={(e) => setTitolo(e.target.value)} />
-            <input type="date" className="border rounded-lg px-2 py-1 w-full" value={dataStr} onChange={(e) => setDataStr(e.target.value)} />
-            <input type="time" className="border rounded-lg px-2 py-1 w-full" value={ora} onChange={(e) => setOra(e.target.value)} />
-            <select className="border rounded-lg px-2 py-1 w-full" value={freq} onChange={(e) => setFreq(e.target.value)}>
-              <option value="NONE">Nessuna ripetizione</option>
-              <option value="WEEKLY">Settimanale</option>
-              <option value="MONTHLY">Mensile (31 → ultimo giorno del mese)</option>
-            </select>
-            {freq === "WEEKLY" && (
-              <div className="flex flex-wrap gap-2 text-sm">
-                {giorni.map((d) => (
-                  <button key={d} onClick={() => toggleWk(d)} className={`px-2 py-1 rounded-lg ${wk.includes(d) ? "bg-black text-white" : "bg-gray-100"}`}>
-                    {dayNameShort[d - 1]}
-                  </button>
-                ))}
-              </div>
-            )}
-            <button
-              className="px-3 py-2 rounded-xl bg-black text-white w-full"
-              onClick={() => {
-                if (!titolo.trim()) return;
-                const ev = { id: uid("ev"), titolo, data: dataStr, ora, ripeti: { freq, byDay: wk } };
-                setData((prev) => ({ ...prev, eventi: [...prev.eventi, ev] }));
-                setTitolo("");
-                setOra("");
-                setFreq("NONE");
-                setWk([]);
+        <header
+          style={{
+            ...baseStyles.header,
+            background: palette.headerBg,
+            color: palette.headerText
+          }}
+        >
+          <div style={baseStyles.headerLeft}>
+            <div
+              style={{
+                ...baseStyles.logoCircle,
+                background: "rgba(15,23,42,0.18)",
+                color: palette.headerText
               }}
             >
-              Aggiungi evento
+              FH
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 16 }}>Family Hub</div>
+              <div style={{ fontSize: 12, opacity: 0.85 }}>
+                Gestione familiare: agenda, spesa, pasti e paghette.
+              </div>
+            </div>
+          </div>
+          <div style={baseStyles.headerRight}>
+            <span style={{ fontSize: 12 }}>Ciao, {currentUser.name}</span>
+            <button
+              style={{
+                ...baseStyles.ghostButton,
+                borderColor: "rgba(248,250,252,0.7)",
+                color: palette.headerText,
+                background: "transparent"
+              }}
+              onClick={handleLogout}
+            >
+              Esci
             </button>
-            <GoogleSyncPanel data={data} setData={setData} />
           </div>
-        </div>
-        <div className="md:col-span-2">
-          <CalendarView
-            events={data.eventi}
-            onDelete={(id) =>
-              setData((prev) => ({ ...prev, eventi: prev.eventi.filter((e) => e.id !== id) }))
-            }
-          />
-        </div>
-      </div>
-    </Section>
-  );
-};
+        </header>
 
-/********************* SCADENZE ************************/
-const ScadenzeTab = ({ data, setData }) => {
-  const [titolo, setTitolo] = useState("");
-  const [dataStr, setDataStr] = useState(today());
-  const [note, setNote] = useState("");
-  return (
-    <Section title="Scadenze" icon={<FolderClock className="w-5 h-5" />}>
-      <div className="grid md:grid-cols-3 gap-2 items-end mb-3">
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Titolo" value={titolo} onChange={(e) => setTitolo(e.target.value)} />
-        <input type="date" className="border rounded-lg px-2 py-1 w-full" value={dataStr} onChange={(e) => setDataStr(e.target.value)} />
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Note (opz)" value={note} onChange={(e) => setNote(e.target.value)} />
-        <button
-          className="px-3 py-2 rounded-xl bg-black text-white"
-          onClick={() => {
-            if (!titolo.trim()) return;
-            setData((prev) => ({ ...prev, scadenze: [...prev.scadenze, { id: uid("scad"), titolo, data: dataStr, note }] }));
-            setTitolo("");
-            setNote("");
-          }}
-        >
-          Aggiungi
-        </button>
-      </div>
-      <ul className="space-y-2">
-        {[...data.scadenze].sort((a, b) => a.data.localeCompare(b.data)).map((s) => (
-          <li key={s.id} className="bg-white rounded-xl border p-2 flex items-center justify-between">
-            <div>
-              <div className="font-medium">{s.titolo}</div>
-              <div className="text-xs text-gray-600">{s.data}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              {s.note && <Pill>Note</Pill>}
-              <button className="p-1 bg-gray-100 rounded" onClick={() => setData((prev) => ({ ...prev, scadenze: prev.scadenze.filter((x) => x.id !== s.id) }))}>
-                <Trash2 className="w-4 h-4" />
+        <div style={baseStyles.body}>
+          <aside
+            style={{
+              ...baseStyles.sidebar,
+              background: palette.sidebarBg,
+              borderRight: "1px solid " + palette.sidebarBorder
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8
+              }}
+            >
+              <span style={{ fontSize: 12, color: palette.textMuted }}>Navigazione</span>
+              <button
+                style={{
+                  ...baseStyles.ghostButton,
+                  borderColor: palette.buttonGhostBorder,
+                  color: palette.appText,
+                  padding: "2px 8px",
+                  fontSize: 11
+                }}
+                onClick={() =>
+                  setSettings(prev => ({
+                    ...prev,
+                    theme: prev.theme === "dark" ? "light" : "dark"
+                  }))
+                }
+              >
+                {settings.theme === "dark" ? "Chiaro" : "Scuro"}
               </button>
             </div>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-};
+            <ul style={baseStyles.navList}>
+              {NAV_ITEMS.map(item => {
+                const active = activeNav === item;
+                return (
+                  <li key={item}>
+                    <button
+                      style={{
+                        ...baseStyles.navButton,
+                        background: active ? palette.navActiveBg : "transparent",
+                        color: active ? palette.navActiveText : palette.appText
+                      }}
+                      onClick={() => setActiveNav(item)}
+                    >
+                      {item}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </aside>
 
-/********************* PASTI & DISPENSA ************************/
-const CATEGORIE = ["Primi", "Secondi", "Contorni", "Altro", "Colazione", "Merenda"];
-
-const PastiTab = ({ data, setData }) => {
-  const [nome, setNome] = useState("");
-  const [categoria, setCategoria] = useState("Primi");
-  const [filtroCat, setFiltroCat] = useState("");
-  const [giorno, setGiorno] = useState(1);
-  const [pasto, setPasto] = useState("colazione");
-  const [sotto, setSotto] = useState("primo");
-
-  const piattiFiltrati = (data.piatti || []).filter((p) => (filtroCat ? p.categoria === filtroCat : true));
-
-  const addPiatto = () => {
-    if (!nome.trim()) return;
-    setData((prev) => ({ ...prev, piatti: [...prev.piatti, { id: uid("pi"), nome, categoria, richiede: [] }] }));
-    setNome("");
-  };
-
-  const addToMenu = (piattoId) => {
-    setData((prev) => {
-      const d = { ...prev.menuSettimanale };
-      const day = { ...d[giorno] };
-      if (pasto === "colazione" || pasto === "merenda") {
-        day[pasto] = [...(day[pasto] || []), piattoId];
-      } else {
-        const blocco = { ...(day[pasto] || { primo: [], secondo: [], contorno: [] }) };
-        blocco[sotto] = [...(blocco[sotto] || []), piattoId];
-        day[pasto] = blocco;
-      }
-      d[giorno] = day;
-      return { ...prev, menuSettimanale: d };
-    });
-  };
-
-  const removeFromMenu = (pastoKey, idx, sub) => {
-    setData((prev) => {
-      const d = { ...prev.menuSettimanale };
-      const day = { ...d[giorno] };
-      if (pastoKey === "colazione" || pastoKey === "merenda") {
-        day[pastoKey] = (day[pastoKey] || []).filter((_, i) => i !== idx);
-      } else {
-        const blocco = { ...(day[pastoKey] || { primo: [], secondo: [], contorno: [] }) };
-        blocco[sub] = (blocco[sub] || []).filter((_, i) => i !== idx);
-        day[pastoKey] = blocco;
-      }
-      d[giorno] = day;
-      return { ...prev, menuSettimanale: d };
-    });
-  };
-
-  const resolvePiatto = (id) => data.piatti.find((p) => p.id === id)?.nome || id;
-
-  const giornoData = data.menuSettimanale[giorno];
-
-  return (
-    <Section title="Pasti & Dispensa" icon={<ChefHat className="w-5 h-5" />}>
-      <div className="grid lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-1 space-y-3">
-          <div className="bg-white rounded-2xl p-3 border">
-            <div className="font-medium mb-2">Nuovo piatto</div>
-            <input className="border rounded-lg px-2 py-1 w-full mb-2" placeholder="Nome piatto" value={nome} onChange={(e) => setNome(e.target.value)} />
-            <select className="border rounded-lg px-2 py-1 w-full mb-2" value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-              {CATEGORIE.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <button className="px-3 py-2 rounded-xl bg-black text-white w-full" onClick={addPiatto}>Aggiungi</button>
-          </div>
-
-          <div className="bg-white rounded-2xl p-3 border">
-            <div className="font-medium mb-2">Libreria piatti</div>
-            <select className="border rounded-lg px-2 py-1 w-full mb-2" value={filtroCat} onChange={(e) => setFiltroCat(e.target.value)}>
-              <option value="">Tutte le categorie</option>
-              {CATEGORIE.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <div className="max-h-64 overflow-auto space-y-1">
-              {piattiFiltrati.map((p) => (
-                <div key={p.id} className="border rounded-lg p-2 flex items-center justify-between">
-                  <div>
-                    <div className="font-medium text-sm">{p.nome}</div>
-                    <div className="text-xs text-gray-600">{p.categoria}</div>
-                  </div>
-                  <button className="px-2 py-1 bg-gray-100 rounded" title="Aggiungi al menu" onClick={() => addToMenu(p.id)}>
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
+          <main
+            style={{
+              ...baseStyles.main,
+              background: palette.mainBg
+            }}
+          >
+            {content}
+          </main>
         </div>
-
-        <div className="lg:col-span-2 space-y-3">
-          <div className="bg-white rounded-2xl p-3 border">
-            <div className="grid md:grid-cols-4 gap-2 items-end">
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Giorno</div>
-                <select className="border rounded-lg px-2 py-1 w-full" value={giorno} onChange={(e) => setGiorno(Number(e.target.value))}>
-                  {giorni.map((g) => (
-                    <option key={g} value={g}>{dayNameFull[g - 1]}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Pasto</div>
-                <select className="border rounded-lg px-2 py-1 w-full" value={pasto} onChange={(e) => setPasto(e.target.value)}>
-                  <option value="colazione">Colazione</option>
-                  <option value="merenda">Merenda</option>
-                  <option value="pranzo">Pranzo</option>
-                  <option value="cena">Cena</option>
-                </select>
-              </div>
-              {pasto === "pranzo" || pasto === "cena" ? (
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">Portata</div>
-                  <select className="border rounded-lg px-2 py-1 w-full" value={sotto} onChange={(e) => setSotto(e.target.value)}>
-                    <option value="primo">Primo</option>
-                    <option value="secondo">Secondo</option>
-                    <option value="contorno">Contorno</option>
-                  </select>
-                </div>
-              ) : (
-                <div className="hidden md:block" />
-              )}
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Filtro categoria</div>
-                <select className="border rounded-lg px-2 py-1 w-full" value={filtroCat} onChange={(e) => setFiltroCat(e.target.value)}>
-                  <option value="">Tutte</option>
-                  {CATEGORIE.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="mt-3 grid md:grid-cols-2 gap-3">
-              <div className="bg-gray-50 rounded-xl p-3">
-                <div className="font-medium mb-1">Selezione rapida</div>
-                <div className="text-xs text-gray-500 mb-2">Clicca "+" nella libreria piatti per aggiungere</div>
-              </div>
-
-              <div className="bg-gray-50 rounded-xl p-3">
-                <div className="font-medium mb-1">Menù del {dayNameFull[giorno - 1]}</div>
-                <div className="grid grid-cols-1 gap-2 text-sm">
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Colazione</div>
-                    <ul className="list-disc pl-4">
-                      {(giornoData.colazione || []).map((id, i) => (
-                        <li key={`col-${i}`} className="flex items-center justify-between">
-                          <span>{resolvePiatto(id)}</span>
-                          <button className="text-red-600" onClick={() => removeFromMenu("colazione", i)}><Trash2 className="w-4 h-4" /></button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Merenda</div>
-                    <ul className="list-disc pl-4">
-                      {(giornoData.merenda || []).map((id, i) => (
-                        <li key={`mer-${i}`} className="flex items-center justify-between">
-                          <span>{resolvePiatto(id)}</span>
-                          <button className="text-red-600" onClick={() => removeFromMenu("merenda", i)}><Trash2 className="w-4 h-4" /></button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Pranzo</div>
-                    {["primo", "secondo", "contorno"].map((k) => (
-                      <div key={`p-${k}`}>
-                        <div className="text-[11px] text-gray-500 mb-1 capitalize">{k}</div>
-                        <ul className="list-disc pl-4">
-                          {(giornoData.pranzo[k] || []).map((id, i) => (
-                            <li key={`pr-${k}-${i}`} className="flex items-center justify-between">
-                              <span>{resolvePiatto(id)}</span>
-                              <button className="text-red-600" onClick={() => removeFromMenu("pranzo", i, k)}><Trash2 className="w-4 h-4" /></button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                  <div>
-                    <div className="text-[11px] text-gray-500 uppercase mb-1">Cena</div>
-                    {["primo", "secondo", "contorno"].map((k) => (
-                      <div key={`c-${k}`}>
-                        <div className="text-[11px] text-gray-500 mb-1 capitalize">{k}</div>
-                        <ul className="list-disc pl-4">
-                          {(giornoData.cena[k] || []).map((id, i) => (
-                            <li key={`ce-${k}-${i}`} className="flex items-center justify-between">
-                              <span>{resolvePiatto(id)}</span>
-                              <button className="text-red-600" onClick={() => removeFromMenu("cena", i, k)}><Trash2 className="w-4 h-4" /></button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Section>
-  );
-};
-
-/********************* LISTA SPESA ************************/
-const SpesaTab = ({ data, setData }) => {
-  const [nome, setNome] = useState("");
-  const [qta, setQta] = useState(1);
-  const [unita, setUnita] = useState("pz");
-
-  const add = () => {
-    if (!nome.trim()) return;
-    setData((prev) => ({ ...prev, listaSpesa: [...prev.listaSpesa, { id: uid("it"), nome, qta, unita }] }));
-    setNome("");
-  };
-  const toggle = (id) =>
-    setData((prev) => ({
-      ...prev,
-      listaSpesa: prev.listaSpesa.map((i) => (i.id === id ? { ...i, preso: !i.preso } : i)),
-    }));
-  const toDispensa = (id) =>
-    setData((prev) => {
-      const item = prev.listaSpesa.find((x) => x.id === id);
-      if (!item) return prev;
-      return {
-        ...prev,
-        dispensa: [...prev.dispensa, { id: uid("d"), nome: item.nome, qta: item.qta, unita: item.unita }],
-        listaSpesa: prev.listaSpesa.filter((x) => x.id !== id),
-      };
-    });
-
-  return (
-    <Section title="Lista spesa & OCR" icon={<ShoppingCart className="w-5 h-5" />}>
-      <div className="grid md:grid-cols-4 gap-2 items-end mb-3">
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Articolo" value={nome} onChange={(e) => setNome(e.target.value)} />
-        <input type="number" min={1} className="border rounded-lg px-2 py-1 w-full" value={qta} onChange={(e) => setQta(Number(e.target.value || 1))} />
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Unità" value={unita} onChange={(e) => setUnita(e.target.value)} />
-        <button className="px-3 py-2 rounded-xl bg-black text-white" onClick={add}>Aggiungi</button>
-      </div>
-      <ul className="space-y-2">
-        {data.listaSpesa.map((i) => (
-          <li key={i.id} className="bg-white rounded-xl border p-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <input type="checkbox" checked={!!i.preso} onChange={() => toggle(i.id)} />
-              <div>
-                <div className="font-medium">{i.nome}</div>
-                <div className="text-xs text-gray-600">{i.qta} {i.unita}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => toDispensa(i.id)}>In dispensa</button>
-              <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setData((prev) => ({ ...prev, listaSpesa: prev.listaSpesa.filter((x) => x.id !== i.id) }))}><Trash2 className="w-4 h-4" /></button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <div className="mt-6">
-        <div className="font-medium mb-2">Dispensa</div>
-        <ul className="grid md:grid-cols-3 gap-2">
-          {data.dispensa.map((d) => (
-            <li key={d.id} className="bg-white rounded-xl border p-2 flex items-center justify-between">
-              <div>
-                <div className="font-medium">{d.nome}</div>
-                <div className="text-xs text-gray-600">{d.qta} {d.unita}</div>
-              </div>
-              <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setData((prev) => ({ ...prev, dispensa: prev.dispensa.filter((x) => x.id !== d.id) }))}><Trash2 className="w-4 h-4" /></button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </Section>
-  );
-};
-
-/********************* COMPITI & PAGHETTE ************************/
-const CompitiTab = ({ data, setData, utenti }) => {
-  const [titolo, setTitolo] = useState("");
-  const [assegnatoA, setAssegnatoA] = useState(utenti[0]?.id || "");
-  const [valore, setValore] = useState(1);
-
-  const segnaFatto = (id, userId) =>
-    setData((prev) => ({
-      ...prev,
-      compiti: prev.compiti.map((c) => (c.id === id ? { ...c, fattoBy: userId } : c)),
-    }));
-
-  const addPagamento = (userId, importo) =>
-    setData((prev) => ({ ...prev, pagamenti: [...prev.pagamenti, { id: uid("pay"), userId, importo, data: today(), note: "paghetta" }] }));
-
-  const saldoPerUser = (userId) => {
-    const base = data.settings.allowanceSettimanaleBase || 0;
-    const earned = data.compiti.filter((c) => c.fattoBy === userId).reduce((s, c) => s + (c.valore || 0), 0);
-    const paid = data.pagamenti.filter((p) => p.userId === userId).reduce((s, p) => s + (p.importo || 0), 0);
-    return base + earned - paid;
-  };
-
-  return (
-    <Section title="Compiti & Paghette" icon={<ClipboardList className="w-5 h-5" />}>
-      <div className="grid md:grid-cols-3 gap-2 items-end mb-3">
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Titolo" value={titolo} onChange={(e) => setTitolo(e.target.value)} />
-        <select className="border rounded-lg px-2 py-1 w-full" value={assegnatoA} onChange={(e) => setAssegnatoA(e.target.value)}>
-          {utenti.map((u) => (
-            <option key={u.id} value={u.id}>{u.nome}</option>
-          ))}
-        </select>
-        <input type="number" min={0} className="border rounded-lg px-2 py-1 w-full" value={valore} onChange={(e) => setValore(Number(e.target.value || 0))} />
-        <button
-          className="px-3 py-2 rounded-xl bg-black text-white"
-          onClick={() => {
-            if (!titolo.trim()) return;
-            setData((prev) => ({ ...prev, compiti: [...prev.compiti, { id: uid("todo"), titolo, assegnatoA, data: today(), ricorrente: false, valore }] }));
-            setTitolo("");
-            setValore(1);
-          }}
-        >
-          Aggiungi
-        </button>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-4">
-        <div>
-          <div className="font-medium mb-2">Da fare</div>
-          <ul className="space-y-2">
-            {data.compiti.filter((c) => !c.fattoBy).map((c) => (
-              <li key={c.id} className="bg-white rounded-xl border p-2 flex items-center justify-between">
-                <div>
-                  <div className="font-medium">{c.titolo}</div>
-                  <div className="text-xs text-gray-600">Valore: {c.valore}{data.settings.valuta}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <select className="border rounded-lg px-2 py-1" defaultValue={c.assegnatoA} onChange={(e) => setData((prev) => ({ ...prev, compiti: prev.compiti.map((x) => (x.id === c.id ? { ...x, assegnatoA: e.target.value } : x)) }))}>
-                    {utenti.map((u) => (
-                      <option key={u.id} value={u.id}>{u.nome}</option>
-                    ))}
-                  </select>
-                  <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => segnaFatto(c.id, c.assegnatoA)}>Segna fatto</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <div className="font-medium mb-2">Saldo & Pagamenti</div>
-          <ul className="space-y-2">
-            {utenti.map((u) => (
-              <li key={u.id} className="bg-white rounded-xl border p-2 flex items-center justify-between">
-                <div>
-                  <div className="font-medium">{u.nome}</div>
-                  <div className="text-xs text-gray-600">Saldo stimato: {saldoPerUser(u.id)}{data.settings.valuta}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => addPagamento(u.id, 5)}>Paga {5}{data.settings.valuta}</button>
-                  <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => addPagamento(u.id, 10)}>Paga {10}{data.settings.valuta}</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </Section>
-  );
-};
-
-/********************* NOTIFICHE ************************/
-const NotificheTab = ({ data, setData }) => {
-  const [titolo, setTitolo] = useState("");
-  const [messaggio, setMessaggio] = useState("");
-  const [orario, setOrario] = useState("20:00");
-  const [giorniSel, setGiorniSel] = useState([]);
-  const toggle = (d) => setGiorniSel((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
-
-  return (
-    <Section title="Promemoria" icon={<Bell className="w-5 h-5" />}>
-      <div className="grid md:grid-cols-5 gap-2 items-end mb-3">
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Titolo" value={titolo} onChange={(e) => setTitolo(e.target.value)} />
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Messaggio" value={messaggio} onChange={(e) => setMessaggio(e.target.value)} />
-        <input type="time" className="border rounded-lg px-2 py-1 w-full" value={orario} onChange={(e) => setOrario(e.target.value)} />
-        <div className="col-span-2">
-          <div className="flex flex-wrap gap-2">
-            {giorni.map((d) => (
-              <button key={d} onClick={() => toggle(d)} className={`px-2 py-1 rounded-lg ${giorniSel.includes(d) ? "bg-black text-white" : "bg-gray-100"}`}>
-                {dayNameShort[d - 1]}
-              </button>
-            ))}
-          </div>
-        </div>
-        <button
-          className="px-3 py-2 rounded-xl bg-black text-white"
-          onClick={() => {
-            if (!titolo.trim() || !orario) return;
-            setData((prev) => ({
-              ...prev,
-              schedules: [...prev.schedules, { id: uid("rem"), titolo, messaggio, orario, giorni: giorniSel, attivo: true }],
-            }));
-            setTitolo("");
-            setMessaggio("");
-            setGiorniSel([]);
-          }}
-        >
-          Aggiungi
-        </button>
-      </div>
-      <ul className="space-y-2">
-        {data.schedules.map((s) => (
-          <li key={s.id} className="bg-white rounded-xl border p-2 flex items-center justify-between">
-            <div>
-              <div className="font-medium">{s.titolo}</div>
-              <div className="text-xs text-gray-600">{s.orario} · {(s.giorni || []).map((d) => dayNameShort[d - 1]).join(", ")}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setData((prev) => ({ ...prev, schedules: prev.schedules.map((x) => (x.id === s.id ? { ...x, attivo: !x.attivo } : x)) }))}>{s.attivo ? "Metti in pausa" : "Attiva"}</button>
-              <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setData((prev) => ({ ...prev, schedules: prev.schedules.filter((x) => x.id !== s.id) }))}><Trash2 className="w-4 h-4" /></button>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-};
-
-/********************* IMPOSTAZIONI & UTENTI ************************/
-const ChangePasswordBanner = ({ currentUser, setData }) => {
-  const [pw, setPw] = useState("");
-  return (
-    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-4">
-      <div className="font-medium mb-1">Imposta una nuova password/PIN per {currentUser?.nome}</div>
-      <div className="flex gap-2">
-        <input className="border rounded-lg px-2 py-1" type="password" placeholder="Nuova password/PIN" value={pw} onChange={(e) => setPw(e.target.value)} />
-        <button
-          className="px-3 py-1 rounded-xl bg-black text-white"
-          onClick={async () => {
-            if (!pw) return;
-            const salt = uid("s");
-            const pwHash = await sha256Hex(`${salt}:${pw}`);
-            setData((prev) => ({
-              ...prev,
-              utenti: prev.utenti.map((u) => (u.id === currentUser.id ? { ...u, salt, pwHash, mustChange: false } : u)),
-            }));
-          }}
-        >
-          Salva
-        </button>
       </div>
     </div>
   );
-};
-
-const UsersTab = ({ data, setData, currentUserId }) => {
-  const [nome, setNome] = useState("");
-  const [username, setUsername] = useState("");
-  const [ruolo, setRuolo] = useState("Ospite");
-  const [pw, setPw] = useState("");
-
-  const addUser = async () => {
-    if (!nome.trim()) return;
-    const salt = pw ? uid("s") : null;
-    const hash = pw ? await sha256Hex(`${salt}:${pw}`) : null;
-    setData((prev) => ({
-      ...prev,
-      utenti: [
-        ...prev.utenti,
-        { id: uid("u"), nome, ruolo, username: username || null, salt, pwHash: hash, mustChange: false },
-      ],
-    }));
-    setNome("");
-    setUsername("");
-    setRuolo("Ospite");
-    setPw("");
-  };
-
-  const resetAdmin = async (id) => {
-    const tmp = String(Math.floor(1000 + Math.random() * 9000));
-    const salt = uid("s");
-    const hash = await sha256Hex(`${salt}:${tmp}`);
-    alert(`PIN temporaneo per l'utente: ${tmp}`);
-    setData((prev) => ({
-      ...prev,
-      utenti: prev.utenti.map((u) => (u.id === id ? { ...u, salt, pwHash: hash, mustChange: true } : u)),
-    }));
-  };
-
-  return (
-    <Section title="Utenti & Permessi" icon={<Users className="w-5 h-5" />}>
-      <div className="grid md:grid-cols-5 gap-2 items-end mb-3">
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Nome" value={nome} onChange={(e) => setNome(e.target.value)} />
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Username (opz.)" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <select className="border rounded-lg px-2 py-1 w-full" value={ruolo} onChange={(e) => setRuolo(e.target.value)}>
-          {Object.keys(data.permessi).map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
-        </select>
-        <input className="border rounded-lg px-2 py-1 w-full" placeholder="Password/PIN (opz.)" value={pw} onChange={(e) => setPw(e.target.value)} />
-        <button className="px-3 py-2 rounded-xl bg-black text-white" onClick={addUser}>Crea utente</button>
-      </div>
-
-      <ul className="space-y-2">
-        {data.utenti.map((u) => (
-          <li key={u.id} className="bg-white rounded-xl border p-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-medium">{u.nome} <span className="text-xs text-gray-500">({u.ruolo})</span></div>
-                <div className="text-xs text-gray-600">{u.username ? `@${u.username}` : "(senza username)"}</div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setData((prev) => ({ ...prev, utenti: prev.utenti.filter((x) => x.id !== u.id) }))}><Trash2 className="w-4 h-4" /></button>
-                <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => resetAdmin(u.id)} title="Reset password amministrativo">
-                  <KeyRound className="w-4 h-4" /> Reset
-                </button>
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  );
-};
-
-const ImpostazioniTab = ({ data, setData }) => {
-  const [famiglia, setFamiglia] = useState(data.settings.famiglia || "");
-  const [bg, setBg] = useState(data.settings.themeBg || "#f9fafb");
-  const [intervalMs, setIntervalMs] = useState(data.settings.carousel?.intervalMs || 4000);
-  const [enabled, setEnabled] = useState(!!data.settings.carousel?.enabled);
-  const [urlFoto, setUrlFoto] = useState("");
-
-  return (
-    <Section title="Impostazioni" icon={<Settings className="w-5 h-5" />}>
-      <div className="grid md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <div className="font-medium">Generali</div>
-          <input className="border rounded-lg px-2 py-1 w-full" placeholder="Nome famiglia" value={famiglia} onChange={(e) => setFamiglia(e.target.value)} />
-          <input className="border rounded-lg px-2 py-1 w-full" type="color" value={bg} onChange={(e) => setBg(e.target.value)} />
-          <button className="px-3 py-2 rounded-xl bg-black text-white" onClick={() => setData((prev) => ({ ...prev, settings: { ...prev.settings, famiglia, themeBg: bg } }))}>Salva</button>
-        </div>
-        <div className="space-y-2">
-          <div className="font-medium">Foto Home (carosello)</div>
-          <div className="flex items-end gap-2">
-            <input className="border rounded-lg px-2 py-1 w-full" placeholder="URL immagine" value={urlFoto} onChange={(e) => setUrlFoto(e.target.value)} />
-            <button className="px-3 py-2 rounded-xl bg-black text-white" onClick={() => { if (!urlFoto.trim()) return; setData((prev) => ({ ...prev, homePhotos: [...(prev.homePhotos || []), { id: uid("ph"), url: urlFoto, titolo: "" }] })); setUrlFoto(""); }}>Aggiungi</button>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Carosello attivo</label>
-            <input type="number" min={1000} className="border rounded-lg px-2 py-1 w-40" value={intervalMs} onChange={(e) => setIntervalMs(Number(e.target.value || 4000))} />
-            <span className="text-sm text-gray-500">ms</span>
-            <button className="px-3 py-2 rounded-xl bg-gray-100" onClick={() => setData((prev) => ({ ...prev, settings: { ...prev.settings, carousel: { enabled, intervalMs } } }))}>Salva carosello</button>
-          </div>
-          <ul className="space-y-1">
-            {(data.homePhotos || []).map((p) => (
-              <li key={p.id} className="flex items-center justify-between bg-white rounded-xl border p-2">
-                <span className="truncate mr-2 text-sm">{p.url}</span>
-                <button className="px-2 py-1 bg-gray-100 rounded" onClick={() => setData((prev) => ({ ...prev, homePhotos: prev.homePhotos.filter((x) => x.id !== p.id) }))}><Trash2 className="w-4 h-4" /></button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </Section>
-  );
-};
-
-/********************* README & TEST ************************/
-const ReadmeBox = () => (
-  <div className="text-xs text-gray-500 mt-8">
-    <div className="font-medium mb-1">Note di versione</div>
-    <ul className="list-disc pl-5 space-y-1">
-      <li>Nessuna modalità “anteprima”: l’accesso avviene solo con credenziali create in <b>Utenti</b>.</li>
-      <li>Hard lock: eventuali sessioni senza credenziali valide vengono invalidate automaticamente.</li>
-      <li>Eventi mensili: se creati il 31 → ricadono sull’ultimo giorno del mese successivo; il 30 rimane il 30.</li>
-      <li>Ruolo <b>Bimbo</b>: forzato PIN numerico; impostare in <b>Utenti</b>.</li>
-      <li>Sync Supabase usa tabella <code>kv(id text primary key, payload jsonb)</code>.</li>
-    </ul>
-  </div>
-);
-
-const DevTests = () => {
-  // semplici smoke tests (non bloccanti)
-  const [ok, setOk] = useState("eseguo...");
-  useEffect(() => {
-    try {
-      const a = instancesForDate([{ id: "1", titolo: "t", data: "2025-01-31", ripeti: { freq: "MONTHLY" } }], new Date("2025-02-28"));
-      const b = instancesForDate([{ id: "2", titolo: "t", data: "2025-04-30", ripeti: { freq: "MONTHLY" } }], new Date("2025-05-30"));
-      setOk(`ok (${a.length}/${b.length})`);
-    } catch (e) {
-      setOk("errore test");
-    }
-  }, []);
-  return (
-    <div className="text-[11px] text-gray-400 mt-6">DevTests: {ok}</div>
-  );
-};
-
-/********************* SUPABASE REST (opzionale) ************************/
-async function supaPull(cfg) {
-  try {
-    const url = `${cfg.url}/rest/v1/${cfg.table}?id=eq.${encodeURIComponent(cfg.recordId)}&select=payload`;
-    const r = await fetch(url, {
-      headers: {
-        apikey: cfg.anonKey,
-        Authorization: `Bearer ${cfg.anonKey}`,
-        Accept: "application/json",
-      },
-    });
-    if (!r.ok) return null;
-    const arr = await r.json();
-    const row = arr[0];
-    return row?.payload || null;
-  } catch {
-    return null;
-  }
 }
-async function supaPush(cfg, payload) {
-  try {
-    const url = `${cfg.url}/rest/v1/${cfg.table}`;
-    const r = await fetch(url, {
-      method: "POST",
-      headers: {
-        apikey: cfg.anonKey,
-        Authorization: `Bearer ${cfg.anonKey}`,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify([{ id: cfg.recordId, payload }]),
-    });
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
+
+export default FamilyHubApp;
