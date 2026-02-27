@@ -1,17 +1,20 @@
 // @ts-nocheck
 import React, { useState } from "react";
 
-// FAMILY HUB - Versione completa per anteprima
-// - Login (Admin/admin, Famiglia/famiglia)
-// - Tema chiaro / scuro
-// - Home con riepilogo di oggi (pasti, impegni, scadenze, spesa, compiti)
-// - Utenti con password, saldo paghetta, cambio password
-// - Calendario stile Google Calendar (lista / mese / settimana) CON ORA
-// - Scadenze assegnate a utente
-// - Dispensa con categorie + Lista spesa collegata
-// - Pasti & Pianificazione con griglia settimanale 7x5 e gestione ingredienti
-// - Compiti & paghette con storico movimenti e pagamenti liberi
-// - ToDo List con archivio
+// FAMILY HUB – versione stabile per Anteprima
+// Funzioni incluse (versione semplificata ma completa):
+// - Login con utenti demo (Admin/admin, Famiglia/famiglia)
+// - Tema chiaro/scuro
+// - Utenti con password, colore e avatar personalizzabili
+// - Home con riepilogo giorno e planner settimanale pasti (7×5 slot)
+// - Calendario stile Google (lista / settimana / mese) con ora, modifica e cancellazione
+// - Scadenze con assegnazione utente
+// - Dispensa con categorie (aggiungi/modifica/elimina) e prodotti
+// - Lista spesa collegata alla dispensa
+// - Pasti: piatti (tipologia + variante + ingredienti) + pianificazione che scala/ripristina dispensa
+// - Compiti & paghette: accredito al completamento, pagamenti liberi, annulla pagamento
+// - ToDo con archivio
+// - Impostazioni tema / notifiche (solo logica locale)
 
 // ----------------- Costanti & helper -----------------
 
@@ -31,7 +34,7 @@ const NAV_ITEMS = [
 const MEAL_TYPES = ["Antipasto", "Primo", "Secondo", "Contorno", "Dolce", "Altro"];
 const MEAL_SLOTS = ["Colazione", "II Colazione", "Pranzo", "Merenda", "Cena"];
 
-const slotOrder = {
+const slotOrder: any = {
   Colazione: 0,
   "II Colazione": 1,
   Pranzo: 2,
@@ -39,25 +42,23 @@ const slotOrder = {
   Cena: 4
 };
 
-const weekdayLabels = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
-
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function addDays(dateStr, days) {
+function addDays(dateStr: string, days: number) {
   const d = new Date(dateStr);
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
-function getWeekDates(anyDateStr) {
+function getWeekDates(anyDateStr: string) {
   const base = new Date(anyDateStr);
-  const day = base.getDay(); // 0=Sun..6=Sat
+  const day = base.getDay(); // 0=Dom..6=Sab
   const diffToMonday = day === 0 ? -6 : 1 - day;
   const monday = new Date(base);
   monday.setDate(base.getDate() + diffToMonday);
-  const res = [];
+  const res: string[] = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
@@ -66,12 +67,43 @@ function getWeekDates(anyDateStr) {
   return res;
 }
 
-function nextId(list) {
+function getMonthMatrix(dateStr: string) {
+  const base = new Date(dateStr);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const firstDay = firstOfMonth.getDay(); // 0=Dom
+  const diffToMonday = firstDay === 0 ? -6 : 1 - firstDay;
+  const gridStart = new Date(firstOfMonth);
+  gridStart.setDate(firstOfMonth.getDate() + diffToMonday);
+
+  const weeks: { date: string; inMonth: boolean }[][] = [];
+  for (let w = 0; w < 6; w++) {
+    const week: { date: string; inMonth: boolean }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const cur = new Date(gridStart);
+      cur.setDate(gridStart.getDate() + w * 7 + d);
+      week.push({
+        date: cur.toISOString().slice(0, 10),
+        inMonth: cur.getMonth() === month
+      });
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+function monthLabel(dateStr: string) {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("it-IT", { month: "long", year: "numeric" });
+}
+
+function nextId(list: { id: number }[]) {
   return list.length ? Math.max(...list.map(i => i.id)) + 1 : 1;
 }
 
-function parseIngredients(text) {
-  if (!text || !text.trim()) return [];
+function parseIngredients(text: string) {
+  if (!text || !text.trim()) return [] as { name: string; qty: number; unit: string }[];
   return text
     .split(";")
     .map(c => c.trim())
@@ -86,11 +118,31 @@ function parseIngredients(text) {
     .filter(i => i.name);
 }
 
+// Mini test interni per le utility
+console.assert(getWeekDates(todayStr()).length === 7, "getWeekDates deve restituire 7 giorni");
+console.assert(getMonthMatrix(todayStr()).length === 6, "getMonthMatrix deve avere 6 settimane");
+
 // ----------------- Dati iniziali -----------------
 
 const initialUsers = [
-  { id: 1, name: "Admin", role: "admin", balance: 0, password: "admin" },
-  { id: 2, name: "Famiglia", role: "adulto", balance: 0, password: "famiglia" }
+  {
+    id: 1,
+    name: "Admin",
+    role: "admin",
+    balance: 0,
+    password: "admin",
+    color: "#38bdf8",
+    avatarUrl: ""
+  },
+  {
+    id: 2,
+    name: "Famiglia",
+    role: "adulto",
+    balance: 0,
+    password: "famiglia",
+    color: "#f97316",
+    avatarUrl: ""
+  }
 ];
 
 const initialMeals = [
@@ -110,7 +162,7 @@ const initialCategories = ["Generico", "Fresco", "Dispensa", "Detersivi"];
 
 // ----------------- Layout helpers -----------------
 
-const baseStyles = {
+const baseStyles: any = {
   appShell: {
     minHeight: "100vh",
     padding: 16,
@@ -280,7 +332,7 @@ const baseStyles = {
 // ----------------- Component principale -----------------
 
 function FamilyHubApp() {
-  // Tema & impostazioni generali
+  // Tema & impostazioni
   const [settings, setSettings] = useState({
     theme: "dark",
     notifications: { email: true, whatsapp: true, popup: true }
@@ -335,6 +387,43 @@ function FamilyHubApp() {
           tableBorder: "#d1d5db"
         };
 
+  // Avatar utente
+  function renderAvatar(user: any, size: number = 32) {
+    if (!user) return null;
+    const letter = (user.name || "?").charAt(0).toUpperCase();
+    const color = user.color || "#38bdf8";
+    const dimension = size;
+    const commonStyle: React.CSSProperties = {
+      width: dimension,
+      height: dimension,
+      borderRadius: 999,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontWeight: 700,
+      fontSize: dimension * 0.45,
+      overflow: "hidden",
+      boxSizing: "border-box",
+      border: "2px solid " + color,
+      background: color,
+      color: "#f9fafb"
+    };
+
+    if (user.avatarUrl) {
+      return (
+        <div style={commonStyle}>
+          <img
+            src={user.avatarUrl}
+            alt={user.name}
+            style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 999 }}
+          />
+        </div>
+      );
+    }
+
+    return <div style={commonStyle}>{letter}</div>;
+  }
+
   // Navigazione & login
   const [activeNav, setActiveNav] = useState("Home");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -342,22 +431,28 @@ function FamilyHubApp() {
   const [loginError, setLoginError] = useState("");
 
   // Dati principali
-  const [users, setUsers] = useState(initialUsers);
+  const [users, setUsers] = useState(initialUsers as any[]);
   const [selectedUserId, setSelectedUserId] = useState(1);
+  const currentUser = users.find(u => u.id === selectedUserId) || users[0];
 
   // Calendario
-  const [calendarEvents, setCalendarEvents] = useState([]); // {id,title,date,time,userId}
+  const [calendarEvents, setCalendarEvents] = useState(
+    [] as { id: number; title: string; date: string; time?: string; userId: number }[]
+  );
   const [calendarForm, setCalendarForm] = useState({
+    id: null as any,
     title: "",
     date: todayStr(),
-    time: "18:00",
+    time: "",
     userId: 1
   });
-  const [calendarViewMode, setCalendarViewMode] = useState("month"); // list | month | week
+  const [calendarViewMode, setCalendarViewMode] = useState<"list" | "month" | "week">("month");
   const [calendarCurrentDate, setCalendarCurrentDate] = useState(todayStr());
 
   // Scadenze
-  const [deadlines, setDeadlines] = useState([]); // {id,title,date,userId}
+  const [deadlines, setDeadlines] = useState(
+    [] as { id: number; title: string; date: string; userId: number }[]
+  );
   const [deadlinesForm, setDeadlinesForm] = useState({
     title: "",
     date: todayStr(),
@@ -365,9 +460,14 @@ function FamilyHubApp() {
   });
 
   // Dispensa
-  const [categories, setCategories] = useState(initialCategories);
+  const [categories, setCategories] = useState(initialCategories as string[]);
   const [newCategory, setNewCategory] = useState("");
-  const [pantry, setPantry] = useState([]); // {id,name,qty,unit,category}
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+
+  const [pantry, setPantry] = useState(
+    [] as { id: number; name: string; qty: number; unit: string; category: string }[]
+  );
   const [pantryForm, setPantryForm] = useState({
     name: "",
     qty: 1,
@@ -376,63 +476,104 @@ function FamilyHubApp() {
   });
 
   // Lista spesa
-  const [shopping, setShopping] = useState([]); // {id,name,qty,unit,taken}
+  const [shopping, setShopping] = useState(
+    [] as { id: number; name: string; qty: number; unit: string; taken: boolean }[]
+  );
   const [shoppingForm, setShoppingForm] = useState({ name: "", qty: 1, unit: "pz" });
 
-  // Pasti
-  const [meals, setMeals] = useState(initialMeals); // {id,name,type,variant,ingredients[]}
+  // Pasti & pianificazione
+  const [meals, setMeals] = useState(initialMeals as any[]);
   const [mealForm, setMealForm] = useState({
+    id: null as any,
     name: "",
     type: MEAL_TYPES[0],
     variant: "",
     ingredientsText: ""
   });
-  const [editingMealId, setEditingMealId] = useState(null);
 
-  const [mealPlans, setMealPlans] = useState([]); // {id,date,userId,mealId,slot}
+  const [mealPlans, setMealPlans] = useState(
+    [] as { id: number; date: string; userId: number; mealId: number; slot: string }[]
+  );
   const [planForm, setPlanForm] = useState({
+    id: null as any,
     date: todayStr(),
     userId: 1,
     mealId: "",
     slot: "Pranzo"
   });
   const [planViewDate, setPlanViewDate] = useState(todayStr());
+  const [planTypeFilter, setPlanTypeFilter] = useState("");
 
   // Compiti & paghette
-  const [chores, setChores] = useState([]); // {id,title,deadline,userId,amount,done}
+  const [chores, setChores] = useState(
+    [] as {
+      id: number;
+      title: string;
+      deadline: string;
+      userId: number;
+      amount: number;
+      done: boolean;
+    }[]
+  );
   const [choresForm, setChoresForm] = useState({
     title: "",
     deadline: todayStr(),
     userId: 1,
     amount: 1
   });
-  const [transactions, setTransactions] = useState([]); // {id,userId,type,amount,date,note}
-  const [paymentInputs, setPaymentInputs] = useState({}); // userId -> string
+  const [transactions, setTransactions] = useState(
+    [] as {
+      id: number;
+      userId: number;
+      type: "accredito" | "pagamento";
+      amount: number;
+      date: string;
+      note?: string;
+    }[]
+  );
+  const [paymentInputs, setPaymentInputs] = useState({} as Record<number, string>);
 
   // ToDo
-  const [todos, setTodos] = useState([]); // {id,title,userId,done}
+  const [todos, setTodos] = useState(
+    [] as { id: number; title: string; userId: number; done: boolean }[]
+  );
   const [todoForm, setTodoForm] = useState({ title: "", userId: 1 });
   const [showCompletedTodos, setShowCompletedTodos] = useState(false);
 
-  // Gestione utenti & password
-  const [newUser, setNewUser] = useState({ name: "", role: "adulto", password: "" });
+  // Utenti & password
+  const [newUser, setNewUser] = useState({
+    name: "",
+    role: "adulto",
+    password: "",
+    color: "#38bdf8",
+    avatarUrl: ""
+  });
   const [selfPwdForm, setSelfPwdForm] = useState({ newPwd: "", confirm: "" });
-  const [adminPwdEdits, setAdminPwdEdits] = useState({});
+  const [adminPwdEdits, setAdminPwdEdits] = useState({} as Record<number, string>);
 
-  const currentUser = users.find(u => u.id === selectedUserId) || users[0];
+  // --- funzioni comuni ---
 
-  function getUserName(id) {
+  function getUserName(id: number) {
     const u = users.find(x => x.id === id);
     return u ? u.name : "Sconosciuto";
   }
 
-  function getMealFullName(id) {
-    const m = meals.find(x => x.id === id);
+  function getMealFullName(id: number) {
+    const m = meals.find((x: any) => x.id === id);
     if (!m) return "";
     return m.variant ? m.name + " (" + m.variant + ")" : m.name;
   }
 
-  function adjustPantryForIngredients(ings, factor) {
+  function updateUserBalance(userId: number, delta: number) {
+    setUsers(prev =>
+      prev.map(u => (u.id === userId ? { ...u, balance: (u.balance || 0) + delta } : u))
+    );
+  }
+
+  function adjustPantryForIngredients(
+    ings: { name: string; qty: number; unit: string }[],
+    factor: number
+  ) {
     if (!ings || !ings.length) return;
     setPantry(prev => {
       const next = [...prev];
@@ -461,7 +602,6 @@ function FamilyHubApp() {
     });
   }
 
-  // --- Dati Home ---
   const today = todayStr();
   const todayMeals = mealPlans
     .filter(p => p.date === today)
@@ -561,7 +701,9 @@ function FamilyHubApp() {
             />
           </div>
           <div style={baseStyles.formRow}>
-            <label style={{ ...baseStyles.label, color: palette.textMuted }}>Password</label>
+            <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+              Password
+            </label>
             <input
               type="password"
               style={{
@@ -575,9 +717,7 @@ function FamilyHubApp() {
             />
           </div>
           {loginError && (
-            <div style={{ color: "#f97373", fontSize: 12, marginBottom: 8 }}>
-              {loginError}
-            </div>
+            <div style={{ color: "#f97373", fontSize: 12, marginBottom: 8 }}>{loginError}</div>
           )}
           <button
             onClick={handleLogin}
@@ -602,6 +742,15 @@ function FamilyHubApp() {
   // ----------------- Home -----------------
 
   function renderHome() {
+    const weekDates = getWeekDates(today);
+    const plansByKey: any = {};
+    mealPlans.forEach(p => {
+      if (!weekDates.includes(p.date)) return;
+      const key = p.date + "|" + p.slot;
+      if (!plansByKey[key]) plansByKey[key] = [];
+      plansByKey[key].push(p);
+    });
+
     return (
       <div>
         <h2 style={baseStyles.pageTitle}>Dashboard</h2>
@@ -623,7 +772,7 @@ function FamilyHubApp() {
             }}
           >
             <div style={baseStyles.cardHeaderRow}>
-              <span style={baseStyles.cardTitle}>Pasti di oggi</span>
+              <span style={baseStyles.cardTitle}>Saldi paghette</span>
               <span
                 style={{
                   ...baseStyles.tag,
@@ -634,18 +783,30 @@ function FamilyHubApp() {
                 {today}
               </span>
             </div>
-            {todayMeals.length === 0 ? (
+            {users.length === 0 ? (
               <p style={{ fontSize: 13, color: palette.textMuted }}>
-                Nessun pasto pianificato.
+                Nessun utente configurato.
               </p>
             ) : (
-              <ul style={{ paddingLeft: 18, fontSize: 13 }}>
-                {todayMeals.map(p => (
-                  <li key={p.id}>
-                    <strong>{p.slot}</strong>: {getMealFullName(p.mealId)}{" "}
-                    <span style={{ color: palette.textMuted }}>
-                      ({getUserName(p.userId)})
-                    </span>
+              <ul
+                style={{
+                  listStyle: "none",
+                  padding: 0,
+                  margin: 0,
+                  fontSize: 13
+                }}
+              >
+                {users.map(u => (
+                  <li
+                    key={u.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginBottom: 2
+                    }}
+                  >
+                    <span>{u.name}</span>
+                    <span>{Number(u.balance || 0).toFixed(2)} €</span>
                   </li>
                 ))}
               </ul>
@@ -656,7 +817,8 @@ function FamilyHubApp() {
             style={{
               ...baseStyles.card,
               background: palette.cardBg,
-              border: "1px solid " + palette.cardBorder
+              border: "1px solid " + palette.cardBorder,
+              gridColumn: "span 2"
             }}
           >
             <div style={baseStyles.cardHeaderRow}>
@@ -776,6 +938,119 @@ function FamilyHubApp() {
               Compiti da completare
             </p>
           </div>
+
+          {/* Planner pasti settimanale a tutta larghezza */}
+          <div
+            style={{
+              ...baseStyles.card,
+              background: palette.cardBg,
+              border: "1px solid " + palette.cardBorder,
+              gridColumn: "1 / -1"
+            }}
+          >
+            <div style={baseStyles.cardHeaderRow}>
+              <span style={baseStyles.cardTitle}>Settimana pasti</span>
+              <span
+                style={{
+                  ...baseStyles.tag,
+                  background: palette.tagBg,
+                  color: palette.textMuted
+                }}
+              >
+                {weekDates[0]} - {weekDates[6]}
+              </span>
+            </div>
+            <div style={{ maxHeight: 420, overflow: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 12,
+                  border: "1px solid " + palette.tableBorder,
+                  tableLayout: "fixed"
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        padding: 6,
+                        borderBottom: "1px solid " + palette.tableBorder,
+                        background: palette.tableHeaderBg,
+                        width: 90,
+                        textAlign: "left"
+                      }}
+                    >
+                      Pasto
+                    </th>
+                    {weekDates.map(d => (
+                      <th
+                        key={d}
+                        style={{
+                          padding: 6,
+                          borderBottom: "1px solid " + palette.tableBorder,
+                          background: palette.tableHeaderBg,
+                          textAlign: "center"
+                        }}
+                      >
+                        {new Date(d).toLocaleDateString("it-IT", {
+                          weekday: "short",
+                          day: "2-digit"
+                        })}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {MEAL_SLOTS.map(slot => (
+                    <tr key={slot}>
+                      <td
+                        style={{
+                          border: "1px solid " + palette.tableBorder,
+                          padding: 6,
+                          fontWeight: 600,
+                          position: "sticky",
+                          left: 0,
+                          background: palette.cardBg,
+                          zIndex: 1
+                        }}
+                      >
+                        {slot}
+                      </td>
+                      {weekDates.map(d => {
+                        const key = d + "|" + slot;
+                        const list = plansByKey[key] || [];
+                        return (
+                          <td
+                            key={d + "-" + slot}
+                            style={{
+                              border: "1px solid " + palette.tableBorder,
+                              padding: 6,
+                              verticalAlign: "top",
+                              wordWrap: "break-word"
+                            }}
+                          >
+                            {list.length === 0 ? (
+                              <span style={{ color: palette.textMuted }}>-</span>
+                            ) : (
+                              list.map(p => (
+                                <div key={p.id} style={{ marginBottom: 2 }}>
+                                  {getMealFullName(p.mealId)}{" "}
+                                  <span style={{ color: palette.textMuted }}>
+                                    ({getUserName(p.userId)})
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -795,13 +1070,15 @@ function FamilyHubApp() {
           name: newUser.name.trim(),
           role: newUser.role,
           balance: 0,
-          password: newUser.password || ""
+          password: newUser.password || "",
+          color: newUser.color || "#38bdf8",
+          avatarUrl: newUser.avatarUrl || ""
         }
       ]);
-      setNewUser({ name: "", role: "adulto", password: "" });
+      setNewUser({ name: "", role: "adulto", password: "", color: "#38bdf8", avatarUrl: "" });
     }
 
-    function deleteUser(id) {
+    function deleteUser(id: number) {
       if (!canAdmin) return;
       if (users.length === 1) return;
       setUsers(prev => prev.filter(u => u.id !== id));
@@ -811,7 +1088,7 @@ function FamilyHubApp() {
       }
     }
 
-    function forcePassword(userId) {
+    function forcePassword(userId: number) {
       const pwd = adminPwdEdits[userId];
       if (!pwd) return;
       setUsers(prev => prev.map(u => (u.id === userId ? { ...u, password: pwd } : u)));
@@ -826,11 +1103,15 @@ function FamilyHubApp() {
       setSelfPwdForm({ newPwd: "", confirm: "" });
     }
 
+    function updateCurrentUserStyle(field: "color" | "avatarUrl", value: string) {
+      setUsers(prev => prev.map(u => (u.id === currentUser.id ? { ...u, [field]: value } : u)));
+    }
+
     return (
       <div>
         <h2 style={baseStyles.pageTitle}>Utenti</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Gestisci utenti, ruoli, password e saldo paghetta.
+          Gestisci utenti, ruoli, password, colore e immagine del profilo.
         </p>
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
@@ -868,16 +1149,15 @@ function FamilyHubApp() {
                         : settings.theme === "dark"
                         ? "rgba(15,23,42,0.9)"
                         : "#f3f4f6",
-                    border: "1px solid " + palette.cardBorder
+                    border: "1px solid " + palette.cardBorder,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8
                   }}
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between"
-                    }}
-                  >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {renderAvatar(u, 32)}
                     <div>
                       <div>
                         <strong>{u.name}</strong>{" "}
@@ -886,64 +1166,36 @@ function FamilyHubApp() {
                         </span>
                       </div>
                       <div style={{ fontSize: 12, color: palette.textMuted }}>
-                        Saldo paghetta: {u.balance.toFixed(2)} €
+                        Saldo paghetta: {Number(u.balance || 0).toFixed(2)} €
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button
-                        style={{
-                          ...baseStyles.ghostButton,
-                          borderColor: palette.buttonGhostBorder,
-                          color: palette.appText
-                        }}
-                        onClick={() => setSelectedUserId(u.id)}
-                      >
-                        Attiva
-                      </button>
-                      {canAdmin && u.role !== "admin" && (
-                        <button
-                          style={{
-                            ...baseStyles.ghostButton,
-                            borderColor: palette.buttonGhostBorder,
-                            color: palette.appText
-                          }}
-                          onClick={() => deleteUser(u.id)}
-                        >
-                          Elimina
-                        </button>
-                      )}
-                    </div>
                   </div>
-                  {canAdmin && (
-                    <div style={{ marginTop: 6 }}>
-                      <input
-                        type="password"
-                        placeholder="Nuova password (admin)"
-                        style={{
-                          ...baseStyles.input,
-                          fontSize: 12,
-                          background: palette.inputBg,
-                          borderColor: palette.inputBorder,
-                          color: palette.appText
-                        }}
-                        value={adminPwdEdits[u.id] || ""}
-                        onChange={e =>
-                          setAdminPwdEdits(prev => ({ ...prev, [u.id]: e.target.value }))
-                        }
-                      />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <button
+                      style={{
+                        ...baseStyles.ghostButton,
+                        borderColor: palette.buttonGhostBorder,
+                        color: palette.appText,
+                        marginRight: 0
+                      }}
+                      onClick={() => setSelectedUserId(u.id)}
+                    >
+                      Attiva
+                    </button>
+                    {canAdmin && u.role !== "admin" && (
                       <button
                         style={{
                           ...baseStyles.ghostButton,
-                          marginTop: 4,
                           borderColor: palette.buttonGhostBorder,
-                          color: palette.appText
+                          color: palette.appText,
+                          marginRight: 0
                         }}
-                        onClick={() => forcePassword(u.id)}
+                        onClick={() => deleteUser(u.id)}
                       >
-                        Forza password
+                        Elimina
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -954,7 +1206,8 @@ function FamilyHubApp() {
               style={{
                 ...baseStyles.card,
                 background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
+                border: "1px solid " + palette.cardBorder,
+                marginBottom: 12
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
@@ -1006,6 +1259,38 @@ function FamilyHubApp() {
                   onChange={e => setNewUser(p => ({ ...p, password: e.target.value }))}
                 />
               </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  Colore profilo
+                </label>
+                <input
+                  type="color"
+                  style={{
+                    ...baseStyles.input,
+                    padding: 0,
+                    height: 32,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder
+                  }}
+                  value={newUser.color}
+                  onChange={e => setNewUser(p => ({ ...p, color: e.target.value }))}
+                />
+              </div>
+              <div style={baseStyles.formRow}>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                  URL immagine profilo (opzionale)
+                </label>
+                <input
+                  style={{
+                    ...baseStyles.input,
+                    background: palette.inputBg,
+                    borderColor: palette.inputBorder,
+                    color: palette.appText
+                  }}
+                  value={newUser.avatarUrl}
+                  onChange={e => setNewUser(p => ({ ...p, avatarUrl: e.target.value }))}
+                />
+              </div>
               <button
                 style={{
                   ...baseStyles.primaryButton,
@@ -1026,59 +1311,135 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Cambia la tua password</span>
-                <span
+                <span style={baseStyles.cardTitle}>Password</span>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 13, marginBottom: 4 }}>Cambio password personale</div>
+                <div style={baseStyles.formRow}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Nuova password
+                  </label>
+                  <input
+                    type="password"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={selfPwdForm.newPwd}
+                    onChange={e =>
+                      setSelfPwdForm(f => ({ ...f, newPwd: e.target.value }))
+                    }
+                  />
+                </div>
+                <div style={baseStyles.formRow}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Conferma password
+                  </label>
+                  <input
+                    type="password"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={selfPwdForm.confirm}
+                    onChange={e =>
+                      setSelfPwdForm(f => ({ ...f, confirm: e.target.value }))
+                    }
+                  />
+                </div>
+                <button
                   style={{
-                    ...baseStyles.tag,
-                    background: palette.tagBg,
-                    color: palette.textMuted
+                    ...baseStyles.primaryButton,
+                    background: palette.buttonPrimaryBg,
+                    color: palette.buttonPrimaryText
                   }}
+                  onClick={changeOwnPassword}
                 >
-                  {currentUser.name}
-                </span>
+                  Aggiorna password
+                </button>
               </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
-                  Nuova password
-                </label>
-                <input
-                  type="password"
-                  style={{
-                    ...baseStyles.input,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={selfPwdForm.newPwd}
-                  onChange={e => setSelfPwdForm(p => ({ ...p, newPwd: e.target.value }))}
-                />
+              {canAdmin && (
+                <div>
+                  <div style={{ fontSize: 13, marginBottom: 4 }}>Forza password (admin)</div>
+                  {users.map(u => (
+                    <div key={u.id} style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 12, marginBottom: 2 }}>{u.name}</div>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <input
+                          type="password"
+                          style={{
+                            ...baseStyles.input,
+                            background: palette.inputBg,
+                            borderColor: palette.inputBorder,
+                            color: palette.appText,
+                            flex: 1
+                          }}
+                          value={adminPwdEdits[u.id] || ""}
+                          onChange={e =>
+                            setAdminPwdEdits(prev => ({
+                              ...prev,
+                              [u.id]: e.target.value
+                            }))
+                          }
+                        />
+                        <button
+                          style={{
+                            ...baseStyles.primaryButton,
+                            background: palette.buttonPrimaryBg,
+                            color: palette.buttonPrimaryText
+                          }}
+                          onClick={() => forcePassword(u.id)}
+                        >
+                          Salva
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <hr style={{ margin: "10px 0", borderColor: palette.cardBorder }} />
+              <div>
+                <div style={{ fontSize: 13, marginBottom: 4 }}>
+                  Personalizzazione utente attivo
+                </div>
+                <div style={baseStyles.formRow}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Colore profilo
+                  </label>
+                  <input
+                    type="color"
+                    style={{
+                      ...baseStyles.input,
+                      padding: 0,
+                      height: 32,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder
+                    }}
+                    value={currentUser.color}
+                    onChange={e => updateCurrentUserStyle("color", e.target.value)}
+                  />
+                </div>
+                <div style={baseStyles.formRow}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    URL immagine profilo
+                  </label>
+                  <input
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={currentUser.avatarUrl || ""}
+                    onChange={e => updateCurrentUserStyle("avatarUrl", e.target.value)}
+                  />
+                </div>
               </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
-                  Conferma
-                </label>
-                <input
-                  type="password"
-                  style={{
-                    ...baseStyles.input,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={selfPwdForm.confirm}
-                  onChange={e => setSelfPwdForm(p => ({ ...p, confirm: e.target.value }))}
-                />
-              </div>
-              <button
-                style={{
-                  ...baseStyles.primaryButton,
-                  background: palette.buttonPrimaryBg,
-                  color: palette.buttonPrimaryText
-                }}
-                onClick={changeOwnPassword}
-              >
-                Aggiorna password
-              </button>
             </div>
           </div>
         </div>
@@ -1089,86 +1450,287 @@ function FamilyHubApp() {
   // ----------------- Calendario -----------------
 
   function renderCalendar() {
-    const sorted = [...calendarEvents].sort((a, b) => {
+    function saveEvent() {
+      if (!calendarForm.title.trim()) return;
+      if (calendarForm.id) {
+        setCalendarEvents(prev =>
+          prev.map(e =>
+            e.id === calendarForm.id
+              ? {
+                  ...e,
+                  title: calendarForm.title.trim(),
+                  date: calendarForm.date,
+                  time: calendarForm.time,
+                  userId: calendarForm.userId
+                }
+              : e
+          )
+        );
+      } else {
+        setCalendarEvents(prev => [
+          ...prev,
+          {
+            id: nextId(prev),
+            title: calendarForm.title.trim(),
+            date: calendarForm.date,
+            time: calendarForm.time,
+            userId: calendarForm.userId
+          }
+        ]);
+      }
+      setCalendarForm({ id: null as any, title: "", date: todayStr(), time: "", userId: 1 });
+    }
+
+    function editEvent(ev: any) {
+      setCalendarForm({
+        id: ev.id,
+        title: ev.title,
+        date: ev.date,
+        time: ev.time || "",
+        userId: ev.userId
+      });
+    }
+
+    function deleteEvent(id: number) {
+      setCalendarEvents(prev => prev.filter(e => e.id !== id));
+      if (calendarForm.id === id) {
+        setCalendarForm({
+          id: null as any,
+          title: "",
+          date: todayStr(),
+          time: "",
+          userId: 1
+        });
+      }
+    }
+
+    const eventsSorted = [...calendarEvents].sort((a, b) => {
       if (a.date !== b.date) return a.date.localeCompare(b.date);
       return (a.time || "").localeCompare(b.time || "");
     });
 
-    const eventsByDate = {};
-    calendarEvents.forEach(ev => {
-      if (!eventsByDate[ev.date]) eventsByDate[ev.date] = [];
-      eventsByDate[ev.date].push(ev);
-    });
-    Object.keys(eventsByDate).forEach(d => {
-      eventsByDate[d].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-    });
-
-    const current = new Date(calendarCurrentDate);
-    const year = current.getFullYear();
-    const month = current.getMonth();
-
-    const firstOfMonth = new Date(year, month, 1);
-    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0=Mon..6=Sun
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-    const monthWeeks = [];
-    let dayCounter = 1 - firstWeekday;
-    for (let w = 0; w < 6; w++) {
-      const weekRow = [];
-      for (let d = 0; d < 7; d++) {
-        if (dayCounter < 1 || dayCounter > daysInMonth) {
-          weekRow.push(null);
-        } else {
-          const dateObj = new Date(year, month, dayCounter);
-          weekRow.push(dateObj.toISOString().slice(0, 10));
-        }
-        dayCounter++;
-      }
-      monthWeeks.push(weekRow);
-    }
-
     const weekDates = getWeekDates(calendarCurrentDate);
+    const monthMatrix = getMonthMatrix(calendarCurrentDate);
 
-    function changeMonth(delta) {
-      const d = new Date(calendarCurrentDate);
-      d.setMonth(d.getMonth() + delta);
-      setCalendarCurrentDate(d.toISOString().slice(0, 10));
+    function renderListView() {
+      return (
+        <div style={{ fontSize: 13 }}>
+          {eventsSorted.length === 0 ? (
+            <p style={{ color: palette.textMuted }}>Nessun impegno in calendario.</p>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {eventsSorted.map(ev => (
+                <li
+                  key={ev.id}
+                  style={{
+                    padding: 6,
+                    borderRadius: 8,
+                    border: "1px solid " + palette.cardBorder,
+                    marginBottom: 4,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}
+                >
+                  <div>
+                    <div>
+                      <strong>
+                        {ev.date} {ev.time ? `- ${ev.time}` : ""}
+                      </strong>
+                    </div>
+                    <div>{ev.title}</div>
+                    <div style={{ color: palette.textMuted }}>
+                      {getUserName(ev.userId)}
+                    </div>
+                  </div>
+                  <div>
+                    <button
+                      style={{
+                        ...baseStyles.ghostButton,
+                        borderColor: palette.buttonGhostBorder,
+                        color: palette.appText
+                      }}
+                      onClick={() => editEvent(ev)}
+                    >
+                      Modifica
+                    </button>
+                    <button
+                      style={{
+                        ...baseStyles.ghostButton,
+                        borderColor: palette.buttonGhostBorder,
+                        color: palette.appText
+                      }}
+                      onClick={() => deleteEvent(ev.id)}
+                    >
+                      Elimina
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      );
     }
 
-    function changeWeek(delta) {
-      setCalendarCurrentDate(addDays(calendarCurrentDate, delta * 7));
-    }
-
-    function addEvent() {
-      if (!calendarForm.title.trim()) return;
-      setCalendarEvents(prev => [
-        ...prev,
-        {
-          id: nextId(prev),
-          title: calendarForm.title.trim(),
-          date: calendarForm.date,
-          time: calendarForm.time || "",
-          userId: Number(calendarForm.userId)
+    function renderWeekView() {
+      const byDay: Record<string, any[]> = {};
+      weekDates.forEach(d => {
+        byDay[d] = [];
+      });
+      calendarEvents.forEach(ev => {
+        if (weekDates.includes(ev.date)) {
+          byDay[ev.date].push(ev);
         }
-      ]);
-      setCalendarForm(f => ({ ...f, title: "" }));
+      });
+      Object.keys(byDay).forEach(d => {
+        byDay[d].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+      });
+
+      return (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(7,1fr)",
+            gap: 8,
+            fontSize: 12
+          }}
+        >
+          {weekDates.map(d => (
+            <div
+              key={d}
+              style={{
+                borderRadius: 10,
+                border: "1px solid " + palette.cardBorder,
+                padding: 6,
+                background: palette.cardBg
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                {new Date(d).toLocaleDateString("it-IT", {
+                  weekday: "short",
+                  day: "2-digit",
+                  month: "2-digit"
+                })}
+              </div>
+              {byDay[d].length === 0 ? (
+                <div style={{ color: palette.textMuted }}>Nessun impegno</div>
+              ) : (
+                byDay[d].map(ev => (
+                  <div
+                    key={ev.id}
+                    style={{
+                      marginBottom: 4,
+                      padding: 4,
+                      borderRadius: 6,
+                      border: "1px solid " + palette.cardBorder,
+                      cursor: "pointer"
+                    }}
+                    onClick={() => editEvent(ev)}
+                  >
+                    <div>
+                      <strong>{ev.time || ""}</strong> {ev.title}
+                    </div>
+                    <div style={{ color: palette.textMuted }}>
+                      {getUserName(ev.userId)}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ))}
+        </div>
+      );
     }
 
-    function removeEvent(id) {
-      setCalendarEvents(prev => prev.filter(e => e.id !== id));
+    function renderMonthView() {
+      const matrix = monthMatrix;
+      return (
+        <div style={{ fontSize: 11 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
+            {["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"].map(d => (
+              <div
+                key={d}
+                style={{
+                  textAlign: "center",
+                  fontWeight: 600,
+                  marginBottom: 4,
+                  color: palette.textMuted
+                }}
+              >
+                {d}
+              </div>
+            ))}
+          </div>
+          {matrix.map((week, wi) => (
+            <div
+              key={wi}
+              style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}
+            >
+              {week.map(day => {
+                const dayEvents = calendarEvents
+                  .filter(ev => ev.date === day.date)
+                  .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+                return (
+                  <div
+                    key={day.date}
+                    style={{
+                      minHeight: 70,
+                      borderRadius: 10,
+                      border: "1px solid " + palette.cardBorder,
+                      padding: 4,
+                      background: day.inMonth ? palette.cardBg : "transparent",
+                      opacity: day.inMonth ? 1 : 0.4
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        marginBottom: 2,
+                        fontSize: 11,
+                        textAlign: "right"
+                      }}
+                    >
+                      {new Date(day.date).getDate()}
+                    </div>
+                    {dayEvents.slice(0, 3).map(ev => (
+                      <div
+                        key={ev.id}
+                        style={{
+                          fontSize: 10,
+                          marginBottom: 1,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          cursor: "pointer"
+                        }}
+                        onClick={() => editEvent(ev)}
+                      >
+                        {ev.time ? ev.time + " " : ""}
+                        {ev.title}
+                      </div>
+                    ))}
+                    {dayEvents.length > 3 && (
+                      <div style={{ fontSize: 10, color: palette.textMuted }}>
+                        +{dayEvents.length - 3} altri
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      );
     }
-
-    const monthLabel = current.toLocaleDateString("it-IT", {
-      month: "long",
-      year: "numeric"
-    });
 
     return (
       <div>
         <h2 style={baseStyles.pageTitle}>Calendario</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Vista stile Google Calendar: mensile, settimanale o lista. Ogni impegno ha anche l'ora.
+          Calendario stile Google, con vista lista, settimana e mese.
         </p>
+
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
             <div
@@ -1179,7 +1741,9 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Nuovo impegno</span>
+                <span style={baseStyles.cardTitle}>
+                  {calendarForm.id ? "Modifica impegno" : "Nuovo impegno"}
+                </span>
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>Titolo</label>
@@ -1191,36 +1755,44 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={calendarForm.title}
-                  onChange={e => setCalendarForm(f => ({ ...f, title: e.target.value }))}
+                  onChange={e =>
+                    setCalendarForm(f => ({ ...f, title: e.target.value }))
+                  }
                 />
               </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Data</label>
-                <input
-                  type="date"
-                  style={{
-                    ...baseStyles.input,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={calendarForm.date}
-                  onChange={e => setCalendarForm(f => ({ ...f, date: e.target.value }))}
-                />
-              </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Ora</label>
-                <input
-                  type="time"
-                  style={{
-                    ...baseStyles.input,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={calendarForm.time}
-                  onChange={e => setCalendarForm(f => ({ ...f, time: e.target.value }))}
-                />
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Data</label>
+                  <input
+                    type="date"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={calendarForm.date}
+                    onChange={e =>
+                      setCalendarForm(f => ({ ...f, date: e.target.value }))
+                    }
+                  />
+                </div>
+                <div style={{ ...baseStyles.formRow, width: 120 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Ora</label>
+                  <input
+                    type="time"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={calendarForm.time}
+                    onChange={e =>
+                      setCalendarForm(f => ({ ...f, time: e.target.value }))
+                    }
+                  />
+                </div>
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
@@ -1249,325 +1821,29 @@ function FamilyHubApp() {
                   background: palette.buttonPrimaryBg,
                   color: palette.buttonPrimaryText
                 }}
-                onClick={addEvent}
+                onClick={saveEvent}
               >
-                Aggiungi impegno
+                Salva
               </button>
-            </div>
-
-            <div
-              style={{
-                ...baseStyles.card,
-                background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
-              }}
-            >
-              <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Vista</span>
-                <span
-                  style={{
-                    ...baseStyles.tag,
-                    background: palette.tagBg,
-                    color: palette.textMuted
-                  }}
-                >
-                  {calendarViewMode}
-                </span>
-              </div>
-              <div style={{ marginBottom: 8, display: "flex", gap: 6 }}>
+              {calendarForm.id && (
                 <button
                   style={{
                     ...baseStyles.ghostButton,
                     borderColor: palette.buttonGhostBorder,
-                    color: palette.appText,
-                    background:
-                      calendarViewMode === "list" ? palette.navActiveBg : "transparent"
+                    color: palette.appText
                   }}
-                  onClick={() => setCalendarViewMode("list")}
+                  onClick={() =>
+                    setCalendarForm({
+                      id: null as any,
+                      title: "",
+                      date: todayStr(),
+                      time: "",
+                      userId: 1
+                    })
+                  }
                 >
-                  Lista
+                  Annulla modifica
                 </button>
-                <button
-                  style={{
-                    ...baseStyles.ghostButton,
-                    borderColor: palette.buttonGhostBorder,
-                    color: palette.appText,
-                    background:
-                      calendarViewMode === "month" ? palette.navActiveBg : "transparent"
-                  }}
-                  onClick={() => setCalendarViewMode("month")}
-                >
-                  Mese
-                </button>
-                <button
-                  style={{
-                    ...baseStyles.ghostButton,
-                    borderColor: palette.buttonGhostBorder,
-                    color: palette.appText,
-                    background:
-                      calendarViewMode === "week" ? palette.navActiveBg : "transparent"
-                  }}
-                  onClick={() => setCalendarViewMode("week")}
-                >
-                  Settimana
-                </button>
-              </div>
-
-              {calendarViewMode === "list" && (
-                <div
-                  style={{
-                    maxHeight: 260,
-                    overflow: "auto",
-                    fontSize: 13,
-                    borderTop: "1px solid " + palette.cardBorder,
-                    paddingTop: 6
-                  }}
-                >
-                  {sorted.length === 0 ? (
-                    <p style={{ color: palette.textMuted }}>
-                      Nessun impegno inserito.
-                    </p>
-                  ) : (
-                    <ul style={{ paddingLeft: 18 }}>
-                      {sorted.map(e => (
-                        <li key={e.id} style={{ marginBottom: 4 }}>
-                          <strong>
-                            {e.date} {e.time}
-                          </strong>{" "}
-                          - {e.title}{" "}
-                          <span style={{ color: palette.textMuted }}>
-                            ({getUserName(e.userId)})
-                          </span>
-                          <button
-                            style={{
-                              ...baseStyles.ghostButton,
-                              marginLeft: 6,
-                              borderColor: palette.buttonGhostBorder,
-                              color: palette.appText
-                            }}
-                            onClick={() => removeEvent(e.id)}
-                          >
-                            X
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-
-              {calendarViewMode === "month" && (
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 6
-                    }}
-                  >
-                    <button
-                      style={{
-                        ...baseStyles.ghostButton,
-                        borderColor: palette.buttonGhostBorder,
-                        color: palette.appText
-                      }}
-                      onClick={() => changeMonth(-1)}
-                    >
-                      ←
-                    </button>
-                    <span style={{ fontSize: 13 }}>{monthLabel}</span>
-                    <button
-                      style={{
-                        ...baseStyles.ghostButton,
-                        borderColor: palette.buttonGhostBorder,
-                        color: palette.appText
-                      }}
-                      onClick={() => changeMonth(1)}
-                    >
-                      →
-                    </button>
-                  </div>
-                  <table
-                    style={{
-                      width: "100%",
-                      borderCollapse: "collapse",
-                      fontSize: 11,
-                      border: "1px solid " + palette.tableBorder
-                    }}
-                  >
-                    <thead>
-                      <tr>
-                        {weekdayLabels.map(d => (
-                          <th
-                            key={d}
-                            style={{
-                              padding: 4,
-                              borderBottom: "1px solid " + palette.tableBorder,
-                              background: palette.tableHeaderBg,
-                              textAlign: "center"
-                            }}
-                          >
-                            {d}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monthWeeks.map((week, wi) => (
-                        <tr key={wi}>
-                          {week.map((dateStr, di) => {
-                            if (!dateStr) {
-                              return (
-                                <td
-                                  key={wi + "-" + di}
-                                  style={{
-                                    border: "1px solid " + palette.tableBorder,
-                                    height: 60,
-                                    verticalAlign: "top"
-                                  }}
-                                />
-                              );
-                            }
-                            const isToday = dateStr === today;
-                            const dayNum = new Date(dateStr).getDate();
-                            const evs = eventsByDate[dateStr] || [];
-                            return (
-                              <td
-                                key={wi + "-" + di}
-                                style={{
-                                  border: "1px solid " + palette.tableBorder,
-                                  padding: 4,
-                                  verticalAlign: "top",
-                                  background: isToday
-                                    ? settings.theme === "dark"
-                                      ? "rgba(56,189,248,0.15)"
-                                      : "#e0f2fe"
-                                    : "transparent"
-                                }}
-                              >
-                                <div style={{ fontSize: 11, marginBottom: 2 }}>{dayNum}</div>
-                                {evs.map(ev => (
-                                  <div
-                                    key={ev.id}
-                                    style={{
-                                      fontSize: 10,
-                                      padding: "1px 3px",
-                                      borderRadius: 4,
-                                      background:
-                                        settings.theme === "dark"
-                                          ? "rgba(59,130,246,0.4)"
-                                          : "#dbeafe",
-                                      marginBottom: 2,
-                                      cursor: "pointer"
-                                    }}
-                                    title={ev.title + " (" + getUserName(ev.userId) + ")"}
-                                  >
-                                    {ev.time ? ev.time + " " : ""}
-                                    {ev.title}
-                                  </div>
-                                ))}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {calendarViewMode === "week" && (
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 6
-                    }}
-                  >
-                    <button
-                      style={{
-                        ...baseStyles.ghostButton,
-                        borderColor: palette.buttonGhostBorder,
-                        color: palette.appText
-                      }}
-                      onClick={() => changeWeek(-1)}
-                    >
-                      ←
-                    </button>
-                    <span style={{ fontSize: 13 }}>
-                      Settimana di {weekDates[0]} - {weekDates[6]}
-                    </span>
-                    <button
-                      style={{
-                        ...baseStyles.ghostButton,
-                        borderColor: palette.buttonGhostBorder,
-                        color: palette.appText
-                      }}
-                      onClick={() => changeWeek(1)}
-                    >
-                      →
-                    </button>
-                  </div>
-                  <div style={{ fontSize: 12 }}>
-                    {weekDates.map(d => {
-                      const label = new Date(d).toLocaleDateString("it-IT", {
-                        weekday: "short",
-                        day: "2-digit",
-                        month: "2-digit"
-                      });
-                      const evs = (eventsByDate[d] || []).sort((a, b) =>
-                        (a.time || "").localeCompare(b.time || "")
-                      );
-                      return (
-                        <div
-                          key={d}
-                          style={{
-                            borderBottom: "1px solid " + palette.cardBorder,
-                            padding: "4px 0"
-                          }}
-                        >
-                          <div style={{ fontWeight: 600 }}>{label}</div>
-                          {evs.length === 0 ? (
-                            <div style={{ color: palette.textMuted }}>Nessun impegno</div>
-                          ) : (
-                            evs.map(ev => (
-                              <div
-                                key={ev.id}
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  marginTop: 2
-                                }}
-                              >
-                                <span>
-                                  {ev.time ? ev.time + " - " : ""}
-                                  {ev.title}{" "}
-                                  <span style={{ color: palette.textMuted }}>
-                                    ({getUserName(ev.userId)})
-                                  </span>
-                                </span>
-                                <button
-                                  style={{
-                                    ...baseStyles.ghostButton,
-                                    borderColor: palette.buttonGhostBorder,
-                                    color: palette.appText
-                                  }}
-                                  onClick={() => removeEvent(ev.id)}
-                                >
-                                  X
-                                </button>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
               )}
             </div>
           </div>
@@ -1581,27 +1857,116 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Impegni futuri</span>
+                <span style={baseStyles.cardTitle}>Vista calendario</span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    style={{
+                      ...baseStyles.ghostButton,
+                      borderColor: palette.buttonGhostBorder,
+                      color: palette.appText,
+                      marginRight: 0,
+                      opacity: calendarViewMode === "list" ? 1 : 0.7
+                    }}
+                    onClick={() => setCalendarViewMode("list")}
+                  >
+                    Lista
+                  </button>
+                  <button
+                    style={{
+                      ...baseStyles.ghostButton,
+                      borderColor: palette.buttonGhostBorder,
+                      color: palette.appText,
+                      marginRight: 0,
+                      opacity: calendarViewMode === "week" ? 1 : 0.7
+                    }}
+                    onClick={() => setCalendarViewMode("week")}
+                  >
+                    Settimana
+                  </button>
+                  <button
+                    style={{
+                      ...baseStyles.ghostButton,
+                      borderColor: palette.buttonGhostBorder,
+                      color: palette.appText,
+                      marginRight: 0,
+                      opacity: calendarViewMode === "month" ? 1 : 0.7
+                    }}
+                    onClick={() => setCalendarViewMode("month")}
+                  >
+                    Mese
+                  </button>
+                </div>
               </div>
-              {sorted.length === 0 ? (
-                <p style={{ fontSize: 13, color: palette.textMuted }}>
-                  Nessun impegno registrato.
-                </p>
-              ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
-                  {sorted.slice(0, 10).map(e => (
-                    <li key={e.id}>
-                      <strong>
-                        {e.date} {e.time}
-                      </strong>{" "}
-                      - {e.title}{" "}
-                      <span style={{ color: palette.textMuted }}>
-                        ({getUserName(e.userId)})
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 8,
+                  fontSize: 13
+                }}
+              >
+                <div>
+                  {calendarViewMode !== "list" && monthLabel(calendarCurrentDate)}
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button
+                    style={{
+                      ...baseStyles.ghostButton,
+                      borderColor: palette.buttonGhostBorder,
+                      color: palette.appText,
+                      marginRight: 0
+                    }}
+                    onClick={() => setCalendarCurrentDate(today)}
+                  >
+                    Oggi
+                  </button>
+                  <button
+                    style={{
+                      ...baseStyles.ghostButton,
+                      borderColor: palette.buttonGhostBorder,
+                      color: palette.appText,
+                      marginRight: 0
+                    }}
+                    onClick={() =>
+                      setCalendarCurrentDate(prev =>
+                        calendarViewMode === "week"
+                          ? addDays(prev, -7)
+                          : calendarViewMode === "month"
+                          ? addDays(prev, -30)
+                          : addDays(prev, -1)
+                      )
+                    }
+                  >
+                    ◀
+                  </button>
+                  <button
+                    style={{
+                      ...baseStyles.ghostButton,
+                      borderColor: palette.buttonGhostBorder,
+                      color: palette.appText,
+                      marginRight: 0
+                    }}
+                    onClick={() =>
+                      setCalendarCurrentDate(prev =>
+                        calendarViewMode === "week"
+                          ? addDays(prev, 7)
+                          : calendarViewMode === "month"
+                          ? addDays(prev, 30)
+                          : addDays(prev, 1)
+                      )
+                    }
+                  >
+                    ▶
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ maxHeight: 420, overflow: "auto" }}>
+                {calendarViewMode === "list" && renderListView()}
+                {calendarViewMode === "week" && renderWeekView()}
+                {calendarViewMode === "month" && renderMonthView()}
+              </div>
             </div>
           </div>
         </div>
@@ -1612,9 +1977,7 @@ function FamilyHubApp() {
   // ----------------- Scadenze -----------------
 
   function renderDeadlines() {
-    const sorted = [...deadlines].sort((a, b) => a.date.localeCompare(b.date));
-
-    function addDeadline() {
+    function saveDeadline() {
       if (!deadlinesForm.title.trim()) return;
       setDeadlines(prev => [
         ...prev,
@@ -1622,21 +1985,19 @@ function FamilyHubApp() {
           id: nextId(prev),
           title: deadlinesForm.title.trim(),
           date: deadlinesForm.date,
-          userId: Number(deadlinesForm.userId)
+          userId: deadlinesForm.userId
         }
       ]);
-      setDeadlinesForm(f => ({ ...f, title: "" }));
+      setDeadlinesForm({ title: "", date: todayStr(), userId: 1 });
     }
 
-    function removeDeadline(id) {
-      setDeadlines(prev => prev.filter(d => d.id !== id));
-    }
+    const sorted = [...deadlines].sort((a, b) => a.date.localeCompare(b.date));
 
     return (
       <div>
         <h2 style={baseStyles.pageTitle}>Scadenze</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Tieni traccia delle scadenze importanti e assegna un referente.
+          Tieni sotto controllo le scadenze familiari.
         </p>
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
@@ -1660,7 +2021,9 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={deadlinesForm.title}
-                  onChange={e => setDeadlinesForm(f => ({ ...f, title: e.target.value }))}
+                  onChange={e =>
+                    setDeadlinesForm(f => ({ ...f, title: e.target.value }))
+                  }
                 />
               </div>
               <div style={baseStyles.formRow}>
@@ -1674,7 +2037,9 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={deadlinesForm.date}
-                  onChange={e => setDeadlinesForm(f => ({ ...f, date: e.target.value }))}
+                  onChange={e =>
+                    setDeadlinesForm(f => ({ ...f, date: e.target.value }))
+                  }
                 />
               </div>
               <div style={baseStyles.formRow}>
@@ -1704,9 +2069,9 @@ function FamilyHubApp() {
                   background: palette.buttonPrimaryBg,
                   color: palette.buttonPrimaryText
                 }}
-                onClick={addDeadline}
+                onClick={saveDeadline}
               >
-                Aggiungi scadenza
+                Salva scadenza
               </button>
             </div>
           </div>
@@ -1724,27 +2089,26 @@ function FamilyHubApp() {
               </div>
               {sorted.length === 0 ? (
                 <p style={{ fontSize: 13, color: palette.textMuted }}>
-                  Nessuna scadenza inserita.
+                  Nessuna scadenza.
                 </p>
               ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: 13 }}>
                   {sorted.map(d => (
-                    <li key={d.id} style={{ marginBottom: 4 }}>
-                      <strong>{d.date}</strong> - {d.title}{" "}
-                      <span style={{ color: palette.textMuted }}>
-                        ({getUserName(d.userId)})
-                      </span>
-                      <button
-                        style={{
-                          ...baseStyles.ghostButton,
-                          marginLeft: 6,
-                          borderColor: palette.buttonGhostBorder,
-                          color: palette.appText
-                        }}
-                        onClick={() => removeDeadline(d.id)}
-                      >
-                        X
-                      </button>
+                    <li
+                      key={d.id}
+                      style={{
+                        padding: 6,
+                        borderRadius: 8,
+                        border: "1px solid " + palette.cardBorder,
+                        marginBottom: 4
+                      }}
+                    >
+                      <div>
+                        <strong>{d.date}</strong> - {d.title}
+                      </div>
+                      <div style={{ color: palette.textMuted }}>
+                        {getUserName(d.userId)}
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -1759,15 +2123,40 @@ function FamilyHubApp() {
   // ----------------- Dispensa -----------------
 
   function renderPantry() {
-    function addCategory() {
+    function saveCategory() {
       const name = newCategory.trim();
-      if (!name) return;
-      if (categories.includes(name)) return;
+      if (!name || categories.includes(name)) return;
       setCategories(prev => [...prev, name]);
       setNewCategory("");
     }
 
-    function addPantryItem() {
+    function startEditCategory(cat: string) {
+      setEditingCategory(cat);
+      setEditingCategoryName(cat);
+    }
+
+    function commitEditCategory() {
+      if (!editingCategory) return;
+      const newName = editingCategoryName.trim();
+      if (!newName) return;
+      setCategories(prev => prev.map(c => (c === editingCategory ? newName : c)));
+      setPantry(prev => prev.map(p => (p.category === editingCategory ? { ...p, category: newName } : p)));
+      setEditingCategory(null);
+      setEditingCategoryName("");
+    }
+
+    function deleteCategory(cat: string) {
+      if (cat === "Generico") return;
+      setCategories(prev => prev.filter(c => c !== cat));
+      setPantry(prev =>
+        prev.map(p => (p.category === cat ? { ...p, category: "Generico" } : p))
+      );
+      if (pantryForm.category === cat) {
+        setPantryForm(f => ({ ...f, category: "Generico" }));
+      }
+    }
+
+    function savePantryItem() {
       if (!pantryForm.name.trim()) return;
       setPantry(prev => [
         ...prev,
@@ -1779,14 +2168,10 @@ function FamilyHubApp() {
           category: pantryForm.category
         }
       ]);
-      setPantryForm(p => ({ ...p, name: "", qty: 1 }));
+      setPantryForm({ name: "", qty: 1, unit: "pz", category: pantryForm.category });
     }
 
-    function removeItem(id) {
-      setPantry(prev => prev.filter(p => p.id !== id));
-    }
-
-    function changeQty(id, delta) {
+    function adjustItemQty(id: number, delta: number) {
       setPantry(prev =>
         prev.map(p =>
           p.id === id ? { ...p, qty: Math.max(0, (p.qty || 0) + delta) } : p
@@ -1794,7 +2179,11 @@ function FamilyHubApp() {
       );
     }
 
-    const grouped = {};
+    function deleteItem(id: number) {
+      setPantry(prev => prev.filter(p => p.id !== id));
+    }
+
+    const grouped: Record<string, any[]> = {};
     pantry.forEach(p => {
       if (!grouped[p.category]) grouped[p.category] = [];
       grouped[p.category].push(p);
@@ -1804,7 +2193,7 @@ function FamilyHubApp() {
       <div>
         <h2 style={baseStyles.pageTitle}>Dispensa</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Censimento prodotti food e no food, organizzati per categoria.
+          Gestisci le categorie e i prodotti presenti in casa.
         </p>
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
@@ -1812,46 +2201,115 @@ function FamilyHubApp() {
               style={{
                 ...baseStyles.card,
                 background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
+                border: "1px solid " + palette.cardBorder,
+                marginBottom: 12
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
                 <span style={baseStyles.cardTitle}>Categorie</span>
               </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>
-                  Nuova categoria
-                </label>
-                <input
-                  style={{
-                    ...baseStyles.input,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={newCategory}
-                  onChange={e => setNewCategory(e.target.value)}
-                />
+              <div style={{ marginBottom: 8 }}>
+                <div style={baseStyles.formRow}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Nuova categoria
+                  </label>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <input
+                      style={{
+                        ...baseStyles.input,
+                        background: palette.inputBg,
+                        borderColor: palette.inputBorder,
+                        color: palette.appText,
+                        flex: 1
+                      }}
+                      value={newCategory}
+                      onChange={e => setNewCategory(e.target.value)}
+                    />
+                    <button
+                      style={{
+                        ...baseStyles.primaryButton,
+                        background: palette.buttonPrimaryBg,
+                        color: palette.buttonPrimaryText
+                      }}
+                      onClick={saveCategory}
+                    >
+                      Aggiungi
+                    </button>
+                  </div>
+                </div>
+                <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: 13 }}>
+                  {categories.map(cat => (
+                    <li
+                      key={cat}
+                      style={{
+                        padding: 4,
+                        borderRadius: 8,
+                        border: "1px solid " + palette.cardBorder,
+                        marginBottom: 4,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}
+                    >
+                      {editingCategory === cat ? (
+                        <div style={{ display: "flex", gap: 4, flex: 1 }}>
+                          <input
+                            style={{
+                              ...baseStyles.input,
+                              background: palette.inputBg,
+                              borderColor: palette.inputBorder,
+                              color: palette.appText,
+                              flex: 1
+                            }}
+                            value={editingCategoryName}
+                            onChange={e => setEditingCategoryName(e.target.value)}
+                          />
+                          <button
+                            style={{
+                              ...baseStyles.primaryButton,
+                              background: palette.buttonPrimaryBg,
+                              color: palette.buttonPrimaryText
+                            }}
+                            onClick={commitEditCategory}
+                          >
+                            Salva
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <span>{cat}</span>
+                          <div>
+                            <button
+                              style={{
+                                ...baseStyles.ghostButton,
+                                borderColor: palette.buttonGhostBorder,
+                                color: palette.appText
+                              }}
+                              onClick={() => startEditCategory(cat)}
+                            >
+                              Modifica
+                            </button>
+                            {cat !== "Generico" && (
+                              <button
+                                style={{
+                                  ...baseStyles.ghostButton,
+                                  borderColor: palette.buttonGhostBorder,
+                                  color: palette.appText
+                                }}
+                                onClick={() => deleteCategory(cat)}
+                              >
+                                Elimina
+                              </button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <button
-                style={{
-                  ...baseStyles.primaryButton,
-                  background: palette.buttonPrimaryBg,
-                  color: palette.buttonPrimaryText
-                }}
-                onClick={addCategory}
-              >
-                Aggiungi categoria
-              </button>
-              <ul style={{ paddingLeft: 18, fontSize: 13, marginTop: 8 }}>
-                {categories.map(c => (
-                  <li key={c}>{c}</li>
-                ))}
-              </ul>
             </div>
-          </div>
 
-          <div style={baseStyles.col}>
             <div
               style={{
                 ...baseStyles.card,
@@ -1860,7 +2318,7 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Nuovo prodotto</span>
+                <span style={baseStyles.cardTitle}>Aggiungi prodotto</span>
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>Nome</label>
@@ -1872,13 +2330,15 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={pantryForm.name}
-                  onChange={e => setPantryForm(p => ({ ...p, name: e.target.value }))}
+                  onChange={e =>
+                    setPantryForm(f => ({ ...f, name: e.target.value }))
+                  }
                 />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                <div style={{ ...baseStyles.formRow, width: 80 }}>
                   <label style={{ ...baseStyles.label, color: palette.textMuted }}>
-                    Quantità
+                    Q.tà
                   </label>
                   <input
                     type="number"
@@ -1890,12 +2350,14 @@ function FamilyHubApp() {
                     }}
                     value={pantryForm.qty}
                     onChange={e =>
-                      setPantryForm(p => ({ ...p, qty: Number(e.target.value) || 0 }))
+                      setPantryForm(f => ({ ...f, qty: Number(e.target.value) }))
                     }
                   />
                 </div>
-                <div style={{ ...baseStyles.formRow, width: 80 }}>
-                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Unità</label>
+                <div style={{ ...baseStyles.formRow, width: 100 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Unità
+                  </label>
                   <input
                     style={{
                       ...baseStyles.input,
@@ -1904,7 +2366,9 @@ function FamilyHubApp() {
                       color: palette.appText
                     }}
                     value={pantryForm.unit}
-                    onChange={e => setPantryForm(p => ({ ...p, unit: e.target.value }))}
+                    onChange={e =>
+                      setPantryForm(f => ({ ...f, unit: e.target.value }))
+                    }
                   />
                 </div>
               </div>
@@ -1920,11 +2384,13 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={pantryForm.category}
-                  onChange={e => setPantryForm(p => ({ ...p, category: e.target.value }))}
+                  onChange={e =>
+                    setPantryForm(f => ({ ...f, category: e.target.value }))
+                  }
                 >
-                  {categories.map(c => (
-                    <option key={c} value={c}>
-                      {c}
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>
+                      {cat}
                     </option>
                   ))}
                 </select>
@@ -1935,12 +2401,14 @@ function FamilyHubApp() {
                   background: palette.buttonPrimaryBg,
                   color: palette.buttonPrimaryText
                 }}
-                onClick={addPantryItem}
+                onClick={savePantryItem}
               >
-                Aggiungi in dispensa
+                Aggiungi alla dispensa
               </button>
             </div>
+          </div>
 
+          <div style={baseStyles.col}>
             <div
               style={{
                 ...baseStyles.card,
@@ -1956,31 +2424,46 @@ function FamilyHubApp() {
                   Nessun prodotto inserito.
                 </p>
               ) : (
-                <div style={{ maxHeight: 260, overflow: "auto", fontSize: 13 }}>
+                <div style={{ maxHeight: 420, overflow: "auto", fontSize: 13 }}>
                   {Object.keys(grouped).map(cat => (
-                    <div key={cat} style={{ marginBottom: 6 }}>
-                      <div style={{ fontWeight: 600 }}>{cat}</div>
-                      {grouped[cat].map(p => (
+                    <div key={cat} style={{ marginBottom: 8 }}>
+                      <div
+                        style={{
+                          fontWeight: 600,
+                          marginBottom: 4,
+                          color: palette.textMuted
+                        }}
+                      >
+                        {cat}
+                      </div>
+                      {grouped[cat].map(item => (
                         <div
-                          key={p.id}
+                          key={item.id}
                           style={{
+                            padding: 4,
+                            borderRadius: 8,
+                            border: "1px solid " + palette.cardBorder,
+                            marginBottom: 4,
                             display: "flex",
                             justifyContent: "space-between",
-                            alignItems: "center",
-                            marginTop: 2
+                            alignItems: "center"
                           }}
                         >
-                          <span>
-                            {p.name}: {p.qty} {p.unit}
-                          </span>
-                          <span>
+                          <div>
+                            {item.name}
+                            {" "}
+                            <span style={{ color: palette.textMuted }}>
+                              ({item.qty} {item.unit})
+                            </span>
+                          </div>
+                          <div>
                             <button
                               style={{
                                 ...baseStyles.ghostButton,
                                 borderColor: palette.buttonGhostBorder,
                                 color: palette.appText
                               }}
-                              onClick={() => changeQty(p.id, -1)}
+                              onClick={() => adjustItemQty(item.id, -1)}
                             >
                               -
                             </button>
@@ -1990,7 +2473,7 @@ function FamilyHubApp() {
                                 borderColor: palette.buttonGhostBorder,
                                 color: palette.appText
                               }}
-                              onClick={() => changeQty(p.id, 1)}
+                              onClick={() => adjustItemQty(item.id, 1)}
                             >
                               +
                             </button>
@@ -2000,11 +2483,11 @@ function FamilyHubApp() {
                                 borderColor: palette.buttonGhostBorder,
                                 color: palette.appText
                               }}
-                              onClick={() => removeItem(p.id)}
+                              onClick={() => deleteItem(item.id)}
                             >
                               X
                             </button>
-                          </span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -2036,39 +2519,36 @@ function FamilyHubApp() {
       setShoppingForm({ name: "", qty: 1, unit: "pz" });
     }
 
-    function toggleTaken(id) {
-      setShopping(prev =>
-        prev.map(s => (s.id === id ? { ...s, taken: !s.taken } : s))
-      );
+    function toggleTaken(id: number) {
+      setShopping(prev => prev.map(s => (s.id === id ? { ...s, taken: !s.taken } : s)));
     }
 
-    function removeShopping(id) {
+    function removeItem(id: number) {
       setShopping(prev => prev.filter(s => s.id !== id));
     }
 
-    function confirmToPantry() {
-      const toTransfer = shopping.filter(s => s.taken);
-      if (!toTransfer.length) return;
+    function confirmPurchased() {
+      const purchased = shopping.filter(s => s.taken);
+      if (purchased.length === 0) return;
       setPantry(prev => {
-        const next = [...prev];
-        toTransfer.forEach(item => {
+        let next = [...prev];
+        purchased.forEach(item => {
           const idx = next.findIndex(
-            p =>
-              p.name.toLowerCase() === item.name.toLowerCase() &&
-              p.unit === item.unit
+            p => p.name.toLowerCase() === item.name.toLowerCase()
           );
-          const qty = Number(item.qty) || 0;
           if (idx === -1) {
             next.push({
               id: nextId(next),
               name: item.name,
-              qty,
+              qty: item.qty,
               unit: item.unit,
               category: "Generico"
             });
           } else {
-            const it = next[idx];
-            next[idx] = { ...it, qty: (it.qty || 0) + qty };
+            next[idx] = {
+              ...next[idx],
+              qty: (next[idx].qty || 0) + item.qty
+            };
           }
         });
         return next;
@@ -2082,7 +2562,7 @@ function FamilyHubApp() {
       <div>
         <h2 style={baseStyles.pageTitle}>Lista spesa</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Genera la lista della spesa e invia automaticamente gli acquisti in dispensa.
+          Prepara la spesa e aggiorna automaticamente la dispensa.
         </p>
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
@@ -2094,7 +2574,7 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Nuovo prodotto</span>
+                <span style={baseStyles.cardTitle}>Nuovo elemento</span>
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>Nome</label>
@@ -2106,13 +2586,15 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={shoppingForm.name}
-                  onChange={e => setShoppingForm(f => ({ ...f, name: e.target.value }))}
+                  onChange={e =>
+                    setShoppingForm(f => ({ ...f, name: e.target.value }))
+                  }
                 />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                <div style={{ ...baseStyles.formRow, width: 80 }}>
                   <label style={{ ...baseStyles.label, color: palette.textMuted }}>
-                    Quantità
+                    Q.tà
                   </label>
                   <input
                     type="number"
@@ -2124,12 +2606,14 @@ function FamilyHubApp() {
                     }}
                     value={shoppingForm.qty}
                     onChange={e =>
-                      setShoppingForm(f => ({ ...f, qty: Number(e.target.value) || 0 }))
+                      setShoppingForm(f => ({ ...f, qty: Number(e.target.value) }))
                     }
                   />
                 </div>
-                <div style={{ ...baseStyles.formRow, width: 80 }}>
-                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Unità</label>
+                <div style={{ ...baseStyles.formRow, width: 100 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Unità
+                  </label>
                   <input
                     style={{
                       ...baseStyles.input,
@@ -2138,7 +2622,9 @@ function FamilyHubApp() {
                       color: palette.appText
                     }}
                     value={shoppingForm.unit}
-                    onChange={e => setShoppingForm(f => ({ ...f, unit: e.target.value }))}
+                    onChange={e =>
+                      setShoppingForm(f => ({ ...f, unit: e.target.value }))
+                    }
                   />
                 </div>
               </div>
@@ -2150,7 +2636,7 @@ function FamilyHubApp() {
                 }}
                 onClick={addShopping}
               >
-                Aggiungi alla lista
+                Aggiungi in lista
               </button>
             </div>
           </div>
@@ -2164,7 +2650,16 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Lista spesa</span>
+                <span style={baseStyles.cardTitle}>Da comprare</span>
+                <span
+                  style={{
+                    ...baseStyles.tag,
+                    background: palette.tagBg,
+                    color: palette.textMuted
+                  }}
+                >
+                  {toBuy} prodotti
+                </span>
               </div>
               {shopping.length === 0 ? (
                 <p style={{ fontSize: 13, color: palette.textMuted }}>
@@ -2172,30 +2667,43 @@ function FamilyHubApp() {
                 </p>
               ) : (
                 <>
-                  <ul style={{ paddingLeft: 0, listStyle: "none", fontSize: 13 }}>
-                    {shopping.map(s => (
+                  <ul
+                    style={{
+                      listStyle: "none",
+                      padding: 0,
+                      margin: 0,
+                      fontSize: 13,
+                      maxHeight: 320,
+                      overflow: "auto"
+                    }}
+                  >
+                    {shopping.map(item => (
                       <li
-                        key={s.id}
+                        key={item.id}
                         style={{
+                          padding: 4,
+                          borderRadius: 8,
+                          border: "1px solid " + palette.cardBorder,
+                          marginBottom: 4,
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
-                          marginBottom: 4
+                          gap: 8
                         }}
                       >
-                        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <label
+                          style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}
+                        >
                           <input
                             type="checkbox"
-                            checked={s.taken}
-                            onChange={() => toggleTaken(s.id)}
+                            checked={item.taken}
+                            onChange={() => toggleTaken(item.id)}
                           />
-                          <span
-                            style={{
-                              textDecoration: s.taken ? "line-through" : "none",
-                              color: s.taken ? palette.textMuted : palette.appText
-                            }}
-                          >
-                            {s.name} ({s.qty} {s.unit})
+                          <span>
+                            {item.name}{" "}
+                            <span style={{ color: palette.textMuted }}>
+                              ({item.qty} {item.unit})
+                            </span>
                           </span>
                         </label>
                         <button
@@ -2204,25 +2712,23 @@ function FamilyHubApp() {
                             borderColor: palette.buttonGhostBorder,
                             color: palette.appText
                           }}
-                          onClick={() => removeShopping(s.id)}
+                          onClick={() => removeItem(item.id)}
                         >
                           X
                         </button>
                       </li>
                     ))}
                   </ul>
-                  <p style={{ fontSize: 12, color: palette.textMuted }}>
-                    Prodotti ancora da acquistare: {toBuy}
-                  </p>
                   <button
                     style={{
                       ...baseStyles.primaryButton,
                       background: palette.buttonPrimaryBg,
-                      color: palette.buttonPrimaryText
+                      color: palette.buttonPrimaryText,
+                      marginTop: 8
                     }}
-                    onClick={confirmToPantry}
+                    onClick={confirmPurchased}
                   >
-                    Conferma acquisti → dispensa
+                    Conferma acquistati → aggiorna dispensa
                   </button>
                 </>
               )}
@@ -2233,18 +2739,16 @@ function FamilyHubApp() {
     );
   }
 
-  // ----------------- Pasti & Pianificazione -----------------
+  // ----------------- Pasti & pianificazione -----------------
 
   function renderMeals() {
-    const weekDates = getWeekDates(planViewDate);
-
     function saveMeal() {
       if (!mealForm.name.trim()) return;
       const ingredients = parseIngredients(mealForm.ingredientsText);
-      if (editingMealId) {
+      if (mealForm.id) {
         setMeals(prev =>
           prev.map(m =>
-            m.id === editingMealId
+            m.id === mealForm.id
               ? {
                   ...m,
                   name: mealForm.name.trim(),
@@ -2267,28 +2771,33 @@ function FamilyHubApp() {
           }
         ]);
       }
-      setMealForm({ name: "", type: MEAL_TYPES[0], variant: "", ingredientsText: "" });
-      setEditingMealId(null);
+      setMealForm({
+        id: null as any,
+        name: "",
+        type: MEAL_TYPES[0],
+        variant: "",
+        ingredientsText: ""
+      });
     }
 
-    function editMeal(m) {
-      setEditingMealId(m.id);
+    function editMeal(meal: any) {
       setMealForm({
-        name: m.name,
-        type: m.type,
-        variant: m.variant,
-        ingredientsText: m.ingredients
-          .map(i => `${i.name}=${i.qty}=${i.unit}`)
+        id: meal.id,
+        name: meal.name,
+        type: meal.type,
+        variant: meal.variant,
+        ingredientsText: (meal.ingredients || [])
+          .map((ing: any) => `${ing.name}=${ing.qty}=${ing.unit}`)
           .join("; ")
       });
     }
 
-    function deleteMeal(id) {
+    function deleteMeal(id: number) {
       setMeals(prev => prev.filter(m => m.id !== id));
       setMealPlans(prev => prev.filter(p => p.mealId !== id));
-      if (editingMealId === id) {
-        setEditingMealId(null);
+      if (mealForm.id === id) {
         setMealForm({
+          id: null as any,
           name: "",
           type: MEAL_TYPES[0],
           variant: "",
@@ -2297,81 +2806,91 @@ function FamilyHubApp() {
       }
     }
 
-    function addPlan() {
+    function savePlan() {
       if (!planForm.mealId) return;
-      const mealId = Number(planForm.mealId);
-      const meal = meals.find(m => m.id === mealId);
-      if (meal && meal.ingredients && meal.ingredients.length) {
-        adjustPantryForIngredients(meal.ingredients, -1);
-      }
-      setMealPlans(prev => [
-        ...prev,
-        {
-          id: nextId(prev),
-          date: planForm.date,
-          userId: Number(planForm.userId),
-          mealId,
-          slot: planForm.slot
+      const mealIdNum = Number(planForm.mealId);
+      const meal = meals.find((m: any) => m.id === mealIdNum);
+      const ingredients = meal?.ingredients || [];
+      if (planForm.id) {
+        // ripristina dispensa per il piano precedente
+        const old = mealPlans.find(p => p.id === planForm.id);
+        if (old) {
+          const oldMeal = meals.find((m: any) => m.id === old.mealId);
+          if (oldMeal) adjustPantryForIngredients(oldMeal.ingredients || [], +1);
         }
-      ]);
+        setMealPlans(prev =>
+          prev.map(p =>
+            p.id === planForm.id
+              ? {
+                  ...p,
+                  date: planForm.date,
+                  userId: planForm.userId,
+                  mealId: mealIdNum,
+                  slot: planForm.slot
+                }
+              : p
+          )
+        );
+      } else {
+        setMealPlans(prev => [
+          ...prev,
+          {
+            id: nextId(prev),
+            date: planForm.date,
+            userId: planForm.userId,
+            mealId: mealIdNum,
+            slot: planForm.slot
+          }
+        ]);
+      }
+      // scala dispensa
+      adjustPantryForIngredients(ingredients, -1);
+      setPlanForm({ id: null as any, date: todayStr(), userId: 1, mealId: "", slot: "Pranzo" });
     }
 
-    function removePlan(id) {
-      setMealPlans(prev => {
-        const plan = prev.find(p => p.id === id);
-        if (plan) {
-          const meal = meals.find(m => m.id === plan.mealId);
-          if (meal && meal.ingredients && meal.ingredients.length) {
-            adjustPantryForIngredients(meal.ingredients, 1);
-          }
-        }
-        return prev.filter(p => p.id !== id);
+    function deletePlan(plan: any) {
+      const meal = meals.find((m: any) => m.id === plan.mealId);
+      if (meal) adjustPantryForIngredients(meal.ingredients || [], +1);
+      setMealPlans(prev => prev.filter(p => p.id !== plan.id));
+    }
+
+    function editPlan(plan: any) {
+      setPlanForm({
+        id: plan.id,
+        date: plan.date,
+        userId: plan.userId,
+        mealId: String(plan.mealId),
+        slot: plan.slot
       });
     }
 
-    function changeWeek(delta) {
-      setPlanViewDate(addDays(planViewDate, delta * 7));
-    }
+    const weekDates = getWeekDates(planViewDate);
 
-    const plansByDateSlot = {};
-    mealPlans.forEach(p => {
-      const key = p.date + "|" + p.slot;
-      if (!plansByDateSlot[key]) plansByDateSlot[key] = [];
-      plansByDateSlot[key].push(p);
-    });
+    const filteredMeals = planTypeFilter
+      ? meals.filter((m: any) => m.type === planTypeFilter)
+      : meals;
 
-    const userOptions = [
-      { id: 0, name: "Famiglia" },
-      ...users.map(u => ({ id: u.id, name: u.name }))
-    ];
-
-    const allPlansSorted = [...mealPlans].sort((a, b) => {
-      if (a.date !== b.date) return a.date.localeCompare(b.date);
-      const sa = slotOrder[a.slot] ?? 99;
-      const sb = slotOrder[b.slot] ?? 99;
-      if (sa !== sb) return sa - sb;
-      return getUserName(a.userId).localeCompare(getUserName(b.userId));
-    });
+    const plansForWeek = mealPlans.filter(p => weekDates.includes(p.date));
 
     return (
       <div>
-        <h2 style={baseStyles.pageTitle}>Pasti &amp; pianificazione</h2>
+        <h2 style={baseStyles.pageTitle}>Pasti & pianificazione</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Censisci i piatti e pianifica i pasti settimanali per gli utenti o per la famiglia.
+          Censisci i piatti e pianifica i pasti per famiglia e singoli utenti.
         </p>
         <div style={baseStyles.twoCols}>
-          {/* Colonna piatti */}
           <div style={baseStyles.col}>
             <div
               style={{
                 ...baseStyles.card,
                 background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
+                border: "1px solid " + palette.cardBorder,
+                marginBottom: 12
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
                 <span style={baseStyles.cardTitle}>
-                  {editingMealId ? "Modifica piatto" : "Nuovo piatto"}
+                  {mealForm.id ? "Modifica piatto" : "Nuovo piatto"}
                 </span>
               </div>
               <div style={baseStyles.formRow}>
@@ -2410,7 +2929,7 @@ function FamilyHubApp() {
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>
-                  Variante (es. pomodoro, bianca...)
+                  Variante (es. pomodoro, carbonara...)
                 </label>
                 <input
                   style={{
@@ -2420,12 +2939,14 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={mealForm.variant}
-                  onChange={e => setMealForm(f => ({ ...f, variant: e.target.value }))}
+                  onChange={e =>
+                    setMealForm(f => ({ ...f, variant: e.target.value }))
+                  }
                 />
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>
-                  Ingredienti (nome=quantità=unità; ...)
+                  Ingredienti (nome=qtà=unità; ...)
                 </label>
                 <textarea
                   rows={3}
@@ -2449,84 +2970,10 @@ function FamilyHubApp() {
                 }}
                 onClick={saveMeal}
               >
-                {editingMealId ? "Salva modifiche" : "Salva piatto"}
+                Salva piatto
               </button>
-              {editingMealId && (
-                <button
-                  style={{
-                    ...baseStyles.ghostButton,
-                    borderColor: palette.buttonGhostBorder,
-                    color: palette.appText
-                  }}
-                  onClick={() => {
-                    setEditingMealId(null);
-                    setMealForm({
-                      name: "",
-                      type: MEAL_TYPES[0],
-                      variant: "",
-                      ingredientsText: ""
-                    });
-                  }}
-                >
-                  Annulla
-                </button>
-              )}
             </div>
 
-            <div
-              style={{
-                ...baseStyles.card,
-                background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
-              }}
-            >
-              <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Piatti censiti</span>
-              </div>
-              {meals.length === 0 ? (
-                <p style={{ fontSize: 13, color: palette.textMuted }}>
-                  Nessun piatto inserito.
-                </p>
-              ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
-                  {meals.map(m => (
-                    <li key={m.id} style={{ marginBottom: 4 }}>
-                      <strong>{m.name}</strong>{" "}
-                      <span style={{ color: palette.textMuted }}>
-                        ({m.type}
-                        {m.variant ? ", " + m.variant : ""})
-                      </span>
-                      <button
-                        style={{
-                          ...baseStyles.ghostButton,
-                          marginLeft: 6,
-                          borderColor: palette.buttonGhostBorder,
-                          color: palette.appText
-                        }}
-                        onClick={() => editMeal(m)}
-                      >
-                        Modifica
-                      </button>
-                      <button
-                        style={{
-                          ...baseStyles.ghostButton,
-                          marginLeft: 4,
-                          borderColor: palette.buttonGhostBorder,
-                          color: palette.appText
-                        }}
-                        onClick={() => deleteMeal(m.id)}
-                      >
-                        X
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          {/* Colonna pianificazione */}
-          <div style={baseStyles.col}>
             <div
               style={{
                 ...baseStyles.card,
@@ -2537,58 +2984,90 @@ function FamilyHubApp() {
               <div style={baseStyles.cardHeaderRow}>
                 <span style={baseStyles.cardTitle}>Pianifica pasto</span>
               </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Data</label>
-                <input
-                  type="date"
-                  style={{
-                    ...baseStyles.input,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={planForm.date}
-                  onChange={e => setPlanForm(f => ({ ...f, date: e.target.value }))}
-                />
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Data</label>
+                  <input
+                    type="date"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={planForm.date}
+                    onChange={e =>
+                      setPlanForm(f => ({ ...f, date: e.target.value }))
+                    }
+                  />
+                </div>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
+                  <select
+                    style={{
+                      ...baseStyles.select,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={planForm.userId}
+                    onChange={e =>
+                      setPlanForm(f => ({ ...f, userId: Number(e.target.value) }))
+                    }
+                  >
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                    <option value={999999}>Famiglia</option>
+                  </select>
+                </div>
               </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Pasto</label>
-                <select
-                  style={{
-                    ...baseStyles.select,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={planForm.slot}
-                  onChange={e => setPlanForm(f => ({ ...f, slot: e.target.value }))}
-                >
-                  {MEAL_SLOTS.map(s => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
-                <select
-                  style={{
-                    ...baseStyles.select,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={planForm.userId}
-                  onChange={e => setPlanForm(f => ({ ...f, userId: Number(e.target.value) }))}
-                >
-                  <option value={0}>Famiglia</option>
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Slot pasto
+                  </label>
+                  <select
+                    style={{
+                      ...baseStyles.select,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={planForm.slot}
+                    onChange={e => setPlanForm(f => ({ ...f, slot: e.target.value }))}
+                  >
+                    {MEAL_SLOTS.map(s => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Filtra per tipologia
+                  </label>
+                  <select
+                    style={{
+                      ...baseStyles.select,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={planTypeFilter}
+                    onChange={e => setPlanTypeFilter(e.target.value)}
+                  >
+                    <option value="">Tutte</option>
+                    {MEAL_TYPES.map(t => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>Piatto</label>
@@ -2602,10 +3081,10 @@ function FamilyHubApp() {
                   value={planForm.mealId}
                   onChange={e => setPlanForm(f => ({ ...f, mealId: e.target.value }))}
                 >
-                  <option value="">Seleziona piatto...</option>
-                  {meals.map(m => (
+                  <option value="">Seleziona...</option>
+                  {filteredMeals.map((m: any) => (
                     <option key={m.id} value={m.id}>
-                      {getMealFullName(m.id)}
+                      {m.type} - {getMealFullName(m.id)}
                     </option>
                   ))}
                 </select>
@@ -2616,10 +3095,81 @@ function FamilyHubApp() {
                   background: palette.buttonPrimaryBg,
                   color: palette.buttonPrimaryText
                 }}
-                onClick={addPlan}
+                onClick={savePlan}
               >
-                Aggiungi pianificazione
+                Salva pianificazione
               </button>
+            </div>
+          </div>
+
+          <div style={baseStyles.col}>
+            <div
+              style={{
+                ...baseStyles.card,
+                background: palette.cardBg,
+                border: "1px solid " + palette.cardBorder
+              }}
+            >
+              <div style={baseStyles.cardHeaderRow}>
+                <span style={baseStyles.cardTitle}>Piatti censiti</span>
+              </div>
+              {meals.length === 0 ? (
+                <p style={{ fontSize: 13, color: palette.textMuted }}>
+                  Nessun piatto censito.
+                </p>
+              ) : (
+                <ul
+                  style={{
+                    listStyle: "none",
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 13,
+                    maxHeight: 160,
+                    overflow: "auto"
+                  }}
+                >
+                  {meals.map((m: any) => (
+                    <li
+                      key={m.id}
+                      style={{
+                        padding: 4,
+                        borderRadius: 8,
+                        border: "1px solid " + palette.cardBorder,
+                        marginBottom: 4,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}
+                    >
+                      <div>
+                        <strong>{m.type}</strong> - {getMealFullName(m.id)}
+                      </div>
+                      <div>
+                        <button
+                          style={{
+                            ...baseStyles.ghostButton,
+                            borderColor: palette.buttonGhostBorder,
+                            color: palette.appText
+                          }}
+                          onClick={() => editMeal(m)}
+                        >
+                          Modifica
+                        </button>
+                        <button
+                          style={{
+                            ...baseStyles.ghostButton,
+                            borderColor: palette.buttonGhostBorder,
+                            color: palette.appText
+                          }}
+                          onClick={() => deleteMeal(m.id)}
+                        >
+                          Elimina
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div
@@ -2631,182 +3181,124 @@ function FamilyHubApp() {
             >
               <div style={baseStyles.cardHeaderRow}>
                 <span style={baseStyles.cardTitle}>Settimana pianificata</span>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 6,
-                  fontSize: 12
-                }}
-              >
-                <button
+                <span
                   style={{
-                    ...baseStyles.ghostButton,
-                    borderColor: palette.buttonGhostBorder,
-                    color: palette.appText
+                    ...baseStyles.tag,
+                    background: palette.tagBg,
+                    color: palette.textMuted
                   }}
-                  onClick={() => changeWeek(-1)}
                 >
-                  ←
-                </button>
-                <span>
                   {weekDates[0]} - {weekDates[6]}
                 </span>
+              </div>
+              <div style={{ marginBottom: 8, display: "flex", gap: 4 }}>
                 <button
                   style={{
                     ...baseStyles.ghostButton,
                     borderColor: palette.buttonGhostBorder,
-                    color: palette.appText
+                    color: palette.appText,
+                    marginRight: 0
                   }}
-                  onClick={() => changeWeek(1)}
+                  onClick={() => setPlanViewDate(addDays(planViewDate, -7))}
                 >
-                  →
+                  ◀
+                </button>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText,
+                    marginRight: 0
+                  }}
+                  onClick={() => setPlanViewDate(today)}
+                >
+                  Oggi
+                </button>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText,
+                    marginRight: 0
+                  }}
+                  onClick={() => setPlanViewDate(addDays(planViewDate, 7))}
+                >
+                  ▶
                 </button>
               </div>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 11,
-                  border: "1px solid " + palette.tableBorder
-                }}
-              >
-                <thead>
-                  <tr>
-                    <th
+              <div style={{ maxHeight: 260, overflow: "auto", fontSize: 12 }}>
+                {MEAL_SLOTS.map(slot => (
+                  <div key={slot} style={{ marginBottom: 6 }}>
+                    <div
                       style={{
-                        padding: 4,
-                        borderBottom: "1px solid " + palette.tableBorder,
-                        background: palette.tableHeaderBg
+                        fontWeight: 600,
+                        marginBottom: 2,
+                        color: palette.textMuted
                       }}
                     >
-                      Pasto
-                    </th>
-                    {weekDates.map(d => (
-                      <th
-                        key={d}
-                        style={{
-                          padding: 4,
-                          borderBottom: "1px solid " + palette.tableBorder,
-                          background: palette.tableHeaderBg,
-                          textAlign: "center"
-                        }}
-                      >
-                        {new Date(d).toLocaleDateString("it-IT", {
-                          weekday: "short",
-                          day: "2-digit"
-                        })}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {MEAL_SLOTS.map(slot => (
-                    <tr key={slot}>
-                      <td
-                        style={{
-                          border: "1px solid " + palette.tableBorder,
-                          padding: 4,
-                          fontWeight: 600
-                        }}
-                      >
-                        {slot}
-                      </td>
-                      {weekDates.map(d => {
-                        const key = d + "|" + slot;
-                        const plans = plansByDateSlot[key] || [];
-                        return (
-                          <td
-                            key={d}
-                            style={{
-                              border: "1px solid " + palette.tableBorder,
-                              padding: 4,
-                              verticalAlign: "top"
-                            }}
-                          >
-                            {plans.length === 0 ? (
-                              <span style={{ color: palette.textMuted }}>-</span>
-                            ) : (
-                              plans.map(p => (
-                                <div
-                                  key={p.id}
-                                  style={{
-                                    marginBottom: 2,
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    gap: 4
-                                  }}
-                                >
-                                  <span>
-                                    {getMealFullName(p.mealId)}{" "}
-                                    <span style={{ color: palette.textMuted }}>
-                                      ({p.userId === 0 ? "Famiglia" : getUserName(p.userId)})
-                                    </span>
-                                  </span>
-                                  <button
-                                    style={{
-                                      ...baseStyles.ghostButton,
-                                      borderColor: palette.buttonGhostBorder,
-                                      color: palette.appText
-                                    }}
-                                    onClick={() => removePlan(p.id)}
-                                  >
-                                    X
-                                  </button>
-                                </div>
-                              ))
-                            )}
-                          </td>
+                      {slot}
+                    </div>
+                    {weekDates.map(d => {
+                      const list = plansForWeek
+                        .filter(p => p.date === d && p.slot === slot)
+                        .sort((a, b) =>
+                          getUserName(a.userId).localeCompare(getUserName(b.userId))
                         );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div
-              style={{
-                ...baseStyles.card,
-                background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
-              }}
-            >
-              <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Elenco pianificazioni</span>
+                      if (list.length === 0) return null;
+                      return (
+                        <div key={d} style={{ marginLeft: 8, marginBottom: 2 }}>
+                          <div style={{ fontWeight: 500 }}>
+                            {new Date(d).toLocaleDateString("it-IT", {
+                              weekday: "short",
+                              day: "2-digit"
+                            })}
+                          </div>
+                          {list.map(p => (
+                            <div
+                              key={p.id}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                gap: 4
+                              }}
+                            >
+                              <span>
+                                {getMealFullName(p.mealId)}{" "}
+                                <span style={{ color: palette.textMuted }}>
+                                  ({getUserName(p.userId)})
+                                </span>
+                              </span>
+                              <span>
+                                <button
+                                  style={{
+                                    ...baseStyles.ghostButton,
+                                    borderColor: palette.buttonGhostBorder,
+                                    color: palette.appText
+                                  }}
+                                  onClick={() => editPlan(p)}
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  style={{
+                                    ...baseStyles.ghostButton,
+                                    borderColor: palette.buttonGhostBorder,
+                                    color: palette.appText
+                                  }}
+                                  onClick={() => deletePlan(p)}
+                                >
+                                  X
+                                </button>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
-              {allPlansSorted.length === 0 ? (
-                <p style={{ fontSize: 13, color: palette.textMuted }}>
-                  Nessun pasto pianificato.
-                </p>
-              ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
-                  {allPlansSorted.map(p => (
-                    <li key={p.id}>
-                      <strong>
-                        {p.date} - {p.slot}
-                      </strong>{" "}
-                      {getMealFullName(p.mealId)}{" "}
-                      <span style={{ color: palette.textMuted }}>
-                        ({p.userId === 0 ? "Famiglia" : getUserName(p.userId)})
-                      </span>
-                      <button
-                        style={{
-                          ...baseStyles.ghostButton,
-                          marginLeft: 6,
-                          borderColor: palette.buttonGhostBorder,
-                          color: palette.appText
-                        }}
-                        onClick={() => removePlan(p.id)}
-                      >
-                        X
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
             </div>
           </div>
         </div>
@@ -2814,10 +3306,10 @@ function FamilyHubApp() {
     );
   }
 
-  // ----------------- Compiti & Paghette -----------------
+  // ----------------- Compiti & paghette -----------------
 
   function renderChores() {
-    function addChore() {
+    function saveChore() {
       if (!choresForm.title.trim()) return;
       setChores(prev => [
         ...prev,
@@ -2825,81 +3317,70 @@ function FamilyHubApp() {
           id: nextId(prev),
           title: choresForm.title.trim(),
           deadline: choresForm.deadline,
-          userId: Number(choresForm.userId),
+          userId: choresForm.userId,
           amount: Number(choresForm.amount) || 0,
           done: false
         }
       ]);
-      setChoresForm({ title: "", deadline: todayStr(), userId: 1, amount: 1 });
+      setChoResForm({ title: "", deadline: todayStr(), userId: 1, amount: 1 });
     }
 
-    function toggleDone(id) {
-      setChores(prev => {
-        const next = prev.map(c =>
-          c.id === id ? { ...c, done: !c.done } : c
-        );
-        const chore = prev.find(c => c.id === id);
-        if (chore && !chore.done) {
-          const amount = Number(chore.amount) || 0;
-          if (amount > 0) {
-            setUsers(us =>
-              us.map(u =>
-                u.id === chore.userId ? { ...u, balance: (u.balance || 0) + amount } : u
-              )
-            );
-            setTransactions(tr => [
-              ...tr,
-              {
-                id: nextId(tr),
-                userId: chore.userId,
-                type: "accredito",
-                amount,
-                date: todayStr(),
-                note: "Compito: " + chore.title
-              }
-            ]);
+    function setChoResForm(v: any) {
+      setChoresForm(v);
+    }
+
+    function toggleDone(chore: any) {
+      if (!chore.done) {
+        // completato → accredita
+        updateUserBalance(chore.userId, chore.amount);
+        setTransactions(prev => [
+          ...prev,
+          {
+            id: nextId(prev),
+            userId: chore.userId,
+            type: "accredito",
+            amount: chore.amount,
+            date: today,
+            note: `Compito: ${chore.title}`
           }
-        }
-        return next;
-      });
+        ]);
+      }
+      setChores(prev => prev.map(c => (c.id === chore.id ? { ...c, done: !c.done } : c)));
     }
 
-    function payUser(userId) {
-      const input = paymentInputs[userId];
-      const amount = Number(input);
-      if (!amount || amount <= 0) return;
-      const user = users.find(u => u.id === userId);
-      if (!user) return;
-      const maxPayable = user.balance || 0;
-      const realAmount = Math.min(amount, maxPayable);
-      if (realAmount <= 0) return;
-      setUsers(prev =>
-        prev.map(u =>
-          u.id === userId ? { ...u, balance: (u.balance || 0) - realAmount } : u
-        )
-      );
+    function payUser(userId: number, amount: number) {
+      if (!amount) return;
+      updateUserBalance(userId, -amount);
       setTransactions(prev => [
         ...prev,
         {
           id: nextId(prev),
           userId,
           type: "pagamento",
-          amount: realAmount,
-          date: todayStr(),
+          amount,
+          date: today,
           note: "Pagamento paghetta"
         }
       ]);
-      setPaymentInputs(prev => ({ ...prev, [userId]: "" }));
+    }
+
+    function cancelTransaction(tx: any) {
+      // annulla effetto saldo
+      if (tx.type === "accredito") {
+        updateUserBalance(tx.userId, -tx.amount);
+      } else {
+        updateUserBalance(tx.userId, tx.amount);
+      }
+      setTransactions(prev => prev.filter(t => t.id !== tx.id));
     }
 
     const choresSorted = [...chores].sort((a, b) => a.deadline.localeCompare(b.deadline));
-    const usersWithBalance = users.filter(u => (u.balance || 0) > 0);
 
     return (
       <div>
-        <h2 style={baseStyles.pageTitle}>Compiti &amp; paghette</h2>
+        <h2 style={baseStyles.pageTitle}>Compiti & paghette</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Assegna compiti, riconosci paghette e gestisci i pagamenti.
+          Assegna compiti, riconosci la paghetta e gestisci i pagamenti.
         </p>
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
@@ -2907,7 +3388,8 @@ function FamilyHubApp() {
               style={{
                 ...baseStyles.card,
                 background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
+                border: "1px solid " + palette.cardBorder,
+                marginBottom: 12
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
@@ -2923,43 +3405,60 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={choresForm.title}
-                  onChange={e => setChoresForm(f => ({ ...f, title: e.target.value }))}
-                />
-              </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Scadenza</label>
-                <input
-                  type="date"
-                  style={{
-                    ...baseStyles.input,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={choresForm.deadline}
-                  onChange={e => setChoresForm(f => ({ ...f, deadline: e.target.value }))}
-                />
-              </div>
-              <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
-                <select
-                  style={{
-                    ...baseStyles.select,
-                    background: palette.inputBg,
-                    borderColor: palette.inputBorder,
-                    color: palette.appText
-                  }}
-                  value={choresForm.userId}
                   onChange={e =>
-                    setChoresForm(f => ({ ...f, userId: Number(e.target.value) }))
+                    setChoResForm({
+                      ...choresForm,
+                      title: e.target.value
+                    })
                   }
-                >
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>
+                    Scadenza
+                  </label>
+                  <input
+                    type="date"
+                    style={{
+                      ...baseStyles.input,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={choresForm.deadline}
+                    onChange={e =>
+                      setChoResForm({
+                        ...choresForm,
+                        deadline: e.target.value
+                      })
+                    }
+                  />
+                </div>
+                <div style={{ ...baseStyles.formRow, flex: 1 }}>
+                  <label style={{ ...baseStyles.label, color: palette.textMuted }}>Utente</label>
+                  <select
+                    style={{
+                      ...baseStyles.select,
+                      background: palette.inputBg,
+                      borderColor: palette.inputBorder,
+                      color: palette.appText
+                    }}
+                    value={choresForm.userId}
+                    onChange={e =>
+                      setChoResForm({
+                        ...choresForm,
+                        userId: Number(e.target.value)
+                      })
+                    }
+                  >
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div style={baseStyles.formRow}>
                 <label style={{ ...baseStyles.label, color: palette.textMuted }}>
@@ -2975,7 +3474,10 @@ function FamilyHubApp() {
                   }}
                   value={choresForm.amount}
                   onChange={e =>
-                    setChoresForm(f => ({ ...f, amount: Number(e.target.value) || 0 }))
+                    setChoResForm({
+                      ...choresForm,
+                      amount: Number(e.target.value)
+                    })
                   }
                 />
               </div>
@@ -2985,9 +3487,9 @@ function FamilyHubApp() {
                   background: palette.buttonPrimaryBg,
                   color: palette.buttonPrimaryText
                 }}
-                onClick={addChore}
+                onClick={saveChore}
               >
-                Aggiungi compito
+                Salva compito
               </button>
             </div>
 
@@ -3003,26 +3505,45 @@ function FamilyHubApp() {
               </div>
               {choresSorted.length === 0 ? (
                 <p style={{ fontSize: 13, color: palette.textMuted }}>
-                  Nessun compito inserito.
+                  Nessun compito assegnato.
                 </p>
               ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
-                  {choresSorted.map(c => (
-                    <li key={c.id} style={{ marginBottom: 4 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <ul
+                  style={{
+                    listStyle: "none",
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 13,
+                    maxHeight: 220,
+                    overflow: "auto"
+                  }}
+                >
+                  {choresSorted.map(ch => (
+                    <li
+                      key={ch.id}
+                      style={{
+                        padding: 4,
+                        borderRadius: 8,
+                        border: "1px solid " + palette.cardBorder,
+                        marginBottom: 4,
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}
+                    >
+                      <label
+                        style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}
+                      >
                         <input
                           type="checkbox"
-                          checked={c.done}
-                          onChange={() => toggleDone(c.id)}
+                          checked={ch.done}
+                          onChange={() => toggleDone(ch)}
                         />
-                        <span
-                          style={{
-                            textDecoration: c.done ? "line-through" : "none",
-                            color: c.done ? palette.textMuted : palette.appText
-                          }}
-                        >
-                          {c.title} ({getUserName(c.userId)}) - scade il {c.deadline} - {" "}
-                          {c.amount.toFixed(2)} €
+                        <span>
+                          {ch.title} ({ch.amount.toFixed(2)} €)
+                          <span style={{ color: palette.textMuted }}>
+                            {" "}- {getUserName(ch.userId)} - entro {ch.deadline}
+                          </span>
                         </span>
                       </label>
                     </li>
@@ -3037,57 +3558,53 @@ function FamilyHubApp() {
               style={{
                 ...baseStyles.card,
                 background: palette.cardBg,
-                border: "1px solid " + palette.cardBorder
+                border: "1px solid " + palette.cardBorder,
+                marginBottom: 12
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Pagamenti paghette</span>
+                <span style={baseStyles.cardTitle}>Pagamenti manuali</span>
               </div>
-              {usersWithBalance.length === 0 ? (
-                <p style={{ fontSize: 13, color: palette.textMuted }}>
-                  Nessun saldo da pagare.
-                </p>
-              ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
-                  {usersWithBalance.map(u => (
-                    <li key={u.id} style={{ marginBottom: 6 }}>
-                      <div>
-                        <strong>{u.name}</strong> - saldo {u.balance.toFixed(2)} €
-                      </div>
-                      <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                        <input
-                          type="number"
-                          placeholder="Importo"
-                          style={{
-                            ...baseStyles.input,
-                            flex: 1,
-                            background: palette.inputBg,
-                            borderColor: palette.inputBorder,
-                            color: palette.appText
-                          }}
-                          value={paymentInputs[u.id] || ""}
-                          onChange={e =>
-                            setPaymentInputs(prev => ({
-                              ...prev,
-                              [u.id]: e.target.value
-                            }))
-                          }
-                        />
-                        <button
-                          style={{
-                            ...baseStyles.primaryButton,
-                            background: palette.buttonPrimaryBg,
-                            color: palette.buttonPrimaryText
-                          }}
-                          onClick={() => payUser(u.id)}
-                        >
-                          Paga
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              {users.map(u => (
+                <div key={u.id} style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, marginBottom: 2 }}>
+                    {u.name} - saldo: {Number(u.balance || 0).toFixed(2)} €
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <input
+                      type="number"
+                      placeholder="Importo"
+                      style={{
+                        ...baseStyles.input,
+                        background: palette.inputBg,
+                        borderColor: palette.inputBorder,
+                        color: palette.appText,
+                        flex: 1
+                      }}
+                      value={paymentInputs[u.id] || ""}
+                      onChange={e =>
+                        setPaymentInputs(prev => ({ ...prev, [u.id]: e.target.value }))
+                      }
+                    />
+                    <button
+                      style={{
+                        ...baseStyles.primaryButton,
+                        background: palette.buttonPrimaryBg,
+                        color: palette.buttonPrimaryText
+                      }}
+                      onClick={() => {
+                        const amt = Number(paymentInputs[u.id] || 0);
+                        if (amt > 0) {
+                          payUser(u.id, amt);
+                          setPaymentInputs(prev => ({ ...prev, [u.id]: "" }));
+                        }
+                      }}
+                    >
+                      Paga
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
 
             <div
@@ -3105,15 +3622,51 @@ function FamilyHubApp() {
                   Nessun movimento registrato.
                 </p>
               ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                <ul
+                  style={{
+                    listStyle: "none",
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 12,
+                    maxHeight: 220,
+                    overflow: "auto"
+                  }}
+                >
                   {transactions
                     .slice()
                     .reverse()
-                    .slice(0, 20)
-                    .map(t => (
-                      <li key={t.id}>
-                        <strong>{t.date}</strong> - {t.type === "accredito" ? "+" : "-"}
-                        {t.amount.toFixed(2)} € a {getUserName(t.userId)} ({t.note})
+                    .map(tx => (
+                      <li
+                        key={tx.id}
+                        style={{
+                          padding: 4,
+                          borderRadius: 8,
+                          border: "1px solid " + palette.cardBorder,
+                          marginBottom: 4,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center"
+                        }}
+                      >
+                        <div>
+                          <div>
+                            <strong>{tx.type === "accredito" ? "+" : "-"}</strong>
+                            {tx.amount.toFixed(2)} € - {getUserName(tx.userId)}
+                          </div>
+                          <div style={{ color: palette.textMuted }}>
+                            {tx.date} - {tx.note}
+                          </div>
+                        </div>
+                        <button
+                          style={{
+                            ...baseStyles.ghostButton,
+                            borderColor: palette.buttonGhostBorder,
+                            color: palette.appText
+                          }}
+                          onClick={() => cancelTransaction(tx)}
+                        >
+                          Annulla
+                        </button>
                       </li>
                     ))}
                 </ul>
@@ -3125,24 +3678,24 @@ function FamilyHubApp() {
     );
   }
 
-  // ----------------- ToDo List -----------------
+  // ----------------- ToDo -----------------
 
   function renderTodos() {
-    function addTodo() {
+    function saveTodo() {
       if (!todoForm.title.trim()) return;
       setTodos(prev => [
         ...prev,
         {
           id: nextId(prev),
           title: todoForm.title.trim(),
-          userId: Number(todoForm.userId),
+          userId: todoForm.userId,
           done: false
         }
       ]);
       setTodoForm({ title: "", userId: 1 });
     }
 
-    function toggleTodo(id) {
+    function toggleTodo(id: number) {
       setTodos(prev => prev.map(t => (t.id === id ? { ...t, done: !t.done } : t)));
     }
 
@@ -3150,10 +3703,9 @@ function FamilyHubApp() {
 
     return (
       <div>
-        <h2 style={baseStyles.pageTitle}>Cose da fare (ToDo List)</h2>
+        <h2 style={baseStyles.pageTitle}>Cose da fare</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Promemoria semplici, anche assegnati a un utente. Le attività completate vengono
-          archiviate.
+          Promemoria veloci per tutta la famiglia.
         </p>
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
@@ -3168,7 +3720,7 @@ function FamilyHubApp() {
                 <span style={baseStyles.cardTitle}>Nuovo promemoria</span>
               </div>
               <div style={baseStyles.formRow}>
-                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Titolo</label>
+                <label style={{ ...baseStyles.label, color: palette.textMuted }}>Testo</label>
                 <input
                   style={{
                     ...baseStyles.input,
@@ -3177,7 +3729,9 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={todoForm.title}
-                  onChange={e => setTodoForm(f => ({ ...f, title: e.target.value }))}
+                  onChange={e =>
+                    setTodoForm(f => ({ ...f, title: e.target.value }))
+                  }
                 />
               </div>
               <div style={baseStyles.formRow}>
@@ -3190,7 +3744,9 @@ function FamilyHubApp() {
                     color: palette.appText
                   }}
                   value={todoForm.userId}
-                  onChange={e => setTodoForm(f => ({ ...f, userId: Number(e.target.value) }))}
+                  onChange={e =>
+                    setTodoForm(f => ({ ...f, userId: Number(e.target.value) }))
+                  }
                 >
                   {users.map(u => (
                     <option key={u.id} value={u.id}>
@@ -3205,9 +3761,9 @@ function FamilyHubApp() {
                   background: palette.buttonPrimaryBg,
                   color: palette.buttonPrimaryText
                 }}
-                onClick={addTodo}
+                onClick={saveTodo}
               >
-                Aggiungi promemoria
+                Salva promemoria
               </button>
             </div>
           </div>
@@ -3221,40 +3777,60 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Elenco cose da fare</span>
-                <label style={{ fontSize: 12, color: palette.textMuted }}>
+                <span style={baseStyles.cardTitle}>Elenco</span>
+                <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4 }}>
                   <input
                     type="checkbox"
                     checked={showCompletedTodos}
                     onChange={e => setShowCompletedTodos(e.target.checked)}
-                    style={{ marginRight: 4 }}
                   />
                   Mostra anche completate
                 </label>
               </div>
               {visibleTodos.length === 0 ? (
                 <p style={{ fontSize: 13, color: palette.textMuted }}>
-                  Nessun promemoria da mostrare.
+                  Nessun promemoria.
                 </p>
               ) : (
-                <ul style={{ paddingLeft: 18, fontSize: 13 }}>
+                <ul
+                  style={{
+                    listStyle: "none",
+                    padding: 0,
+                    margin: 0,
+                    fontSize: 13,
+                    maxHeight: 320,
+                    overflow: "auto"
+                  }}
+                >
                   {visibleTodos.map(t => (
-                    <li key={t.id} style={{ marginBottom: 4 }}>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <input
-                          type="checkbox"
-                          checked={t.done}
-                          onChange={() => toggleTodo(t.id)}
-                        />
-                        <span
-                          style={{
-                            textDecoration: t.done ? "line-through" : "none",
-                            color: t.done ? palette.textMuted : palette.appText
-                          }}
-                        >
-                          {t.title} ({getUserName(t.userId)})
+                    <li
+                      key={t.id}
+                      style={{
+                        padding: 4,
+                        borderRadius: 8,
+                        border: "1px solid " + palette.cardBorder,
+                        marginBottom: 4,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={t.done}
+                        onChange={() => toggleTodo(t.id)}
+                      />
+                      <span
+                        style={{
+                          textDecoration: t.done ? "line-through" : "none",
+                          flex: 1
+                        }}
+                      >
+                        {t.title}
+                        <span style={{ color: palette.textMuted }}>
+                          {" "}- {getUserName(t.userId)}
                         </span>
-                      </label>
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -3269,25 +3845,11 @@ function FamilyHubApp() {
   // ----------------- Impostazioni -----------------
 
   function renderSettings() {
-    function toggleTheme() {
-      setSettings(prev => ({
-        ...prev,
-        theme: prev.theme === "dark" ? "light" : "dark"
-      }));
-    }
-
-    function toggleNotif(key) {
-      setSettings(prev => ({
-        ...prev,
-        notifications: { ...prev.notifications, [key]: !prev.notifications[key] }
-      }));
-    }
-
     return (
       <div>
         <h2 style={baseStyles.pageTitle}>Impostazioni</h2>
         <p style={{ ...baseStyles.pageSubtitle, color: palette.textMuted }}>
-          Personalizza il tema e le modalità di notifica.
+          Personalizza tema e preferenze notifiche.
         </p>
         <div style={baseStyles.twoCols}>
           <div style={baseStyles.col}>
@@ -3301,19 +3863,32 @@ function FamilyHubApp() {
               <div style={baseStyles.cardHeaderRow}>
                 <span style={baseStyles.cardTitle}>Tema</span>
               </div>
-              <p style={{ fontSize: 13, color: palette.textMuted }}>
-                Scegli tra tema scuro e tema chiaro.
-              </p>
-              <button
-                style={{
-                  ...baseStyles.primaryButton,
-                  background: palette.buttonPrimaryBg,
-                  color: palette.buttonPrimaryText
-                }}
-                onClick={toggleTheme}
-              >
-                Passa a tema {settings.theme === "dark" ? "chiaro" : "scuro"}
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText,
+                    marginRight: 0,
+                    opacity: settings.theme === "light" ? 1 : 0.7
+                  }}
+                  onClick={() => setSettings(s => ({ ...s, theme: "light" }))}
+                >
+                  Chiaro
+                </button>
+                <button
+                  style={{
+                    ...baseStyles.ghostButton,
+                    borderColor: palette.buttonGhostBorder,
+                    color: palette.appText,
+                    marginRight: 0,
+                    opacity: settings.theme === "dark" ? 1 : 0.7
+                  }}
+                  onClick={() => setSettings(s => ({ ...s, theme: "dark" }))}
+                >
+                  Scuro
+                </button>
+              </div>
             </div>
           </div>
 
@@ -3326,38 +3901,50 @@ function FamilyHubApp() {
               }}
             >
               <div style={baseStyles.cardHeaderRow}>
-                <span style={baseStyles.cardTitle}>Notifiche (simboliche)</span>
+                <span style={baseStyles.cardTitle}>Notifiche (placeholder)</span>
               </div>
-              <p style={{ fontSize: 13, color: palette.textMuted }}>
-                Qui puoi indicare come preferiresti ricevere le notifiche. In questa anteprima
-                non vengono ancora inviate realmente, ma le preferenze sono salvate.
+              <p style={{ fontSize: 12, color: palette.textMuted }}>
+                In una versione successiva qui potremo collegare WhatsApp, email e notifiche
+                push.
               </p>
-              <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
                 <input
                   type="checkbox"
                   checked={settings.notifications.email}
-                  onChange={() => toggleNotif("email")}
-                  style={{ marginRight: 4 }}
+                  onChange={e =>
+                    setSettings(s => ({
+                      ...s,
+                      notifications: { ...s.notifications, email: e.target.checked }
+                    }))
+                  }
                 />
                 Email
               </label>
-              <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
                 <input
                   type="checkbox"
                   checked={settings.notifications.whatsapp}
-                  onChange={() => toggleNotif("whatsapp")}
-                  style={{ marginRight: 4 }}
+                  onChange={e =>
+                    setSettings(s => ({
+                      ...s,
+                      notifications: { ...s.notifications, whatsapp: e.target.checked }
+                    }))
+                  }
                 />
                 WhatsApp
               </label>
-              <label style={{ display: "block", fontSize: 13, marginBottom: 4 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
                 <input
                   type="checkbox"
                   checked={settings.notifications.popup}
-                  onChange={() => toggleNotif("popup")}
-                  style={{ marginRight: 4 }}
+                  onChange={e =>
+                    setSettings(s => ({
+                      ...s,
+                      notifications: { ...s.notifications, popup: e.target.checked }
+                    }))
+                  }
                 />
-                Notifiche a schermo (popup)
+                Popup in app
               </label>
             </div>
           </div>
@@ -3372,17 +3959,32 @@ function FamilyHubApp() {
     return renderLogin();
   }
 
-  let content = null;
-  if (activeNav === "Home") content = renderHome();
-  else if (activeNav === "Utenti") content = renderUsers();
-  else if (activeNav === "Calendario") content = renderCalendar();
-  else if (activeNav === "Scadenze") content = renderDeadlines();
-  else if (activeNav === "Dispensa") content = renderPantry();
-  else if (activeNav === "Lista spesa") content = renderShopping();
-  else if (activeNav === "Pasti") content = renderMeals();
-  else if (activeNav === "Compiti & paghette") content = renderChores();
-  else if (activeNav === "ToDo List") content = renderTodos();
-  else if (activeNav === "Impostazioni") content = renderSettings();
+  function renderMain() {
+    switch (activeNav) {
+      case "Home":
+        return renderHome();
+      case "Utenti":
+        return renderUsers();
+      case "Calendario":
+        return renderCalendar();
+      case "Scadenze":
+        return renderDeadlines();
+      case "Dispensa":
+        return renderPantry();
+      case "Lista spesa":
+        return renderShopping();
+      case "Pasti":
+        return renderMeals();
+      case "Compiti & paghette":
+        return renderChores();
+      case "ToDo List":
+        return renderTodos();
+      case "Impostazioni":
+        return renderSettings();
+      default:
+        return renderHome();
+    }
+  }
 
   return (
     <div
@@ -3409,7 +4011,7 @@ function FamilyHubApp() {
             <div
               style={{
                 ...baseStyles.logoCircle,
-                background: "rgba(15,23,42,0.18)",
+                background: "rgba(15,23,42,0.2)",
                 color: palette.headerText
               }}
             >
@@ -3417,19 +4019,33 @@ function FamilyHubApp() {
             </div>
             <div>
               <div style={{ fontWeight: 600, fontSize: 16 }}>Family Hub</div>
-              <div style={{ fontSize: 12, opacity: 0.85 }}>
-                Gestione familiare: agenda, spesa, pasti e paghette.
+              <div style={{ fontSize: 12, opacity: 0.9 }}>
+                {" "}Benvenuto, {currentUser.name}
               </div>
             </div>
           </div>
           <div style={baseStyles.headerRight}>
-            <span style={{ fontSize: 12 }}>Ciao, {currentUser.name}</span>
+            <span style={{ fontSize: 12 }}>Tema</span>
             <button
               style={{
                 ...baseStyles.ghostButton,
-                borderColor: "rgba(248,250,252,0.7)",
+                borderColor: "rgba(248,250,252,0.4)",
                 color: palette.headerText,
-                background: "transparent"
+                marginRight: 0
+              }}
+              onClick={() =>
+                setSettings(s => ({ ...s, theme: s.theme === "dark" ? "light" : "dark" }))
+              }
+            >
+              {settings.theme === "dark" ? "Chiaro" : "Scuro"}
+            </button>
+            <div>{renderAvatar(currentUser, 32)}</div>
+            <button
+              style={{
+                ...baseStyles.ghostButton,
+                borderColor: "rgba(248,250,252,0.4)",
+                color: palette.headerText,
+                marginRight: 0
               }}
               onClick={handleLogout}
             >
@@ -3438,7 +4054,12 @@ function FamilyHubApp() {
           </div>
         </header>
 
-        <div style={baseStyles.body}>
+        <div
+          style={{
+            ...baseStyles.body,
+            background: palette.mainBg
+          }}
+        >
           <aside
             style={{
               ...baseStyles.sidebar,
@@ -3446,51 +4067,23 @@ function FamilyHubApp() {
               borderRight: "1px solid " + palette.sidebarBorder
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 8
-              }}
-            >
-              <span style={{ fontSize: 12, color: palette.textMuted }}>Navigazione</span>
-              <button
-                style={{
-                  ...baseStyles.ghostButton,
-                  borderColor: palette.buttonGhostBorder,
-                  color: palette.appText,
-                  padding: "2px 8px",
-                  fontSize: 11
-                }}
-                onClick={() =>
-                  setSettings(prev => ({
-                    ...prev,
-                    theme: prev.theme === "dark" ? "light" : "dark"
-                  }))
-                }
-              >
-                {settings.theme === "dark" ? "Chiaro" : "Scuro"}
-              </button>
-            </div>
             <ul style={baseStyles.navList}>
-              {NAV_ITEMS.map(item => {
-                const active = activeNav === item;
-                return (
-                  <li key={item}>
-                    <button
-                      style={{
-                        ...baseStyles.navButton,
-                        background: active ? palette.navActiveBg : "transparent",
-                        color: active ? palette.navActiveText : palette.appText
-                      }}
-                      onClick={() => setActiveNav(item)}
-                    >
-                      {item}
-                    </button>
-                  </li>
-                );
-              })}
+              {NAV_ITEMS.map(item => (
+                <li key={item}>
+                  <button
+                    style={{
+                      ...baseStyles.navButton,
+                      background:
+                        activeNav === item ? palette.navActiveBg : "transparent",
+                      color:
+                        activeNav === item ? palette.navActiveText : palette.appText
+                    }}
+                    onClick={() => setActiveNav(item)}
+                  >
+                    {item}
+                  </button>
+                </li>
+              ))}
             </ul>
           </aside>
 
@@ -3500,7 +4093,7 @@ function FamilyHubApp() {
               background: palette.mainBg
             }}
           >
-            {content}
+            {renderMain()}
           </main>
         </div>
       </div>
@@ -3509,3 +4102,4 @@ function FamilyHubApp() {
 }
 
 export default FamilyHubApp;
+
