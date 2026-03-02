@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 // FAMILY HUB – versione stabile per Anteprima
 // Funzioni incluse (versione semplificata ma completa):
@@ -337,6 +337,25 @@ function FamilyHubApp() {
     theme: "dark",
     notifications: { email: true, whatsapp: true, popup: true }
   });
+
+  // Responsive: rileva schermi piccoli
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (typeof window === "undefined") return;
+      const width = window.innerWidth || 0;
+      const mobile = width < 768;
+      setIsMobile(mobile);
+      if (!mobile) {
+        setMobileNavOpen(false);
+      }
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const palette =
     settings.theme === "dark"
@@ -4008,6 +4027,19 @@ function FamilyHubApp() {
           }}
         >
           <div style={baseStyles.headerLeft}>
+            {isMobile && (
+              <button
+                style={{
+                  ...baseStyles.ghostButton,
+                  borderColor: "rgba(248,250,252,0.4)",
+                  color: palette.headerText,
+                  marginRight: 4
+                }}
+                onClick={() => setMobileNavOpen(o => !o)}
+              >
+                ☰
+              </button>
+            )}
             <div
               style={{
                 ...baseStyles.logoCircle,
@@ -4057,14 +4089,25 @@ function FamilyHubApp() {
         <div
           style={{
             ...baseStyles.body,
-            background: palette.mainBg
+            background: palette.mainBg,
+            flexDirection: isMobile ? "column" : "row",
+            position: "relative"
           }}
         >
           <aside
             style={{
               ...baseStyles.sidebar,
               background: palette.sidebarBg,
-              borderRight: "1px solid " + palette.sidebarBorder
+              borderRight: isMobile ? "none" : "1px solid " + palette.sidebarBorder,
+              position: isMobile ? "fixed" : "relative",
+              left: isMobile ? (mobileNavOpen ? 0 : -260) : 0,
+              top: isMobile ? 0 : "auto",
+              height: isMobile ? "100%" : "auto",
+              zIndex: 40,
+              transition: "left 0.2s ease",
+              boxShadow:
+                isMobile && mobileNavOpen ? "4px 0 12px rgba(0,0,0,0.6)" : "none",
+              width: isMobile ? 260 : baseStyles.sidebar.width
             }}
           >
             <ul style={baseStyles.navList}>
@@ -4078,7 +4121,10 @@ function FamilyHubApp() {
                       color:
                         activeNav === item ? palette.navActiveText : palette.appText
                     }}
-                    onClick={() => setActiveNav(item)}
+                    onClick={() => {
+                      setActiveNav(item);
+                      if (isMobile) setMobileNavOpen(false);
+                    }}
                   >
                     {item}
                   </button>
@@ -4086,6 +4132,18 @@ function FamilyHubApp() {
               ))}
             </ul>
           </aside>
+
+          {isMobile && mobileNavOpen && (
+            <div
+              onClick={() => setMobileNavOpen(false)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.4)",
+                zIndex: 30
+              }}
+            />
+          )}
 
           <main
             style={{
@@ -4102,4 +4160,3 @@ function FamilyHubApp() {
 }
 
 export default FamilyHubApp;
-
