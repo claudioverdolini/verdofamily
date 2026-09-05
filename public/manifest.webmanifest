@@ -1,0 +1,12 @@
+{
+  "name": "VerdoFamily · Family Hub",
+  "short_name": "VerdoFamily",
+  "description": "Calendario, spesa, dispensa, pasti, compiti e paghette per tutta la famiglia.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F6FB",
+  "theme_color": "#5B5BD6",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
