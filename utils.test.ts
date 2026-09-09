@@ -41,6 +41,14 @@ describe('data migration', () => {
     expect(migrated.version).toBe(3)
   })
 
+  it('preserves linked cloud user ids', () => {
+    const migrated = migrateData({
+      ...initialData,
+      users: [{ ...initialData.users[0], cloudUserId: '11111111-2222-3333-4444-555555555555' }]
+    }, initialData)
+    expect(migrated.users[0].cloudUserId).toBe('11111111-2222-3333-4444-555555555555')
+  })
+
   it('parses ingredients safely', () => {
     expect(parseIngredients('Pasta=80=g;Uova=2=pz')).toEqual([
       { name: 'Pasta', qty: 80, unit: 'g' },
