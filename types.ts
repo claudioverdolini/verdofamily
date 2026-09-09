@@ -30,6 +30,7 @@ export type UserPrefs = {
 
 export type FamilyUser = {
   id: number
+  cloudUserId?: string
   name: string
   role: Role
   password: string

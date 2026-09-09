@@ -150,6 +150,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
+          cloudUserId: u.cloudUserId || undefined,
           name: u.name || 'Utente',
           role: u.role || 'adulto',
           password: u.password || '',
