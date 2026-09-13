@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
-import { Check, ClipboardCopy, Download, RotateCcw, Upload } from 'lucide-react'
+import React, { useEffect, useState } from 'react'
+import { Check, ClipboardCopy, Cloud, Download, RefreshCw, RotateCcw, Upload } from 'lucide-react'
 import { useFamily } from '../store'
+import { supabase } from '../supabaseClient'
 import type { PageKey, ThemeMode } from '../types'
 import { Avatar, Button, Card, CardHeader, Field, PageIntro, Segmented } from '../ui'
 
@@ -31,13 +32,134 @@ const HOME_CARDS = [
   { key: 'wallets', label: 'Paghette' }
 ] as const
 
+type DriveBackupStatus = {
+  enabled: boolean
+  last_attempt_at: string | null
+  last_success_at: string | null
+  last_error: string | null
+}
+
+type BackupHistoryItem = {
+  id: number
+  revision: number
+  reason: string
+  created_at: string
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return 'Mai'
+  try {
+    return new Intl.DateTimeFormat('it-IT', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
+function backupReason(reason: string) {
+  if (reason === 'google_drive_export') return 'Backup automatico Drive'
+  if (reason === 'manual_google_drive_export') return 'Backup manuale Drive'
+  if (reason === 'pre_restore') return 'Prima di un ripristino'
+  if (reason === 'pre_save') return 'Versione precedente'
+  return reason || 'Backup'
+}
+
 export default function SettingsPage() {
-  const { authUser, updateCurrentPrefs, updateCurrentProfile, exportData, importData, resetData } = useFamily()
+  const {
+    authUser,
+    updateCurrentPrefs,
+    updateCurrentProfile,
+    exportData,
+    importData,
+    resetData,
+    cloudAuthenticated,
+    familyId,
+    syncNow
+  } = useFamily()
   const [importText, setImportText] = useState('')
   const [message, setMessage] = useState('')
+  const [driveStatus, setDriveStatus] = useState<DriveBackupStatus | null>(null)
+  const [backupHistory, setBackupHistory] = useState<BackupHistoryItem[]>([])
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupLoading, setBackupLoading] = useState(false)
 
   const prefs = authUser?.prefs
+
+  useEffect(() => {
+    void refreshBackupStatus()
+  }, [familyId, cloudAuthenticated])
+
   if (!authUser || !prefs) return null
+
+  async function refreshBackupStatus() {
+    if (!supabase || !familyId || !cloudAuthenticated) {
+      setDriveStatus(null)
+      setBackupHistory([])
+      return
+    }
+    setBackupLoading(true)
+    try {
+      const [statusResult, historyResult] = await Promise.all([
+        supabase.rpc('get_drive_backup_status', { p_family_id: familyId }),
+        supabase
+          .from('family_backups')
+          .select('id,revision,reason,created_at')
+          .eq('family_id', familyId)
+          .order('created_at', { ascending: false })
+          .limit(10)
+      ])
+
+      if (!statusResult.error) {
+        const row = Array.isArray(statusResult.data) ? statusResult.data[0] : statusResult.data
+        setDriveStatus(row || null)
+      }
+      if (!historyResult.error) setBackupHistory((historyResult.data || []) as BackupHistoryItem[])
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  async function runDriveBackup() {
+    if (!supabase || !familyId) return
+    setBackupBusy(true)
+    setMessage('')
+    try {
+      await syncNow()
+      const { data: result, error } = await supabase.functions.invoke('google-drive-backup-runner', {
+        body: { familyId }
+      })
+      if (error) {
+        setMessage(`Backup Google Drive non riuscito: ${error.message}`)
+      } else if (result?.ok) {
+        const fileName = result?.results?.[0]?.fileName
+        setMessage(fileName ? `Backup Google Drive creato: ${fileName}` : 'Backup Google Drive creato correttamente.')
+      } else {
+        setMessage(`Backup Google Drive non riuscito: ${result?.error || result?.results?.[0]?.error || 'errore sconosciuto'}`)
+      }
+      await refreshBackupStatus()
+    } catch (error: any) {
+      setMessage(`Backup Google Drive non riuscito: ${error?.message || 'errore sconosciuto'}`)
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function restoreBackup(item: BackupHistoryItem) {
+    if (!supabase) return
+    if (!confirm(`Ripristinare il backup revisione ${item.revision} del ${formatDateTime(item.created_at)}? Prima del ripristino verrà salvata automaticamente anche la situazione attuale.`)) return
+    setBackupBusy(true)
+    setMessage('')
+    try {
+      const { error } = await supabase.rpc('restore_family_backup', { p_backup_id: item.id })
+      if (error) {
+        setMessage(`Ripristino non riuscito: ${error.message}`)
+      } else {
+        setMessage('Backup ripristinato. I dispositivi collegati si aggiorneranno automaticamente.')
+        await refreshBackupStatus()
+      }
+    } finally {
+      setBackupBusy(false)
+    }
+  }
 
   function setTheme(theme: ThemeMode) {
     updateCurrentPrefs({ theme })
@@ -154,7 +276,27 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="settings-card--wide">
-        <CardHeader title="Dati & backup" subtitle="Esporta prima di cambi importanti; puoi ripristinare tutto in pochi secondi." />
+        <CardHeader title="Dati & backup" subtitle="Backup automatici nel cloud e su Google Drive, più esportazione manuale locale." />
+
+        {cloudAuthenticated && familyId ? <>
+          <div className={driveStatus?.last_error ? 'callout' : 'callout callout--success'}>
+            <strong>Google Drive automatico: {driveStatus?.enabled ? 'attivo' : 'configurazione in corso'}</strong><br />
+            Ultimo backup riuscito: {formatDateTime(driveStatus?.last_success_at)}
+            {driveStatus?.last_error ? <><br />Ultimo errore: {driveStatus.last_error}</> : null}
+          </div>
+          <div className="backup-actions">
+            <Button variant="soft" icon={<Cloud size={17} />} onClick={runDriveBackup} disabled={backupBusy}>{backupBusy ? 'Backup in corso…' : 'Backup Google Drive ora'}</Button>
+            <Button variant="ghost" icon={<RefreshCw size={17} />} onClick={refreshBackupStatus} disabled={backupLoading}>{backupLoading ? 'Verifica…' : 'Verifica stato'}</Button>
+          </div>
+          <div className="callout">Il backup automatico viene eseguito ogni notte. Ogni salvataggio importante conserva inoltre una versione precedente nel database prima di sovrascrivere i dati.</div>
+
+          {backupHistory.length ? <>
+            <CardHeader title="Cronologia ripristinabile" subtitle="Ultime versioni conservate su Supabase" />
+            <div className="sortable-list">{backupHistory.map(item => <div key={item.id}><span><strong>Rev. {item.revision}</strong> · {backupReason(item.reason)} · {formatDateTime(item.created_at)}</span><div><button disabled={backupBusy} onClick={() => restoreBackup(item)}>Ripristina</button></div></div>)}</div>
+          </> : null}
+        </> : <div className="callout">Accedi con il tuo account cloud per attivare backup automatici e cronologia ripristinabile.</div>}
+
+        <CardHeader title="Copia manuale" subtitle="Una copia JSON resta utile anche fuori dal cloud." />
         <div className="backup-actions"><Button variant="soft" icon={<ClipboardCopy size={17} />} onClick={copyBackup}>Copia backup</Button><Button variant="soft" icon={<Download size={17} />} onClick={downloadBackup}>Scarica JSON</Button></div>
         <Field label="Importa backup" hint="Incolla qui un backup JSON creato da VerdoFamily."><textarea rows={5} value={importText} onChange={e => setImportText(e.target.value)} /></Field>
         <div className="backup-footer"><Button variant="ghost" icon={<Upload size={17} />} onClick={doImport}>Importa</Button><Button variant="danger" icon={<RotateCcw size={17} />} onClick={() => { if (confirm('Ripristinare i dati demo? Questa operazione cancella i dati locali.')) resetData() }}>Ripristina dati demo</Button></div>
