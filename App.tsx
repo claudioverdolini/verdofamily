@@ -22,6 +22,7 @@ import {
 import { FamilyProvider, useFamily } from './store'
 import type { PageKey } from './types'
 import { Avatar, Button, IconButton } from './ui'
+import { supabase } from './supabaseClient'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/Calendar'
 import ShoppingPantryPage from './pages/ShoppingPantry'
@@ -80,21 +81,64 @@ function LoginScreen() {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [showDemo, setShowDemo] = useState(false)
+  const [needsVerification, setNeedsVerification] = useState(false)
 
   async function submit(e?: React.FormEvent) {
     e?.preventDefault()
     setError('')
     setMessage('')
+    setNeedsVerification(false)
     setBusy(true)
     try {
       if (mode === 'signup') {
         const result = await signUp(identifier, password, displayName)
         if (!result.ok) setError(result.error || 'Registrazione non riuscita.')
-        else if (result.needsEmailConfirmation) setMessage('Account creato. Controlla la tua email e conferma l’indirizzo, poi torna qui per accedere.')
+        else if (result.needsEmailConfirmation) {
+          setNeedsVerification(true)
+          setMessage('Account creato. Controlla la tua email e conferma l’indirizzo, poi torna qui per accedere.')
+        }
       } else {
         const result = await login(identifier, password)
-        if (!result.ok) setError(result.error || 'Accesso non riuscito.')
+        if (!result.ok) {
+          const rawError = result.error || 'Accesso non riuscito.'
+          const unverified = /email.*(not confirmed|not verified)|confirm.*email/i.test(rawError)
+          setNeedsVerification(unverified)
+          setError(unverified ? 'La tua email non è ancora verificata. Puoi farti inviare un nuovo link di conferma.' : rawError)
+        }
       }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resendVerification() {
+    const email = identifier.trim()
+    setError('')
+    setMessage('')
+    if (!email || !email.includes('@')) {
+      setError('Inserisci prima l’email dell’account da verificare.')
+      return
+    }
+    if (!supabase) {
+      setError('Connessione cloud non configurata.')
+      return
+    }
+    setBusy(true)
+    try {
+      const { error: resendError } = await supabase.auth.resend({
+        type: 'signup',
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/` }
+      })
+      if (resendError) {
+        const text = resendError.message || 'Invio non riuscito.'
+        setError(/rate limit|security purposes/i.test(text)
+          ? 'Hai richiesto troppe email in poco tempo. Attendi qualche minuto e riprova.'
+          : text)
+        return
+      }
+      setNeedsVerification(true)
+      setMessage('Nuova email di verifica inviata. Usa solo il link più recente e controlla anche Spam/Posta indesiderata.')
     } finally {
       setBusy(false)
     }
@@ -105,6 +149,15 @@ function LoginScreen() {
     setIdentifier(user.name)
     setPassword(user.password || '')
     setError('')
+    setMessage('')
+    setNeedsVerification(false)
+  }
+
+  function switchMode(nextMode: 'login' | 'signup') {
+    setMode(nextMode)
+    setError('')
+    setMessage('')
+    setNeedsVerification(false)
   }
 
   return <div className="login-screen">
@@ -116,7 +169,7 @@ function LoginScreen() {
     <div className="login-panel">
       <form className="login-card" onSubmit={submit}>
         <div className="login-brand"><div className="brand-mark"><span>V</span></div><div><strong>VerdoFamily</strong><span>{cloudEnabled ? 'Cloud Family Hub' : 'Family Hub'}</span></div></div>
-        <div className="auth-tabs"><button type="button" className={mode === 'login' ? 'is-active' : ''} onClick={() => { setMode('login'); setError(''); setMessage('') }}>Accedi</button><button type="button" className={mode === 'signup' ? 'is-active' : ''} onClick={() => { setMode('signup'); setError(''); setMessage('') }}>Registrati</button></div>
+        <div className="auth-tabs"><button type="button" className={mode === 'login' ? 'is-active' : ''} onClick={() => switchMode('login')}>Accedi</button><button type="button" className={mode === 'signup' ? 'is-active' : ''} onClick={() => switchMode('signup')}>Registrati</button></div>
         <div className="login-copy"><h2>{mode === 'login' ? 'Bentornato' : 'Crea il tuo account'}</h2><p>{mode === 'login' ? 'Usa email e password per ritrovare la tua famiglia su ogni dispositivo.' : 'Ti servirà un’email per il recupero e la sincronizzazione sicura.'}</p></div>
         {mode === 'signup' ? <label className="field"><span className="field__label">Nome</span><input autoFocus autoComplete="name" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Es. Claudio" /></label> : null}
         <label className="field"><span className="field__label">{mode === 'login' && !identifier.includes('@') ? 'Email o utente demo' : 'Email'}</span><input autoFocus={mode === 'login'} type={mode === 'signup' ? 'email' : 'text'} autoComplete="username" value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="nome@email.it" /></label>
@@ -124,6 +177,7 @@ function LoginScreen() {
         {error ? <div className="login-error">{error}</div> : null}
         {message ? <div className="callout callout--success">{message}</div> : null}
         <Button type="submit" className="login-submit" disabled={busy || cloudLoading}>{busy || cloudLoading ? 'Attendi…' : (mode === 'login' ? 'Accedi' : 'Crea account')} {!busy && !cloudLoading ? <ChevronRight size={18} /> : null}</Button>
+        {cloudEnabled && needsVerification ? <Button type="button" variant="soft" className="login-submit" disabled={busy || cloudLoading} onClick={resendVerification}><RefreshCw size={16} /> Reinvia email di verifica</Button> : null}
         {mode === 'login' ? <div className="demo-access"><button type="button" className="text-link" onClick={() => setShowDemo(v => !v)}>{showDemo ? 'Nascondi accesso demo' : 'Accesso demo locale'}</button>{showDemo ? <div className="login-users"><span>Profili locali di prova</span><div>{data.users.filter(u => u.password).map(user => <button type="button" key={user.id} onClick={() => useDemo(user)}><Avatar user={user} size="sm" /><span>{user.name}</span></button>)}</div></div> : null}</div> : null}
       </form>
     </div>
