@@ -50,20 +50,42 @@ export type CalendarEvent = {
   notes?: string
 }
 
+export type MedicinePackage = {
+  id: number
+  expiryDate?: string
+  quantity: number
+  packageSize?: number
+  lot?: string
+  addedAt?: string
+}
+
+export type TherapyMedicine = {
+  id: number
+  medicineId: number
+  tabletsPerDose: number
+  dosesPerDay: number
+  usage?: string
+}
+
 export type Deadline = {
   id: number
   title: string
   date: string
   userId: number
   done: boolean
-  kind?: 'general' | 'medicine'
+  kind?: 'general' | 'medicine' | 'therapy'
   activeIngredient?: string
   purpose?: string
   usage?: string
   prescriber?: string
   notes?: string
+  defaultPackageSize?: number
+  packages?: MedicinePackage[]
   therapyStartDate?: string
   therapyEndDate?: string
+  therapyMedicines?: TherapyMedicine[]
+  legacyMedicineId?: number
+  // Legacy fields retained only so older backups can be migrated safely.
   stockStartDate?: string
   tabletCount?: number
   tabletsPerDose?: number
