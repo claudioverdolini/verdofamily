@@ -62,6 +62,10 @@ export type Deadline = {
   usage?: string
   prescriber?: string
   notes?: string
+  stockStartDate?: string
+  tabletCount?: number
+  tabletsPerDose?: number
+  dosesPerDay?: number
 }
 
 export type PantryItem = {
