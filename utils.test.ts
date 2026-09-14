@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, cleanReceiptLine, medicineDepletionDate, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, weekDates } from './utils'
+import { addDays, cleanReceiptLine, medicineDepletionDate, medicineTherapyCoverage, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, weekDates } from './utils'
 import { initialData } from './data'
 
 describe('date helpers', () => {
@@ -22,6 +22,28 @@ describe('date helpers', () => {
     expect(medicineDepletionDate('2026-09-14', 30, 1, 1)).toBe('2026-10-13')
     expect(medicineDepletionDate('2026-09-14', 30, 1, 2)).toBe('2026-09-28')
     expect(medicineDepletionDate('2026-09-14', 10, 1, 0.5)).toBe('2026-10-03')
+  })
+
+  it('checks whether medicine stock covers the prescribed therapy', () => {
+    const covered = medicineTherapyCoverage('2026-09-14', '2026-09-28', '2026-09-14', 30, 1, 2)
+    expect(covered?.therapyDays).toBe(15)
+    expect(covered?.requiredTablets).toBe(30)
+    expect(covered?.sufficient).toBe(true)
+    expect(covered?.surplus).toBe(0)
+    expect(covered?.depletionDate).toBe('2026-09-28')
+
+    const short = medicineTherapyCoverage('2026-09-14', '2026-09-28', '2026-09-14', 20, 1, 2)
+    expect(short?.sufficient).toBe(false)
+    expect(short?.shortage).toBe(10)
+    expect(short?.depletionDate).toBe('2026-09-23')
+  })
+
+  it('calculates only the remaining therapy when stock is counted later', () => {
+    const result = medicineTherapyCoverage('2026-09-14', '2026-09-28', '2026-09-20', 18, 1, 2)
+    expect(result?.therapyDays).toBe(15)
+    expect(result?.remainingDays).toBe(9)
+    expect(result?.requiredTablets).toBe(18)
+    expect(result?.sufficient).toBe(true)
   })
 })
 
