@@ -56,6 +56,12 @@ export type Deadline = {
   date: string
   userId: number
   done: boolean
+  kind?: 'general' | 'medicine'
+  activeIngredient?: string
+  purpose?: string
+  usage?: string
+  prescriber?: string
+  notes?: string
 }
 
 export type PantryItem = {
