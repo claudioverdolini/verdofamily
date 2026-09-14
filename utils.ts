@@ -1,4 +1,4 @@
-import type { FamilyData, FamilyUser, UserPrefs } from './types'
+import type { Deadline, FamilyData, FamilyUser, MedicinePackage, TherapyMedicine, UserPrefs } from './types'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -19,6 +19,11 @@ export function addDays(dateStr: string, days: number) {
   const d = parseISODate(dateStr)
   d.setDate(d.getDate() + days)
   return localDateISO(d)
+}
+
+export function daysInclusive(startDate: string, endDate: string) {
+  if (!startDate || !endDate || endDate < startDate) return 0
+  return Math.round((parseISODate(endDate).getTime() - parseISODate(startDate).getTime()) / 86400000) + 1
 }
 
 export function medicineDepletionDate(startDate: string, tabletCount: number, tabletsPerDose: number, dosesPerDay: number) {
@@ -44,11 +49,9 @@ export function medicineTherapyCoverage(
   if (!therapyStartDate || !therapyEndDate || therapyEndDate < therapyStartDate || !Number.isFinite(perDose) || !Number.isFinite(frequency) || perDose <= 0 || frequency <= 0) return null
 
   const dailyUse = perDose * frequency
-  const therapyDays = Math.round((parseISODate(therapyEndDate).getTime() - parseISODate(therapyStartDate).getTime()) / 86400000) + 1
+  const therapyDays = daysInclusive(therapyStartDate, therapyEndDate)
   const effectiveStockStart = stockStartDate && stockStartDate > therapyStartDate ? stockStartDate : therapyStartDate
-  const remainingDays = effectiveStockStart > therapyEndDate
-    ? 0
-    : Math.round((parseISODate(therapyEndDate).getTime() - parseISODate(effectiveStockStart).getTime()) / 86400000) + 1
+  const remainingDays = effectiveStockStart > therapyEndDate ? 0 : daysInclusive(effectiveStockStart, therapyEndDate)
   const requiredTablets = Math.max(0, Math.ceil((remainingDays * dailyUse) - 1e-9))
   const tablets = Number(tabletCount)
   const hasStock = Number.isFinite(tablets) && tablets > 0
@@ -64,6 +67,139 @@ export function medicineTherapyCoverage(
     sufficient: hasStock ? tablets >= requiredTablets : null,
     shortage: hasStock ? Math.max(requiredTablets - tablets, 0) : null,
     surplus: hasStock ? Math.max(tablets - requiredTablets, 0) : null
+  }
+}
+
+export function therapyDailyUse(line: Pick<TherapyMedicine, 'tabletsPerDose' | 'dosesPerDay'>) {
+  const perDose = Number(line.tabletsPerDose)
+  const frequency = Number(line.dosesPerDay)
+  if (!Number.isFinite(perDose) || !Number.isFinite(frequency) || perDose <= 0 || frequency <= 0) return 0
+  return perDose * frequency
+}
+
+export function therapyLineRequiredTablets(
+  therapyStartDate: string,
+  therapyEndDate: string,
+  line: Pick<TherapyMedicine, 'tabletsPerDose' | 'dosesPerDay'>,
+  fromDate?: string
+) {
+  const dailyUse = therapyDailyUse(line)
+  if (!therapyStartDate || !therapyEndDate || therapyEndDate < therapyStartDate || dailyUse <= 0) return null
+  const effectiveStart = fromDate && fromDate > therapyStartDate ? fromDate : therapyStartDate
+  if (effectiveStart > therapyEndDate) return 0
+  return Math.ceil((daysInclusive(effectiveStart, therapyEndDate) * dailyUse) - 1e-9)
+}
+
+function normalizeMedicinePackage(pkg: any, index: number): MedicinePackage {
+  const quantity = Number(pkg?.quantity ?? pkg?.tabletCount ?? 0)
+  const packageSize = Number(pkg?.packageSize ?? 0)
+  return {
+    id: Number(pkg?.id) || index + 1,
+    expiryDate: pkg?.expiryDate || pkg?.date || '',
+    quantity: Number.isFinite(quantity) && quantity >= 0 ? quantity : 0,
+    packageSize: Number.isFinite(packageSize) && packageSize > 0 ? packageSize : undefined,
+    lot: pkg?.lot || '',
+    addedAt: pkg?.addedAt || pkg?.stockStartDate || ''
+  }
+}
+
+function normalizeTherapyMedicine(line: any, index: number): TherapyMedicine {
+  return {
+    id: Number(line?.id) || index + 1,
+    medicineId: Number(line?.medicineId || 0),
+    tabletsPerDose: Number(line?.tabletsPerDose || 1),
+    dosesPerDay: Number(line?.dosesPerDay || 1),
+    usage: line?.usage || ''
+  }
+}
+
+export function medicineInventorySummary(medicine: Deadline, therapies: Deadline[], asOfDate = localDateISO()) {
+  const allPackages = (medicine.packages || []).map(normalizeMedicinePackage)
+  const expiredPackages = allPackages.filter(pkg => !!pkg.expiryDate && pkg.expiryDate < asOfDate)
+  const usablePackages = allPackages.filter(pkg => pkg.quantity > 0 && (!pkg.expiryDate || pkg.expiryDate >= asOfDate))
+  const totalStock = usablePackages.reduce((sum, pkg) => sum + pkg.quantity, 0)
+  const earliestExpiry = usablePackages.map(pkg => pkg.expiryDate || '').filter(Boolean).sort()[0] || ''
+  const expiringSoonPackages = usablePackages.filter(pkg => pkg.expiryDate && pkg.expiryDate <= addDays(asOfDate, 30)).length
+  const linkedTherapies = therapies.filter(therapy => therapy.kind === 'therapy' && !therapy.done && (therapy.therapyMedicines || []).some(line => Number(line.medicineId) === medicine.id))
+
+  let activeDailyUse = 0
+  let knownRemainingDemand = 0
+  let hasOpenEndedDemand = false
+  let latestKnownEnd = asOfDate
+
+  for (const therapy of linkedTherapies) {
+    const start = therapy.therapyStartDate || therapy.date || ''
+    const end = therapy.therapyEndDate || ''
+    if (end && end > latestKnownEnd) latestKnownEnd = end
+    for (const line of therapy.therapyMedicines || []) {
+      if (Number(line.medicineId) !== medicine.id) continue
+      const dailyUse = therapyDailyUse(line)
+      if (dailyUse <= 0 || !start) continue
+      if (start <= asOfDate && (!end || end >= asOfDate)) activeDailyUse += dailyUse
+      if (end) {
+        const required = therapyLineRequiredTablets(start, end, line, asOfDate)
+        knownRemainingDemand += Number(required || 0)
+      } else if (start >= asOfDate || start <= asOfDate) {
+        hasOpenEndedDemand = true
+      }
+    }
+  }
+
+  const standardPackageSize = Number(medicine.defaultPackageSize || usablePackages.find(pkg => Number(pkg.packageSize || 0) > 0)?.packageSize || allPackages.find(pkg => Number(pkg.packageSize || 0) > 0)?.packageSize || 0)
+  const shortageKnown = Math.max(Math.ceil(knownRemainingDemand - totalStock - 1e-9), 0)
+  const packagesToBuy = shortageKnown > 0 && standardPackageSize > 0 ? Math.ceil(shortageKnown / standardPackageSize) : 0
+
+  const simulatedPackages = usablePackages
+    .map(pkg => ({ ...pkg, remaining: Number(pkg.quantity) }))
+    .sort((a, b) => (a.expiryDate || '9999-12-31').localeCompare(b.expiryDate || '9999-12-31'))
+  const simulationEnd = hasOpenEndedDemand ? addDays(asOfDate, 1825) : latestKnownEnd
+  let shortageDate = ''
+  let coverageUntil = ''
+
+  for (let day = asOfDate; day <= simulationEnd && linkedTherapies.length; day = addDays(day, 1)) {
+    let demand = 0
+    for (const therapy of linkedTherapies) {
+      const start = therapy.therapyStartDate || therapy.date || ''
+      const end = therapy.therapyEndDate || ''
+      if (!start || day < start || (end && day > end)) continue
+      for (const line of therapy.therapyMedicines || []) {
+        if (Number(line.medicineId) === medicine.id) demand += therapyDailyUse(line)
+      }
+    }
+    if (demand <= 0) continue
+
+    let remainingDemand = demand
+    for (const pkg of simulatedPackages) {
+      if (remainingDemand <= 1e-9) break
+      if (pkg.remaining <= 0) continue
+      if (pkg.expiryDate && pkg.expiryDate < day) continue
+      const used = Math.min(pkg.remaining, remainingDemand)
+      pkg.remaining -= used
+      remainingDemand -= used
+    }
+    if (remainingDemand > 1e-9) {
+      shortageDate = day
+      coverageUntil = day === asOfDate ? '' : addDays(day, -1)
+      break
+    }
+    coverageUntil = day
+  }
+
+  return {
+    packageCount: allPackages.length,
+    totalStock,
+    earliestExpiry,
+    expiredPackageCount: expiredPackages.length,
+    expiringSoonPackageCount: expiringSoonPackages,
+    therapyCount: linkedTherapies.length,
+    activeDailyUse,
+    knownRemainingDemand: Math.ceil(knownRemainingDemand - 1e-9),
+    hasOpenEndedDemand,
+    shortageKnown,
+    packagesToBuy,
+    standardPackageSize,
+    shortageDate,
+    coverageUntil
   }
 }
 
@@ -188,11 +324,99 @@ export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
   }
 }
 
+function migrateDeadlines(input: any[]): Deadline[] {
+  const source = Array.isArray(input) ? input : []
+  const existingLegacyLinks = new Set(source.filter(item => item?.kind === 'therapy' && item?.legacyMedicineId).map(item => Number(item.legacyMedicineId)))
+  let nextDeadlineId = source.reduce((max, item) => Math.max(max, Number(item?.id || 0)), 0) + 1
+  const result: Deadline[] = []
+  const pendingTherapies: Deadline[] = []
+
+  source.forEach((raw: any) => {
+    const base = { ...raw, id: Number(raw?.id), done: !!raw?.done }
+    if (raw?.kind === 'medicine') {
+      const packages = Array.isArray(raw.packages)
+        ? raw.packages.map(normalizeMedicinePackage)
+        : (raw.tabletCount || raw.date)
+          ? [normalizeMedicinePackage({
+              id: 1,
+              expiryDate: raw.date || '',
+              quantity: Number(raw.tabletCount || 0),
+              packageSize: Number(raw.tabletCount || 0) || undefined,
+              addedAt: raw.stockStartDate || ''
+            }, 0)]
+          : []
+      const expiryDates = packages.map(pkg => pkg.expiryDate || '').filter(Boolean).sort()
+      const defaultPackageSize = Number(raw.defaultPackageSize || packages.find(pkg => Number(pkg.packageSize || 0) > 0)?.packageSize || raw.tabletCount || 0) || undefined
+      result.push({
+        ...base,
+        kind: 'medicine',
+        date: expiryDates[0] || raw.date || localDateISO(),
+        userId: 0,
+        defaultPackageSize,
+        packages,
+        prescriber: undefined,
+        usage: undefined,
+        therapyStartDate: undefined,
+        therapyEndDate: undefined,
+        therapyMedicines: undefined,
+        stockStartDate: undefined,
+        tabletCount: undefined,
+        tabletsPerDose: undefined,
+        dosesPerDay: undefined
+      })
+
+      const shouldCreateLegacyTherapy = !existingLegacyLinks.has(Number(raw.id)) && !!(
+        raw.therapyStartDate || raw.therapyEndDate || raw.prescriber || Number(raw.userId || 0) > 0
+      )
+      if (shouldCreateLegacyTherapy) {
+        const therapyStartDate = raw.therapyStartDate || raw.stockStartDate || ''
+        const therapyEndDate = raw.therapyEndDate || ''
+        pendingTherapies.push({
+          id: nextDeadlineId++,
+          title: `Terapia ${raw.title || 'medicinale'}`,
+          date: therapyEndDate || therapyStartDate || raw.date || localDateISO(),
+          userId: Number(raw.userId || 0),
+          done: false,
+          kind: 'therapy',
+          purpose: raw.purpose || '',
+          prescriber: raw.prescriber || '',
+          notes: '',
+          therapyStartDate,
+          therapyEndDate,
+          therapyMedicines: [{
+            id: 1,
+            medicineId: Number(raw.id),
+            tabletsPerDose: Number(raw.tabletsPerDose || 1),
+            dosesPerDay: Number(raw.dosesPerDay || 1),
+            usage: raw.usage || ''
+          }],
+          legacyMedicineId: Number(raw.id)
+        })
+      }
+      return
+    }
+
+    if (raw?.kind === 'therapy') {
+      result.push({
+        ...base,
+        kind: 'therapy',
+        date: raw.therapyEndDate || raw.therapyStartDate || raw.date || localDateISO(),
+        therapyMedicines: Array.isArray(raw.therapyMedicines) ? raw.therapyMedicines.map(normalizeTherapyMedicine) : []
+      })
+      return
+    }
+
+    result.push({ ...base, kind: raw?.kind || 'general' })
+  })
+
+  return [...result, ...pendingTherapies]
+}
+
 export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 3,
+    version: 4,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -207,7 +431,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         }))
       : fallback.users,
     calendarEvents: Array.isArray(source.calendarEvents) ? source.calendarEvents : [],
-    deadlines: Array.isArray(source.deadlines) ? source.deadlines.map((d: any) => ({ ...d, done: !!d.done })) : [],
+    deadlines: migrateDeadlines(source.deadlines),
     categories: Array.isArray(source.categories) && source.categories.length ? source.categories : fallback.categories,
     pantry: Array.isArray(source.pantry) ? source.pantry : [],
     shopping: Array.isArray(source.shopping) ? source.shopping : [],
