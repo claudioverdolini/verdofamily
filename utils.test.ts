@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, cleanReceiptLine, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, weekDates } from './utils'
+import { addDays, cleanReceiptLine, medicineDepletionDate, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, weekDates } from './utils'
 import { initialData } from './data'
 
 describe('date helpers', () => {
@@ -16,6 +16,12 @@ describe('date helpers', () => {
 
   it('adds days without UTC drift', () => {
     expect(addDays('2026-03-28', 1)).toBe('2026-03-29')
+  })
+
+  it('calculates the last day covered by medicine stock', () => {
+    expect(medicineDepletionDate('2026-09-14', 30, 1, 1)).toBe('2026-10-13')
+    expect(medicineDepletionDate('2026-09-14', 30, 1, 2)).toBe('2026-09-28')
+    expect(medicineDepletionDate('2026-09-14', 10, 1, 0.5)).toBe('2026-10-03')
   })
 })
 
