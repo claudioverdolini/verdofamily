@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Cloud,
   CloudOff,
+  HeartPulse,
   Home,
   LogOut,
   Menu,
@@ -28,6 +29,7 @@ import CalendarPage from './pages/Calendar'
 import ShoppingPantryPage from './pages/ShoppingPantry'
 import MealsPage from './pages/Meals'
 import ChoresPage from './pages/Chores'
+import HealthPage from './pages/Health'
 import DeadlinesPage from './pages/Deadlines'
 import TodosPage from './pages/Todos'
 import UsersPage from './pages/Users'
@@ -39,6 +41,7 @@ const NAV: Array<{ key: PageKey; label: string; icon: React.ReactNode; group?: s
   { key: 'shopping', label: 'Spesa & Dispensa', icon: <ShoppingBasket size={20} /> },
   { key: 'meals', label: 'Pasti', icon: <Utensils size={20} /> },
   { key: 'chores', label: 'Compiti & Paghette', icon: <WalletCards size={20} /> },
+  { key: 'health', label: 'Salute', icon: <HeartPulse size={20} /> },
   { key: 'deadlines', label: 'Scadenze', icon: <ReceiptText size={20} /> },
   { key: 'todos', label: 'ToDo List', icon: <CheckSquare2 size={20} /> },
   { key: 'users', label: 'Utenti', icon: <Users size={20} />, group: 'Gestione' },
@@ -52,6 +55,7 @@ function PageRenderer() {
     case 'shopping': return <ShoppingPantryPage />
     case 'meals': return <MealsPage />
     case 'chores': return <ChoresPage />
+    case 'health': return <HealthPage />
     case 'deadlines': return <DeadlinesPage />
     case 'todos': return <TodosPage />
     case 'users': return <UsersPage />
