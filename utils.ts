@@ -21,6 +21,16 @@ export function addDays(dateStr: string, days: number) {
   return localDateISO(d)
 }
 
+export function medicineDepletionDate(startDate: string, tabletCount: number, tabletsPerDose: number, dosesPerDay: number) {
+  const tablets = Number(tabletCount)
+  const perDose = Number(tabletsPerDose)
+  const frequency = Number(dosesPerDay)
+  if (!startDate || !Number.isFinite(tablets) || !Number.isFinite(perDose) || !Number.isFinite(frequency) || tablets <= 0 || perDose <= 0 || frequency <= 0) return ''
+  const dailyUse = perDose * frequency
+  const coverageDays = Math.ceil(tablets / dailyUse)
+  return addDays(startDate, Math.max(coverageDays - 1, 0))
+}
+
 export function weekDates(dateStr: string) {
   const base = parseISODate(dateStr)
   const day = base.getDay()
