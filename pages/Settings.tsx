@@ -32,6 +32,9 @@ const HOME_CARDS = [
   { key: 'wallets', label: 'Paghette' }
 ] as const
 
+const BACKUP_MAX_AGE_MS = 24 * 60 * 60 * 1000
+const BACKUP_REFRESH_MS = 5 * 60 * 1000
+
 type DriveBackupStatus = {
   enabled: boolean
   last_attempt_at: string | null
@@ -44,6 +47,12 @@ type BackupHistoryItem = {
   revision: number
   reason: string
   created_at: string
+}
+
+type BackupHealth = {
+  ok: boolean
+  title: string
+  detail: string
 }
 
 function formatDateTime(value?: string | null) {
@@ -61,6 +70,42 @@ function backupReason(reason: string) {
   if (reason === 'pre_restore') return 'Prima di un ripristino'
   if (reason === 'pre_save') return 'Versione precedente'
   return reason || 'Backup'
+}
+
+function getBackupHealth(status: DriveBackupStatus | null): BackupHealth {
+  if (!status) {
+    return { ok: false, title: '⚠️ Backup non verificato', detail: 'In attesa del controllo Google Drive.' }
+  }
+  if (!status.enabled) {
+    return { ok: false, title: '⚠️ Backup da configurare', detail: 'Il backup automatico Google Drive non risulta attivo.' }
+  }
+  if (status.last_error) {
+    return { ok: false, title: '⚠️ Backup da verificare', detail: `Ultimo errore: ${status.last_error}` }
+  }
+  if (!status.last_success_at) {
+    return { ok: false, title: '⚠️ Backup da verificare', detail: 'Nessun backup Google Drive riuscito registrato.' }
+  }
+
+  const lastSuccess = new Date(status.last_success_at).getTime()
+  if (!Number.isFinite(lastSuccess)) {
+    return { ok: false, title: '⚠️ Backup da verificare', detail: 'La data dell’ultimo backup non è valida.' }
+  }
+
+  const ageMs = Math.max(0, Date.now() - lastSuccess)
+  if (ageMs > BACKUP_MAX_AGE_MS) {
+    const hours = Math.floor(ageMs / (60 * 60 * 1000))
+    return {
+      ok: false,
+      title: '⚠️ Backup da verificare',
+      detail: `Ultimo Drive: ${formatDateTime(status.last_success_at)} · ${hours} ore fa.`
+    }
+  }
+
+  return {
+    ok: true,
+    title: '✅ Backup protetto',
+    detail: `Ultimo Drive: ${formatDateTime(status.last_success_at)}`
+  }
 }
 
 export default function SettingsPage() {
@@ -83,9 +128,18 @@ export default function SettingsPage() {
   const [backupLoading, setBackupLoading] = useState(false)
 
   const prefs = authUser?.prefs
+  const backupHealth = getBackupHealth(driveStatus)
 
   useEffect(() => {
     void refreshBackupStatus()
+  }, [familyId, cloudAuthenticated])
+
+  useEffect(() => {
+    if (!familyId || !cloudAuthenticated) return
+    const timer = window.setInterval(() => {
+      void refreshBackupStatus()
+    }, BACKUP_REFRESH_MS)
+    return () => window.clearInterval(timer)
   }, [familyId, cloudAuthenticated])
 
   if (!authUser || !prefs) return null
@@ -279,16 +333,16 @@ export default function SettingsPage() {
         <CardHeader title="Dati & backup" subtitle="Backup automatici nel cloud e su Google Drive, più esportazione manuale locale." />
 
         {cloudAuthenticated && familyId ? <>
-          <div className={driveStatus?.last_error ? 'callout' : 'callout callout--success'}>
-            <strong>Google Drive automatico: {driveStatus?.enabled ? 'attivo' : 'configurazione in corso'}</strong><br />
-            Ultimo backup riuscito: {formatDateTime(driveStatus?.last_success_at)}
-            {driveStatus?.last_error ? <><br />Ultimo errore: {driveStatus.last_error}</> : null}
+          <div className={backupHealth.ok ? 'callout callout--success' : 'callout'}>
+            <strong>{backupHealth.title}</strong><br />
+            {backupHealth.detail}
+            {driveStatus?.enabled ? <><br />Controllo automatico attivo ogni 5 minuti.</> : null}
           </div>
           <div className="backup-actions">
             <Button variant="soft" icon={<Cloud size={17} />} onClick={runDriveBackup} disabled={backupBusy}>{backupBusy ? 'Backup in corso…' : 'Backup Google Drive ora'}</Button>
             <Button variant="ghost" icon={<RefreshCw size={17} />} onClick={refreshBackupStatus} disabled={backupLoading}>{backupLoading ? 'Verifica…' : 'Verifica stato'}</Button>
           </div>
-          <div className="callout">Il backup automatico viene eseguito ogni notte. Ogni salvataggio importante conserva inoltre una versione precedente nel database prima di sovrascrivere i dati.</div>
+          <div className="callout">Il backup automatico viene eseguito ogni notte. Se per più di 24 ore non viene registrato un backup riuscito, qui comparirà automaticamente un avviso. Ogni salvataggio importante conserva inoltre una versione precedente nel database.</div>
 
           {backupHistory.length ? <>
             <CardHeader title="Cronologia ripristinabile" subtitle="Ultime versioni conservate su Supabase" />
