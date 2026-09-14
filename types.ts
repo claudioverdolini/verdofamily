@@ -7,6 +7,7 @@ export type PageKey =
   | 'shopping'
   | 'meals'
   | 'chores'
+  | 'health'
   | 'deadlines'
   | 'todos'
   | 'users'
@@ -92,6 +93,38 @@ export type Deadline = {
   dosesPerDay?: number
 }
 
+export type HealthVisitStatus = 'scheduled' | 'completed' | 'cancelled'
+
+export type HealthVisit = {
+  id: number
+  userId: number
+  title: string
+  date: string
+  time?: string
+  status: HealthVisitStatus
+  specialty?: string
+  doctor?: string
+  facility?: string
+  reason?: string
+  outcome?: string
+  nextVisitDate?: string
+  notes?: string
+  calendarEventId?: number
+}
+
+export type HealthRecordKind = 'exam' | 'report' | 'vaccine' | 'document' | 'note'
+
+export type HealthRecord = {
+  id: number
+  userId: number
+  date: string
+  title: string
+  kind: HealthRecordKind
+  provider?: string
+  result?: string
+  notes?: string
+}
+
 export type PantryItem = {
   id: number
   name: string
@@ -161,6 +194,8 @@ export type FamilyData = {
   users: FamilyUser[]
   calendarEvents: CalendarEvent[]
   deadlines: Deadline[]
+  healthVisits: HealthVisit[]
+  healthRecords: HealthRecord[]
   categories: string[]
   pantry: PantryItem[]
   shopping: ShoppingItem[]
