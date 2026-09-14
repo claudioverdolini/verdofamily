@@ -31,6 +31,42 @@ export function medicineDepletionDate(startDate: string, tabletCount: number, ta
   return addDays(startDate, Math.max(coverageDays - 1, 0))
 }
 
+export function medicineTherapyCoverage(
+  therapyStartDate: string,
+  therapyEndDate: string,
+  stockStartDate: string,
+  tabletCount: number,
+  tabletsPerDose: number,
+  dosesPerDay: number
+) {
+  const perDose = Number(tabletsPerDose)
+  const frequency = Number(dosesPerDay)
+  if (!therapyStartDate || !therapyEndDate || therapyEndDate < therapyStartDate || !Number.isFinite(perDose) || !Number.isFinite(frequency) || perDose <= 0 || frequency <= 0) return null
+
+  const dailyUse = perDose * frequency
+  const therapyDays = Math.round((parseISODate(therapyEndDate).getTime() - parseISODate(therapyStartDate).getTime()) / 86400000) + 1
+  const effectiveStockStart = stockStartDate && stockStartDate > therapyStartDate ? stockStartDate : therapyStartDate
+  const remainingDays = effectiveStockStart > therapyEndDate
+    ? 0
+    : Math.round((parseISODate(therapyEndDate).getTime() - parseISODate(effectiveStockStart).getTime()) / 86400000) + 1
+  const requiredTablets = Math.max(0, Math.ceil((remainingDays * dailyUse) - 1e-9))
+  const tablets = Number(tabletCount)
+  const hasStock = Number.isFinite(tablets) && tablets > 0
+  const depletionDate = hasStock ? medicineDepletionDate(effectiveStockStart, tablets, perDose, frequency) : ''
+
+  return {
+    therapyDays,
+    remainingDays,
+    dailyUse,
+    requiredTablets,
+    effectiveStockStart,
+    depletionDate,
+    sufficient: hasStock ? tablets >= requiredTablets : null,
+    shortage: hasStock ? Math.max(requiredTablets - tablets, 0) : null,
+    surplus: hasStock ? Math.max(tablets - requiredTablets, 0) : null
+  }
+}
+
 export function weekDates(dateStr: string) {
   const base = parseISODate(dateStr)
   const day = base.getDay()
