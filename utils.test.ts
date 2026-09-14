@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, cleanReceiptLine, medicineDepletionDate, medicineTherapyCoverage, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, weekDates } from './utils'
+import { addDays, cleanReceiptLine, medicineDepletionDate, medicineInventorySummary, medicineTherapyCoverage, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, therapyLineRequiredTablets, weekDates } from './utils'
 import { initialData } from './data'
 
 describe('date helpers', () => {
@@ -47,6 +47,76 @@ describe('date helpers', () => {
   })
 })
 
+describe('shared medicine inventory', () => {
+  const medicine: any = {
+    id: 10,
+    title: 'Farmaco A',
+    date: '2027-01-31',
+    userId: 0,
+    done: false,
+    kind: 'medicine',
+    defaultPackageSize: 30,
+    packages: [
+      { id: 1, expiryDate: '2027-01-31', quantity: 30, packageSize: 30 },
+      { id: 2, expiryDate: '2027-02-28', quantity: 30, packageSize: 30 }
+    ]
+  }
+
+  it('sums simultaneous therapies against one shared stock', () => {
+    const therapies: any[] = [
+      {
+        id: 20,
+        title: 'Terapia 1',
+        date: '2026-09-23',
+        userId: 1,
+        done: false,
+        kind: 'therapy',
+        therapyStartDate: '2026-09-14',
+        therapyEndDate: '2026-09-23',
+        therapyMedicines: [{ id: 1, medicineId: 10, tabletsPerDose: 1, dosesPerDay: 2 }]
+      },
+      {
+        id: 21,
+        title: 'Terapia 2',
+        date: '2026-09-23',
+        userId: 2,
+        done: false,
+        kind: 'therapy',
+        therapyStartDate: '2026-09-14',
+        therapyEndDate: '2026-09-23',
+        therapyMedicines: [{ id: 1, medicineId: 10, tabletsPerDose: 1, dosesPerDay: 1 }]
+      }
+    ]
+    const summary = medicineInventorySummary(medicine, therapies, '2026-09-14')
+    expect(summary.totalStock).toBe(60)
+    expect(summary.activeDailyUse).toBe(3)
+    expect(summary.knownRemainingDemand).toBe(30)
+    expect(summary.shortageKnown).toBe(0)
+  })
+
+  it('calculates how many boxes are missing for shared therapies', () => {
+    const therapies: any[] = [{
+      id: 20,
+      title: 'Terapia lunga',
+      date: '2026-10-23',
+      userId: 1,
+      done: false,
+      kind: 'therapy',
+      therapyStartDate: '2026-09-14',
+      therapyEndDate: '2026-10-23',
+      therapyMedicines: [{ id: 1, medicineId: 10, tabletsPerDose: 1, dosesPerDay: 2 }]
+    }]
+    const summary = medicineInventorySummary(medicine, therapies, '2026-09-14')
+    expect(summary.knownRemainingDemand).toBe(80)
+    expect(summary.shortageKnown).toBe(20)
+    expect(summary.packagesToBuy).toBe(1)
+  })
+
+  it('calculates tablets required by one therapy line', () => {
+    expect(therapyLineRequiredTablets('2026-09-14', '2026-09-20', { tabletsPerDose: 1, dosesPerDay: 2 })).toBe(14)
+  })
+})
+
 describe('receipt parsing', () => {
   it('removes price tails and headers', () => {
     expect(cleanReceiptLine('LATTE INTERO 1,79')).toBe('LATTE INTERO')
@@ -66,7 +136,34 @@ describe('data migration', () => {
   it('migrates legacy meals to dishes', () => {
     const migrated = migrateData({ users: initialData.users, meals: [{ id: 9, name: 'Riso', type: 'Primo', variant: '', ingredients: [] }] }, initialData)
     expect(migrated.dishes[0].name).toBe('Riso')
-    expect(migrated.version).toBe(3)
+    expect(migrated.version).toBe(4)
+  })
+
+  it('separates a legacy medicine from its prescribed therapy without losing data', () => {
+    const migrated = migrateData({
+      ...initialData,
+      deadlines: [{
+        id: 7,
+        title: 'Farmaco B',
+        date: '2027-01-01',
+        userId: 1,
+        done: false,
+        kind: 'medicine',
+        tabletCount: 20,
+        tabletsPerDose: 1,
+        dosesPerDay: 2,
+        therapyStartDate: '2026-09-14',
+        therapyEndDate: '2026-09-20',
+        prescriber: 'Rossi',
+        usage: 'Dopo i pasti'
+      }]
+    }, initialData)
+    const medicine = migrated.deadlines.find(item => item.kind === 'medicine')
+    const therapy = migrated.deadlines.find(item => item.kind === 'therapy')
+    expect(medicine?.packages?.[0].quantity).toBe(20)
+    expect(therapy?.legacyMedicineId).toBe(7)
+    expect(therapy?.therapyMedicines?.[0].medicineId).toBe(7)
+    expect(therapy?.prescriber).toBe('Rossi')
   })
 
   it('preserves linked cloud user ids', () => {
