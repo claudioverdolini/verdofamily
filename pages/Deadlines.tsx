@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Check, Pencil, Pill, Plus, Trash2 } from 'lucide-react'
 import { useFamily } from '../store'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
-import { localDateISO, medicineDepletionDate, parseISODate } from '../utils'
+import { localDateISO, medicineDepletionDate, medicineTherapyCoverage, parseISODate } from '../utils'
 
 type DeadlineSection = 'general' | 'medicine'
 
@@ -31,6 +31,22 @@ function positiveNumber(value: any) {
   return Number.isFinite(number) && number > 0 ? number : undefined
 }
 
+function medicineConsumptionStart(therapyStartDate?: string, stockStartDate?: string) {
+  if (therapyStartDate && (!stockStartDate || therapyStartDate > stockStartDate)) return therapyStartDate
+  return stockStartDate || therapyStartDate || ''
+}
+
+function therapyPhase(startDate?: string, endDate?: string) {
+  if (!startDate && !endDate) return ''
+  if (startDate && endDate && endDate < startDate) return 'Date terapia da verificare'
+  const today = localDateISO()
+  if (startDate && today < startDate) return `Inizio terapia: ${formatMedicineDate(startDate)}`
+  if (endDate && today > endDate) return `Terapia terminata il ${formatMedicineDate(endDate)}`
+  if (endDate && today === endDate) return 'Ultimo giorno di terapia'
+  if (startDate && (!endDate || today >= startDate)) return 'Terapia in corso'
+  return ''
+}
+
 export default function DeadlinesPage() {
   const { data, authUser, upsertDeadline, toggleDeadline, deleteDeadline } = useFamily()
   const [editing, setEditing] = useState<any>(null)
@@ -49,6 +65,8 @@ export default function DeadlinesPage() {
       usage: '',
       prescriber: '',
       notes: '',
+      therapyStartDate: '',
+      therapyEndDate: '',
       stockStartDate: localDateISO(),
       tabletCount: '',
       tabletsPerDose: 1,
@@ -58,6 +76,10 @@ export default function DeadlinesPage() {
 
   function save() {
     if (!editing?.title?.trim() || !editing?.date) return
+    if (editing.kind === 'medicine' && editing.therapyStartDate && editing.therapyEndDate && editing.therapyEndDate < editing.therapyStartDate) {
+      alert('La data di fine terapia non può essere precedente alla data di inizio.')
+      return
+    }
     upsertDeadline({
       ...editing,
       title: editing.title.trim(),
@@ -68,6 +90,8 @@ export default function DeadlinesPage() {
       usage: editing.usage?.trim() || '',
       prescriber: editing.prescriber?.trim() || '',
       notes: editing.notes?.trim() || '',
+      therapyStartDate: editing.kind === 'medicine' ? (editing.therapyStartDate || '') : undefined,
+      therapyEndDate: editing.kind === 'medicine' ? (editing.therapyEndDate || '') : undefined,
       stockStartDate: editing.kind === 'medicine' ? (editing.stockStartDate || '') : undefined,
       tabletCount: editing.kind === 'medicine' ? positiveNumber(editing.tabletCount) : undefined,
       tabletsPerDose: editing.kind === 'medicine' ? positiveNumber(editing.tabletsPerDose) : undefined,
@@ -81,14 +105,36 @@ export default function DeadlinesPage() {
     .slice()
     .sort((a, b) => Number(a.done) - Number(b.done) || a.date.localeCompare(b.date))
 
+  const editingConsumptionStart = editing?.kind === 'medicine'
+    ? medicineConsumptionStart(editing.therapyStartDate || '', editing.stockStartDate || '')
+    : ''
+
   const editingDepletionDate = editing?.kind === 'medicine'
     ? medicineDepletionDate(
-        editing.stockStartDate || '',
+        editingConsumptionStart,
         Number(editing.tabletCount || 0),
         Number(editing.tabletsPerDose || 0),
         Number(editing.dosesPerDay || 0)
       )
     : ''
+
+  const editingCoverage = editing?.kind === 'medicine'
+    ? medicineTherapyCoverage(
+        editing.therapyStartDate || '',
+        editing.therapyEndDate || '',
+        editing.stockStartDate || '',
+        Number(editing.tabletCount || 0),
+        Number(editing.tabletsPerDose || 0),
+        Number(editing.dosesPerDay || 0)
+      )
+    : null
+
+  const editingTherapyInvalid = !!(
+    editing?.kind === 'medicine' &&
+    editing.therapyStartDate &&
+    editing.therapyEndDate &&
+    editing.therapyEndDate < editing.therapyStartDate
+  )
 
   const pageAction = section === 'medicine'
     ? <Button icon={<Pill size={18} />} onClick={() => openNew('medicine')}>Aggiungi medicinale</Button>
@@ -98,7 +144,7 @@ export default function DeadlinesPage() {
     <PageIntro
       eyebrow="Promemoria"
       title="Scadenze"
-      description="Documenti, pagamenti, rinnovi e medicinali: tutte le date importanti in un unico posto."
+      description="Documenti, pagamenti, rinnovi, medicinali e terapie: tutte le date importanti in un unico posto."
       actions={pageAction}
     />
 
@@ -114,22 +160,48 @@ export default function DeadlinesPage() {
     </div>
 
     <Card>
-      {section === 'medicine' ? <CardHeader title="Scadenze medicinali" subtitle="Monitora scadenza, utilizzo e durata stimata delle scorte." /> : null}
+      {section === 'medicine' ? <CardHeader title="Medicinali e terapie" subtitle="Monitora scadenza, durata della cura, dosaggio e copertura delle scorte." /> : null}
 
       {list.length ? <div className="deadline-list">{list.map(item => {
         const user = data.users.find(u => u.id === item.userId)
         const status = section === 'medicine' ? medicineStatus(item.date, item.done) : null
-        const depletionDate = item.kind === 'medicine'
-          ? medicineDepletionDate(item.stockStartDate || '', Number(item.tabletCount || 0), Number(item.tabletsPerDose || 0), Number(item.dosesPerDay || 0))
-          : ''
+        const consumptionStart = medicineConsumptionStart(item.therapyStartDate, item.stockStartDate)
+        const coverage = item.kind === 'medicine'
+          ? medicineTherapyCoverage(
+              item.therapyStartDate || '',
+              item.therapyEndDate || '',
+              item.stockStartDate || '',
+              Number(item.tabletCount || 0),
+              Number(item.tabletsPerDose || 0),
+              Number(item.dosesPerDay || 0)
+            )
+          : null
+        const depletionDate = coverage?.depletionDate || (item.kind === 'medicine'
+          ? medicineDepletionDate(consumptionStart, Number(item.tabletCount || 0), Number(item.tabletsPerDose || 0), Number(item.dosesPerDay || 0))
+          : '')
         const stockInfo = item.tabletCount && item.tabletsPerDose && item.dosesPerDay
           ? `${item.tabletCount} compresse · ${item.tabletsPerDose} per assunzione · ${item.dosesPerDay} ass./giorno`
+          : ''
+        const therapyInfo = item.therapyStartDate || item.therapyEndDate
+          ? `Terapia: ${item.therapyStartDate ? formatMedicineDate(item.therapyStartDate) : '?'} → ${item.therapyEndDate ? formatMedicineDate(item.therapyEndDate) : '?'}`
+          : ''
+        const phase = therapyPhase(item.therapyStartDate, item.therapyEndDate)
+        const coverageInfo = coverage
+          ? coverage.sufficient === true
+            ? `Scorta sufficiente${coverage.surplus ? ` · restano ${coverage.surplus} compresse` : ' · quantità esatta'}`
+            : coverage.sufficient === false
+              ? `Scorta insufficiente · mancano ${coverage.shortage} compresse`
+              : `Per la terapia servono ${coverage.requiredTablets} compresse`
           : ''
         const medicineInfo = [
           user?.name ? `Prescritto a ${user.name}` : '',
           item.purpose ? `Serve per: ${item.purpose}` : '',
+          therapyInfo,
+          phase,
           stockInfo,
-          depletionDate ? `Esaurimento stimato: ${formatMedicineDate(depletionDate)}` : '',
+          coverage ? `Necessarie: ${coverage.requiredTablets} compresse` : '',
+          coverageInfo,
+          depletionDate ? `Copertura stimata fino al ${formatMedicineDate(depletionDate)}` : '',
           item.usage ? `Uso: ${item.usage}` : ''
         ].filter(Boolean).join(' · ')
 
@@ -151,7 +223,7 @@ export default function DeadlinesPage() {
       })}</div> : <EmptyState
         icon={section === 'medicine' ? <Pill size={24} /> : undefined}
         title={section === 'medicine' ? 'Nessun medicinale monitorato' : 'Nessuna scadenza'}
-        text={section === 'medicine' ? 'Aggiungi un medicinale per tenere sotto controllo scadenza e disponibilità.' : 'Aggiungi la prima data importante.'}
+        text={section === 'medicine' ? 'Aggiungi un medicinale per tenere sotto controllo scadenza, terapia e disponibilità.' : 'Aggiungi la prima data importante.'}
         action={<Button onClick={() => openNew(section)}>{section === 'medicine' ? 'Aggiungi medicinale' : 'Aggiungi scadenza'}</Button>}
       />}
     </Card>
@@ -160,7 +232,7 @@ export default function DeadlinesPage() {
       open={!!editing}
       onClose={() => setEditing(null)}
       title={editing?.kind === 'medicine' ? (editing?.id ? 'Modifica medicinale' : 'Nuovo medicinale') : (editing?.id ? 'Modifica scadenza' : 'Nuova scadenza')}
-      subtitle={editing?.kind === 'medicine' ? 'Solo nome e data di scadenza sono necessari. Tutti gli altri campi sono facoltativi.' : undefined}
+      subtitle={editing?.kind === 'medicine' ? 'Nome e data di scadenza identificano il medicinale; terapia, dosaggio e altri dettagli restano facoltativi.' : undefined}
       size={editing?.kind === 'medicine' ? 'lg' : 'md'}
       footer={<div className="modal-actions"><div>{editing?.id ? <Button variant="danger" onClick={() => { deleteDeadline(editing.id); setEditing(null) }}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button onClick={save}>Salva</Button></div></div>}
     >
@@ -173,14 +245,28 @@ export default function DeadlinesPage() {
         <Field label="A cosa serve" className="field--wide"><input value={editing.purpose || ''} onChange={e => setEditing({ ...editing, purpose: e.target.value })} placeholder="Es. dolore, pressione, allergia…" /></Field>
 
         <Card className="field--wide">
-          <CardHeader title="Scorta e consumo" subtitle="Inserendo questi dati, VerdoFamily calcola automaticamente quando finiranno le compresse." />
+          <CardHeader title="Terapia prescritta" subtitle="Indica l'inizio e la fine della cura: VerdoFamily le mette in relazione con dosaggio e scorta." />
           <div className="form-grid form-grid--2">
-            <Field label="Data inizio conteggio" hint="Di norma oggi, oppure il giorno in cui hai iniziato la confezione."><input type="date" value={editing.stockStartDate || ''} onChange={e => setEditing({ ...editing, stockStartDate: e.target.value })} /></Field>
+            <Field label="Inizio terapia"><input type="date" value={editing.therapyStartDate || ''} onChange={e => setEditing({ ...editing, therapyStartDate: e.target.value })} /></Field>
+            <Field label="Fine terapia prescritta"><input type="date" value={editing.therapyEndDate || ''} min={editing.therapyStartDate || undefined} onChange={e => setEditing({ ...editing, therapyEndDate: e.target.value })} /></Field>
+          </div>
+          {editingTherapyInvalid ? <div className="callout callout--warning" style={{ marginTop: 12 }}><strong>Date non valide.</strong> La fine della terapia deve essere uguale o successiva all'inizio.</div> : editingCoverage ? <div className={editingCoverage.sufficient === false ? 'callout callout--warning' : 'callout callout--success'} style={{ marginTop: 12 }}>
+            <strong>Terapia di {editingCoverage.therapyDays} giorni · {editingCoverage.requiredTablets} compresse necessarie{editingCoverage.remainingDays !== editingCoverage.therapyDays ? ' dalla data di conteggio della scorta' : ''}.</strong>
+            {editingCoverage.sufficient === true ? <><br />Scorta sufficiente fino al termine della cura{editingCoverage.surplus ? `: resteranno circa ${editingCoverage.surplus} compresse.` : ': quantità esatta.'}</> : null}
+            {editingCoverage.sufficient === false ? <><br />Scorta insufficiente: mancano circa {editingCoverage.shortage} compresse. Con la scorta inserita la copertura stimata arriva al {formatMedicineDate(editingCoverage.depletionDate)}.</> : null}
+            {editingCoverage.sufficient === null ? <><br />Inserisci anche il numero di compresse disponibili per verificare se bastano fino alla fine della cura.</> : null}
+          </div> : editing.therapyStartDate && editing.therapyEndDate ? <div className="callout" style={{ marginTop: 12 }}>Inserisci il dosaggio nella sezione sottostante per calcolare quante compresse servono durante tutta la terapia.</div> : <div className="callout" style={{ marginTop: 12 }}>Puoi lasciare vuote queste date se il medicinale non fa parte di una terapia definita.</div>}
+        </Card>
+
+        <Card className="field--wide">
+          <CardHeader title="Scorta e consumo" subtitle="Quantità e frequenza permettono di stimare l'esaurimento e verificare la copertura della terapia." />
+          <div className="form-grid form-grid--2">
+            <Field label="Data inizio conteggio" hint="Il giorno da cui questa quantità è effettivamente disponibile. Se la terapia inizia dopo, il conteggio partirà dall'inizio terapia."><input type="date" value={editing.stockStartDate || ''} onChange={e => setEditing({ ...editing, stockStartDate: e.target.value })} /></Field>
             <Field label="Compresse disponibili"><input type="number" min="0" step="1" value={editing.tabletCount ?? ''} onChange={e => setEditing({ ...editing, tabletCount: e.target.value })} placeholder="Es. 30" /></Field>
             <Field label="Compresse per assunzione"><input type="number" min="0" step="0.25" value={editing.tabletsPerDose ?? ''} onChange={e => setEditing({ ...editing, tabletsPerDose: e.target.value })} placeholder="Es. 1" /></Field>
             <Field label="Assunzioni al giorno" hint="Es. 2 = mattina e sera; 0,5 = una volta ogni 2 giorni."><input type="number" min="0" step="0.25" value={editing.dosesPerDay ?? ''} onChange={e => setEditing({ ...editing, dosesPerDay: e.target.value })} placeholder="Es. 1" /></Field>
           </div>
-          {editingDepletionDate ? <div className="callout callout--success" style={{ marginTop: 12 }}><strong>Esaurimento stimato: {formatMedicineDate(editingDepletionDate)}</strong><br />Calcolo basato sulla quantità e sulla frequenza indicate, a partire dalla data di inizio conteggio.</div> : <div className="callout" style={{ marginTop: 12 }}>Inserisci quantità, compresse per assunzione e frequenza per ottenere la data di esaurimento stimata.</div>}
+          {editingDepletionDate ? <div className="callout callout--success" style={{ marginTop: 12 }}><strong>Copertura stimata fino al {formatMedicineDate(editingDepletionDate)}</strong><br />Il calcolo parte dal {formatMedicineDate(editingConsumptionStart)} e usa quantità e frequenza indicate.</div> : <div className="callout" style={{ marginTop: 12 }}>Inserisci quantità, compresse per assunzione e frequenza per ottenere la data di esaurimento stimata.</div>}
         </Card>
 
         <Field label="Modalità d'uso / dosaggio" className="field--wide"><textarea rows={3} value={editing.usage || ''} onChange={e => setEditing({ ...editing, usage: e.target.value })} placeholder="Es. 1 compressa dopo cena, solo al bisogno…" /></Field>
