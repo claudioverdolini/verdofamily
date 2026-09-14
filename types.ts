@@ -62,6 +62,8 @@ export type Deadline = {
   usage?: string
   prescriber?: string
   notes?: string
+  therapyStartDate?: string
+  therapyEndDate?: string
   stockStartDate?: string
   tabletCount?: number
   tabletsPerDose?: number
