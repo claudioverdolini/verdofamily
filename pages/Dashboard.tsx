@@ -26,7 +26,7 @@ export default function Dashboard() {
 
   const nextDeadlines = useMemo(
     () => data.deadlines
-      .filter(d => !d.done && d.date >= today && d.date <= addDays(today, 15))
+      .filter(d => d.kind !== 'medicine' && d.kind !== 'therapy' && !d.done && d.date >= today && d.date <= addDays(today, 15))
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(0, 4),
     [data.deadlines, today]
