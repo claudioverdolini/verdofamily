@@ -74,7 +74,7 @@ export type Deadline = {
   date: string
   userId: number
   done: boolean
-  kind?: 'general' | 'medicine' | 'therapy'
+  kind?: 'general' | 'medicine' | 'therapy' | 'visit' | 'health-record'
   activeIngredient?: string
   purpose?: string
   usage?: string
@@ -86,43 +86,22 @@ export type Deadline = {
   therapyEndDate?: string
   therapyMedicines?: TherapyMedicine[]
   legacyMedicineId?: number
+  // Health visit / clinical history fields.
+  healthStatus?: 'scheduled' | 'completed' | 'cancelled'
+  time?: string
+  specialty?: string
+  doctor?: string
+  facility?: string
+  outcome?: string
+  nextVisitDate?: string
+  healthRecordKind?: 'exam' | 'report' | 'vaccine' | 'document' | 'note'
+  provider?: string
+  result?: string
   // Legacy fields retained only so older backups can be migrated safely.
   stockStartDate?: string
   tabletCount?: number
   tabletsPerDose?: number
   dosesPerDay?: number
-}
-
-export type HealthVisitStatus = 'scheduled' | 'completed' | 'cancelled'
-
-export type HealthVisit = {
-  id: number
-  userId: number
-  title: string
-  date: string
-  time?: string
-  status: HealthVisitStatus
-  specialty?: string
-  doctor?: string
-  facility?: string
-  reason?: string
-  outcome?: string
-  nextVisitDate?: string
-  notes?: string
-  calendarEventId?: number
-}
-
-export type HealthRecordKind = 'exam' | 'report' | 'vaccine' | 'document' | 'note'
-
-export type HealthRecord = {
-  id: number
-  userId: number
-  date: string
-  title: string
-  kind: HealthRecordKind
-  provider?: string
-  result?: string
-  notes?: string
 }
 
 export type PantryItem = {
@@ -194,8 +173,6 @@ export type FamilyData = {
   users: FamilyUser[]
   calendarEvents: CalendarEvent[]
   deadlines: Deadline[]
-  healthVisits: HealthVisit[]
-  healthRecords: HealthRecord[]
   categories: string[]
   pantry: PantryItem[]
   shopping: ShoppingItem[]
