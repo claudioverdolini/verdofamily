@@ -422,6 +422,11 @@ export default function HealthPage() {
       setAttachmentMessage('Gli allegati richiedono l’accesso cloud.')
       return
     }
+    const stored = data.deadlines.find(item => item.id === editing.id && item.kind === editing.kind)
+    if (!stored) {
+      setAttachmentMessage('La scheda non risulta più sincronizzata. Chiudila, aggiorna la pagina e riaprila prima di caricare allegati.')
+      return
+    }
     setAttachmentBusy(true)
     setAttachmentMessage('')
     try {
@@ -433,10 +438,11 @@ export default function HealthPage() {
       const { data: result, error } = await supabase.functions.invoke('health-attachment', { body: form })
       if (error || !result?.ok || !result?.attachment) throw new Error(error?.message || result?.error || 'Caricamento non riuscito')
       const attachments = [...(editing.attachments || []), result.attachment]
-      const stored = data.deadlines.find(item => item.id === editing.id) || editing
-      upsertDeadline({ ...stored, attachments })
+      upsertDeadline({ ...stored, ...editing, attachments })
       setEditing({ ...editing, attachments })
-      setAttachmentMessage('Allegato salvato nell’archivio sanitario privato.')
+      setAttachmentMessage(result.attachment?.driveBackup?.ok === false
+        ? 'Allegato salvato su Supabase. Backup Drive da verificare.'
+        : 'Allegato salvato su Supabase e copiato su Google Drive.')
     } catch (error: any) {
       setAttachmentMessage(`Allegato non salvato: ${error?.message || 'errore sconosciuto'}`)
     } finally {
@@ -485,7 +491,7 @@ export default function HealthPage() {
     if (!editing || !['visit', 'health-record', 'therapy'].includes(editing.kind)) return null
     const attachments = editing.attachments || []
     return <Card className="field--wide">
-      <CardHeader title="Allegati sanitari" subtitle="PDF, foto e documenti sono conservati in un archivio cloud privato. Il link di apertura è temporaneo." />
+      <CardHeader title={`Allegati · ${editing.kind === 'visit' ? 'Visita' : editing.kind === 'therapy' ? 'Terapia' : 'Esame/referto'}: ${editing.title || 'senza titolo'}`} subtitle="PDF, foto e documenti sono conservati in Supabase privato e copiati su Google Drive." />
       {!editing.id ? <div className="callout"><strong>Salva prima la scheda.</strong> Dopo il primo salvataggio riaprila per allegare referti, ricette, impegnative o foto.</div> : !cloudAuthenticated ? <div className="callout">Accedi al cloud per gestire gli allegati.</div> : <>
         <div className="backup-actions" style={{ marginBottom: attachments.length ? 12 : 0 }}>
           <label className="btn btn--soft" style={{ cursor: attachmentBusy ? 'wait' : 'pointer' }}>
