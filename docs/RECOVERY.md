@@ -16,7 +16,7 @@ No passwords, service-role keys, webhook secrets, health files or family data mu
 
 ## 1. Recover the application source
 
-Clone the repository and select the desired commit/tag. Git history is the primary source of truth for application structure.
+Clone the repository and select the desired commit/tag. Git history is the primary source of truth for application structure and deployed source.
 
 The `VerdoFamily source snapshot` GitHub Action creates a complete source archive after every push to `main` and once per week. GitHub artifacts are retained for 90 days.
 
