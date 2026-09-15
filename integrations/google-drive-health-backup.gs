@@ -11,6 +11,7 @@ function doPost(e) {
     if (!secret || payload.secret !== secret) return json_({ ok: false, error: 'unauthorized' });
 
     if (payload.type === 'health_attachment') return saveHealthAttachment_(payload);
+    if (payload.type === 'program_backup') return saveProgramBackup_(payload);
     return saveFamilyBackup_(payload);
   } catch (err) {
     return json_({ ok: false, error: String(err && err.message ? err.message : err) });
@@ -51,6 +52,29 @@ function saveHealthAttachment_(payload) {
   const file = folder.createFile(blob);
   if (payload.description) file.setDescription(String(payload.description).slice(0, 5000));
   return json_({ ok: true, fileId: file.getId(), fileName: file.getName(), type: 'health_attachment' });
+}
+
+function saveProgramBackup_(payload) {
+  if (!payload.fileName || !payload.contentBase64) return json_({ ok: false, error: 'invalid_program_backup_payload' });
+  const folderId = props.getProperty('VERDOFAMILY_PROGRAM_BACKUP_FOLDER_ID');
+  if (!folderId) return json_({ ok: false, error: 'program_backup_folder_not_configured' });
+
+  const folder = DriveApp.getFolderById(folderId);
+  const bytes = Utilities.base64Decode(payload.contentBase64);
+  const stamp = Utilities.formatDate(new Date(), 'Europe/Rome', 'yyyy-MM-dd_HH-mm-ss');
+  const sha = safe_(String(payload.commitSha || '').slice(0, 12) || 'snapshot');
+  const fileName = `VerdoFamily_Source_${stamp}_${sha}.zip`;
+  const blob = Utilities.newBlob(bytes, 'application/zip', fileName);
+  const file = folder.createFile(blob);
+  const details = [
+    payload.commitSha ? `Commit: ${payload.commitSha}` : '',
+    payload.commitMessage ? `Messaggio: ${payload.commitMessage}` : '',
+    payload.repository ? `Repository: ${payload.repository}` : '',
+    payload.createdAt ? `Creato: ${payload.createdAt}` : ''
+  ].filter(Boolean).join('\n');
+  if (details) file.setDescription(details.slice(0, 5000));
+
+  return json_({ ok: true, fileId: file.getId(), fileName: file.getName(), type: 'program_backup' });
 }
 
 function safe_(value) {
