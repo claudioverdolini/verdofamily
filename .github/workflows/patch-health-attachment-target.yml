@@ -1,0 +1,43 @@
+name: Patch health attachment target
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Health attachment handling
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('pages/Health.tsx')
+          s = p.read_text()
+          old = """    setAttachmentBusy(true)\n    setAttachmentMessage('')\n    try {\n      const form = new FormData()\n      form.append('action', 'upload')\n      form.append('familyId', familyId)\n      form.append('recordId', `${editing.kind}-${editing.id}`)\n      form.append('file', file)\n      const { data: result, error } = await supabase.functions.invoke('health-attachment', { body: form })\n      if (error || !result?.ok || !result?.attachment) throw new Error(error?.message || result?.error || 'Caricamento non riuscito')\n      const attachments = [...(editing.attachments || []), result.attachment]\n      const stored = data.deadlines.find(item => item.id === editing.id) || editing\n      upsertDeadline({ ...stored, attachments })\n      setEditing({ ...editing, attachments })\n      setAttachmentMessage('Allegato salvato nell’archivio sanitario privato.')\n"""
+          new = """    const stored = data.deadlines.find(item => item.id === editing.id && item.kind === editing.kind)\n    if (!stored) {\n      setAttachmentMessage('La scheda non risulta più sincronizzata. Chiudila, aggiorna la pagina e riaprila prima di caricare allegati.')\n      return\n    }\n    setAttachmentBusy(true)\n    setAttachmentMessage('')\n    try {\n      const form = new FormData()\n      form.append('action', 'upload')\n      form.append('familyId', familyId)\n      form.append('recordId', `${editing.kind}-${editing.id}`)\n      form.append('file', file)\n      const { data: result, error } = await supabase.functions.invoke('health-attachment', { body: form })\n      if (error || !result?.ok || !result?.attachment) throw new Error(error?.message || result?.error || 'Caricamento non riuscito')\n      const attachments = [...(editing.attachments || []), result.attachment]\n      upsertDeadline({ ...stored, ...editing, attachments })\n      setEditing({ ...editing, attachments })\n      setAttachmentMessage(result.attachment?.driveBackup?.ok === false\n        ? 'Allegato salvato su Supabase. Backup Drive da verificare.'\n        : 'Allegato salvato su Supabase e copiato su Google Drive.')\n"""
+          if old not in s:
+              raise SystemExit('upload block not found')
+          s = s.replace(old, new, 1)
+          old2 = """      <CardHeader title=\"Allegati sanitari\" subtitle=\"PDF, foto e documenti sono conservati in un archivio cloud privato. Il link di apertura è temporaneo.\" />"""
+          new2 = """      <CardHeader title={`Allegati · ${editing.kind === 'visit' ? 'Visita' : editing.kind === 'therapy' ? 'Terapia' : 'Esame/referto'}: ${editing.title || 'senza titolo'}`} subtitle=\"PDF, foto e documenti sono conservati in Supabase privato e copiati su Google Drive.\" />"""
+          if old2 not in s:
+              raise SystemExit('attachment header not found')
+          s = s.replace(old2, new2, 1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-health-attachment-target.yml
+          git add pages/Health.tsx
+          git commit -m "Fix health attachment record association"
+          git push
