@@ -22,6 +22,7 @@ import { localDateISO, medicineInventorySummary, nextId, parseISODate, therapyDa
 
 type HealthSection = 'overview' | 'visits' | 'inventory' | 'therapy' | 'records'
 type FollowUpUnit = 'days' | 'weeks' | 'months' | 'years'
+type BookingReminderUnit = 'days' | 'weeks' | 'months'
 
 function formatDate(value?: string) {
   if (!value) return '—'
@@ -84,6 +85,56 @@ function followUpLabel(item: any) {
   if (!every) return ''
   const unit = ({ days: 'giorni', weeks: 'settimane', months: 'mesi', years: 'anni' } as Record<string, string>)[item.followUpUnit || 'months']
   return `Controllo ogni ${every} ${unit}`
+}
+
+function subtractBookingInterval(dateStr: string, amount: number, unit: BookingReminderUnit) {
+  if (!dateStr || !Number.isFinite(amount) || amount <= 0) return ''
+  const value = Math.max(1, Math.round(amount))
+  const date = parseISODate(dateStr)
+  if (unit === 'days') {
+    date.setDate(date.getDate() - value)
+    return localDateISO(date)
+  }
+  if (unit === 'weeks') {
+    date.setDate(date.getDate() - (value * 7))
+    return localDateISO(date)
+  }
+  const originalDay = date.getDate()
+  date.setDate(1)
+  date.setMonth(date.getMonth() - value)
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12).getDate()
+  date.setDate(Math.min(originalDay, lastDay))
+  return localDateISO(date)
+}
+
+function calculatedBookingReminderDate(item: any, targetDate?: string) {
+  const every = positiveNumber(item?.bookingReminderEvery)
+  const date = targetDate || item?.date || ''
+  if (!every || !date) return ''
+  return subtractBookingInterval(date, every, (item.bookingReminderUnit || 'days') as BookingReminderUnit)
+}
+
+function bookingReminderLabel(item: any) {
+  const every = positiveNumber(item?.bookingReminderEvery)
+  if (!every) return ''
+  const unit = item.bookingReminderUnit || 'days'
+  const label = unit === 'months'
+    ? (every === 1 ? '1 mese' : `${every} mesi`)
+    : unit === 'weeks'
+      ? (every === 1 ? '1 settimana' : `${every} settimane`)
+      : (every === 1 ? '1 giorno' : `${every} giorni`)
+  const date = calculatedBookingReminderDate(item)
+  return `Prenotare ${label} prima${date ? ` · ${formatDate(date)}` : ''}`
+}
+
+function bookingReminderPreset(item: any) {
+  const every = positiveNumber(item?.bookingReminderEvery)
+  const unit = item?.bookingReminderUnit || 'days'
+  if (!every) return 'none'
+  if (unit === 'days' && every === 7) return '7d'
+  if (unit === 'days' && every === 15) return '15d'
+  if (unit === 'months' && every === 1) return '1m'
+  return 'custom'
 }
 
 function therapyPhase(item: any) {
@@ -206,6 +257,8 @@ export default function HealthPage() {
         nextVisitDate: '',
         followUpEvery: '',
         followUpUnit: 'months',
+        bookingReminderEvery: '',
+        bookingReminderUnit: 'days',
         notes: '',
         attachments: []
       })
@@ -231,17 +284,42 @@ export default function HealthPage() {
     setEditing(copy)
   }
 
-  function upsertVisitCalendar(visit: any, existingEventId?: number) {
+  function upsertVisitCalendar(visit: any, eventId?: number) {
     const payload = {
       title: `Visita: ${visit.title}`,
       date: visit.date,
       time: visit.time || '',
       userId: Number(visit.userId),
       notes: `Promemoria Salute${visit.doctor ? ` · ${visit.doctor}` : ''}${visit.facility ? ` · ${visit.facility}` : ''}`,
-      linkedHealthVisitId: Number(visit.id)
+      linkedHealthVisitId: Number(visit.id),
+      linkedHealthReminderType: 'visit' as const
     }
-    const exists = existingEventId ? data.calendarEvents.some(event => event.id === existingEventId) : false
-    upsertCalendarEvent(exists ? { ...payload, id: existingEventId } : payload)
+    upsertCalendarEvent(eventId ? { ...payload, id: eventId } : payload)
+  }
+
+  function upsertBookingCalendar(visit: any, eventId: number) {
+    const theoreticalDate = calculatedBookingReminderDate(visit)
+    if (!theoreticalDate || !visit.date) return
+    const reminderDate = theoreticalDate < today && visit.date >= today ? today : theoreticalDate
+    upsertCalendarEvent({
+      id: eventId,
+      title: `Prenotare: ${visit.title}`,
+      date: reminderDate,
+      time: '',
+      userId: Number(visit.userId),
+      notes: `Promemoria prenotazione per controllo previsto il ${formatDate(visit.date)}${visit.doctor ? ` · ${visit.doctor}` : ''}${visit.facility ? ` · ${visit.facility}` : ''}`,
+      linkedHealthVisitId: Number(visit.id),
+      linkedHealthReminderType: 'booking' as const
+    })
+  }
+
+  function setBookingPreset(value: string) {
+    if (!editing) return
+    if (value === 'none') return setEditing({ ...editing, bookingReminderEvery: '', bookingReminderUnit: 'days' })
+    if (value === '7d') return setEditing({ ...editing, bookingReminderEvery: 7, bookingReminderUnit: 'days' })
+    if (value === '15d') return setEditing({ ...editing, bookingReminderEvery: 15, bookingReminderUnit: 'days' })
+    if (value === '1m') return setEditing({ ...editing, bookingReminderEvery: 1, bookingReminderUnit: 'months' })
+    setEditing({ ...editing, bookingReminderEvery: positiveNumber(editing.bookingReminderEvery) || 10, bookingReminderUnit: editing.bookingReminderUnit || 'days' })
   }
 
   function saveVisit() {
@@ -250,6 +328,8 @@ export default function HealthPage() {
     const isNew = !editing.id
     const sourceId = Number(editing.id || nextId(data.deadlines))
     const explicitOrCalculatedFollowUp = status === 'completed' ? calculatedFollowUpDate(editing) : ''
+    const bookingEvery = positiveNumber(editing.bookingReminderEvery)
+    const bookingUnit = (editing.bookingReminderUnit || 'days') as BookingReminderUnit
 
     if (explicitOrCalculatedFollowUp && explicitOrCalculatedFollowUp <= editing.date) {
       alert('La prossima visita deve essere successiva alla visita appena effettuata.')
@@ -260,18 +340,44 @@ export default function HealthPage() {
       ? data.deadlines.find(item => item.id === Number(editing.followUpVisitId) && item.kind === 'visit')
       : undefined
 
+    let calendarCursor = nextId(data.calendarEvents)
+    const reserveCalendarId = (existing?: any) => {
+      const current = Number(existing || 0)
+      if (current) return current
+      const reserved = calendarCursor
+      calendarCursor += 1
+      return reserved
+    }
+
     let sourceCalendarEventId = Number(editing.calendarEventId || 0) || undefined
-    if (status === 'scheduled' && !sourceCalendarEventId) sourceCalendarEventId = nextId(data.calendarEvents)
-    if (status === 'cancelled' && sourceCalendarEventId) {
-      deleteCalendarEvent(sourceCalendarEventId)
-      sourceCalendarEventId = undefined
+    let sourceBookingReminderEventId = Number(editing.bookingReminderEventId || 0) || undefined
+
+    if (status === 'scheduled') {
+      sourceCalendarEventId = reserveCalendarId(sourceCalendarEventId)
+      if (bookingEvery) sourceBookingReminderEventId = reserveCalendarId(sourceBookingReminderEventId)
+      else if (sourceBookingReminderEventId) {
+        deleteCalendarEvent(sourceBookingReminderEventId)
+        sourceBookingReminderEventId = undefined
+      }
+    } else {
+      if (status === 'cancelled' && sourceCalendarEventId) {
+        deleteCalendarEvent(sourceCalendarEventId)
+        sourceCalendarEventId = undefined
+      }
+      if (sourceBookingReminderEventId) {
+        deleteCalendarEvent(sourceBookingReminderEventId)
+        sourceBookingReminderEventId = undefined
+      }
     }
 
     let followId: number | undefined
     let followEventId: number | undefined
+    let followBookingReminderEventId: number | undefined
     if (explicitOrCalculatedFollowUp) {
       followId = oldFollow?.id || (isNew ? sourceId + 1 : nextId(data.deadlines))
-      followEventId = Number(oldFollow?.calendarEventId || 0) || nextId(data.calendarEvents)
+      followEventId = reserveCalendarId(oldFollow?.calendarEventId)
+      if (bookingEvery) followBookingReminderEventId = reserveCalendarId(oldFollow?.bookingReminderEventId)
+      else if (oldFollow?.bookingReminderEventId) deleteCalendarEvent(oldFollow.bookingReminderEventId)
     }
 
     const source = {
@@ -290,15 +396,19 @@ export default function HealthPage() {
       notes: editing.notes?.trim() || '',
       followUpEvery: positiveNumber(editing.followUpEvery),
       followUpUnit: (editing.followUpUnit || 'months') as FollowUpUnit,
+      bookingReminderEvery: bookingEvery,
+      bookingReminderUnit: bookingUnit,
       nextVisitDate: explicitOrCalculatedFollowUp || '',
       followUpVisitId: followId,
-      calendarEventId: sourceCalendarEventId
+      calendarEventId: sourceCalendarEventId,
+      bookingReminderEventId: sourceBookingReminderEventId
     }
 
     upsertDeadline(source)
 
     const materializedSource = { ...source, id: sourceId }
-    if (status === 'scheduled' && sourceCalendarEventId) upsertVisitCalendar(materializedSource, editing.calendarEventId)
+    if (status === 'scheduled' && sourceCalendarEventId) upsertVisitCalendar(materializedSource, sourceCalendarEventId)
+    if (status === 'scheduled' && sourceBookingReminderEventId) upsertBookingCalendar(materializedSource, sourceBookingReminderEventId)
     if (status === 'completed' && sourceCalendarEventId) upsertVisitCalendar(materializedSource, sourceCalendarEventId)
 
     if (explicitOrCalculatedFollowUp && followId && followEventId) {
@@ -320,15 +430,20 @@ export default function HealthPage() {
         nextVisitDate: '',
         followUpEvery: source.followUpEvery,
         followUpUnit: source.followUpUnit,
+        bookingReminderEvery: source.bookingReminderEvery,
+        bookingReminderUnit: source.bookingReminderUnit,
+        bookingReminderEventId: followBookingReminderEventId,
         followUpSourceId: sourceId,
         autoGenerated: true,
         calendarEventId: followEventId,
         attachments: oldFollow?.attachments || []
       }
       upsertDeadline(follow)
-      upsertVisitCalendar({ ...follow, id: followId }, oldFollow?.calendarEventId)
+      upsertVisitCalendar({ ...follow, id: followId }, followEventId)
+      if (followBookingReminderEventId) upsertBookingCalendar({ ...follow, id: followId }, followBookingReminderEventId)
     } else if (oldFollow?.autoGenerated) {
       if (oldFollow.calendarEventId) deleteCalendarEvent(oldFollow.calendarEventId)
+      if (oldFollow.bookingReminderEventId) deleteCalendarEvent(oldFollow.bookingReminderEventId)
       deleteDeadline(oldFollow.id)
     }
 
@@ -400,10 +515,12 @@ export default function HealthPage() {
     try {
       await Promise.allSettled((editing.attachments || []).map((attachment: any) => removeStoredAttachment(attachment.path)))
       if (editing.kind === 'visit' && editing.calendarEventId) deleteCalendarEvent(editing.calendarEventId)
+      if (editing.kind === 'visit' && editing.bookingReminderEventId) deleteCalendarEvent(editing.bookingReminderEventId)
       if (editing.kind === 'visit' && editing.followUpVisitId) {
         const follow = data.deadlines.find(item => item.id === Number(editing.followUpVisitId) && item.autoGenerated)
         if (follow) {
           if (follow.calendarEventId) deleteCalendarEvent(follow.calendarEventId)
+          if (follow.bookingReminderEventId) deleteCalendarEvent(follow.bookingReminderEventId)
           deleteDeadline(follow.id)
         }
       }
@@ -523,6 +640,8 @@ export default function HealthPage() {
 
   const planningTherapies = editing?.kind === 'therapy' ? (editing.id ? therapies.map(therapy => therapy.id === editing.id ? editing : therapy) : [...therapies, { ...editing, id: -1 }]) : therapies
   const editingFollowUpDate = editing?.kind === 'visit' && editing?.healthStatus === 'completed' ? calculatedFollowUpDate(editing) : ''
+  const editingBookingTargetDate = editing?.kind === 'visit' ? (editing?.healthStatus === 'completed' ? editingFollowUpDate : (editing?.date || '')) : ''
+  const editingBookingReminderDate = editing?.kind === 'visit' ? calculatedBookingReminderDate(editing, editingBookingTargetDate) : ''
 
   const pageAction = section === 'visits'
     ? <Button icon={<Plus size={18} />} onClick={() => openNew('visit')}>Nuova visita</Button>
@@ -567,11 +686,11 @@ export default function HealthPage() {
     </> : null}
 
     {section === 'visits' ? <Card>
-      <CardHeader title="Visite e controlli" subtitle="Quando chiudi una visita puoi indicare la prossima data oppure una frequenza: VerdoFamily crea il controllo successivo e il relativo evento in Calendario." />
+      <CardHeader title="Visite e controlli" subtitle="Quando chiudi una visita puoi indicare la prossima data o una frequenza e scegliere quanto prima ricordarti di prenotarla. VerdoFamily crea entrambi i promemoria nel Calendario." />
       {visibleVisits.length ? <div className="deadline-list">{visibleVisits.map(item => {
         const user = data.users.find(u => u.id === item.userId)
         const status = visitStatus(item)
-        const details = [user?.name, item.specialty, item.doctor, item.facility, item.time ? `ore ${item.time}` : '', followUpLabel(item), item.attachments?.length ? `📎 ${item.attachments.length}` : ''].filter(Boolean).join(' · ')
+        const details = [user?.name, item.specialty, item.doctor, item.facility, item.time ? `ore ${item.time}` : '', followUpLabel(item), (item.healthStatus || 'scheduled') === 'scheduled' ? bookingReminderLabel(item) : '', item.attachments?.length ? `📎 ${item.attachments.length}` : ''].filter(Boolean).join(' · ')
         return <div key={item.id} className={`deadline-row ${item.healthStatus === 'cancelled' ? 'is-done' : ''}`}>
           <div className="deadline-date"><strong>{item.date.slice(8, 10)}</strong><span>{item.date.slice(5, 7)}</span></div>
           <div className="deadline-copy"><strong>{item.title}</strong><span>{details}</span>{item.outcome ? <span>Esito: {item.outcome}</span> : null}</div>
@@ -636,12 +755,20 @@ export default function HealthPage() {
         <Field label="Struttura"><input value={editing.facility || ''} onChange={e => setEditing({ ...editing, facility: e.target.value })} /></Field>
 
         <Card className="field--wide">
-          <CardHeader title="Prossimo controllo automatico" subtitle="Usa una data precisa oppure una frequenza. Quando la visita è segnata come effettuata, il sistema crea automaticamente la prossima visita e il promemoria nel Calendario." />
+          <CardHeader title="Prossimo controllo automatico" subtitle="Usa una data precisa oppure una frequenza. Puoi anche creare un secondo promemoria che ti avvisa quando è il momento di prenotare il controllo." />
           <div className="form-grid form-grid--2">
             <Field label="Prossima visita" hint="Ha priorità sulla frequenza."><input type="date" min={editing.date || undefined} value={editing.nextVisitDate || ''} onChange={e => setEditing({ ...editing, nextVisitDate: e.target.value })} /></Field>
             <Field label="Ripeti controllo ogni"><input type="number" min="1" step="1" value={editing.followUpEvery ?? ''} onChange={e => setEditing({ ...editing, followUpEvery: e.target.value })} placeholder="Es. 6" /></Field>
             <Field label="Unità"><select value={editing.followUpUnit || 'months'} onChange={e => setEditing({ ...editing, followUpUnit: e.target.value })}><option value="days">Giorni</option><option value="weeks">Settimane</option><option value="months">Mesi</option><option value="years">Anni</option></select></Field>
-            <div className="callout" style={{ alignSelf: 'end' }}><CalendarClock size={16} /> {editing.healthStatus === 'completed' ? (editingFollowUpDate ? `Prossimo promemoria: ${formatDate(editingFollowUpDate)}` : 'Nessun controllo successivo impostato.') : 'Il promemoria verrà generato quando la visita sarà indicata come effettuata.'}</div>
+            <div className="callout" style={{ alignSelf: 'end' }}><CalendarClock size={16} /> {editing.healthStatus === 'completed' ? (editingFollowUpDate ? `Prossimo controllo: ${formatDate(editingFollowUpDate)}` : 'Nessun controllo successivo impostato.') : 'Il controllo successivo verrà generato quando la visita sarà indicata come effettuata.'}</div>
+          </div>
+          <div className="form-grid form-grid--2" style={{ marginTop: 12 }}>
+            <Field label="Ricordami di prenotarla" hint="Rispetto alla data del prossimo controllo."><select value={bookingReminderPreset(editing)} onChange={e => setBookingPreset(e.target.value)}><option value="none">Nessun promemoria</option><option value="7d">7 giorni prima</option><option value="15d">15 giorni prima</option><option value="1m">1 mese prima</option><option value="custom">Personalizzato</option></select></Field>
+            {bookingReminderPreset(editing) === 'custom' ? <>
+              <Field label="Anticipo"><input type="number" min="1" step="1" value={editing.bookingReminderEvery ?? ''} onChange={e => setEditing({ ...editing, bookingReminderEvery: e.target.value })} /></Field>
+              <Field label="Unità anticipo"><select value={editing.bookingReminderUnit || 'days'} onChange={e => setEditing({ ...editing, bookingReminderUnit: e.target.value })}><option value="days">Giorni</option><option value="weeks">Settimane</option><option value="months">Mesi</option></select></Field>
+            </> : <div className="callout" style={{ alignSelf: 'end' }}><CalendarClock size={16} /> {editingBookingReminderDate ? `Promemoria prenotazione: ${formatDate(editingBookingReminderDate)}` : 'Nessun promemoria di prenotazione.'}</div>}
+            {bookingReminderPreset(editing) === 'custom' ? <div className="callout" style={{ alignSelf: 'end' }}><CalendarClock size={16} /> {editingBookingReminderDate ? `Promemoria prenotazione: ${formatDate(editingBookingReminderDate)}` : 'Imposta prima la data del controllo.'}</div> : null}
           </div>
         </Card>
 

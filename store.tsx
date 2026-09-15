@@ -502,7 +502,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function upsertCalendarEvent(event: Omit<CalendarEvent, 'id'> & { id?: number }) {
-    setData(prev => ({ ...prev, calendarEvents: event.id ? prev.calendarEvents.map(e => e.id === event.id ? { ...e, ...event, id: e.id } : e) : [...prev.calendarEvents, { ...event, id: nextId(prev.calendarEvents) }] }))
+    setData(prev => {
+      if (!event.id) return { ...prev, calendarEvents: [...prev.calendarEvents, { ...event, id: nextId(prev.calendarEvents) }] }
+      const exists = prev.calendarEvents.some(e => e.id === event.id)
+      return { ...prev, calendarEvents: exists ? prev.calendarEvents.map(e => e.id === event.id ? { ...e, ...event, id: e.id } : e) : [...prev.calendarEvents, { ...event, id: event.id }] }
+    })
   }
   function deleteCalendarEvent(id: number) { setData(prev => ({ ...prev, calendarEvents: prev.calendarEvents.filter(e => e.id !== id) })) }
 
