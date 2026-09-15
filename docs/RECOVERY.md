@@ -18,7 +18,18 @@ No passwords, service-role keys, webhook secrets, health files or family data mu
 
 Clone the repository and select the desired commit/tag. Git history is the primary source of truth for application structure.
 
-The `VerdoFamily source snapshot` GitHub Action also creates a complete source archive after every push to `main` and once per week. Artifacts are retained for 90 days.
+The `VerdoFamily source snapshot` GitHub Action creates a complete source archive after every push to `main` and once per week. GitHub artifacts are retained for 90 days.
+
+If the Drive mirror is configured, the same workflow also copies the ZIP to the VerdoFamily `Backup/Programma` folder through the Apps Script webhook.
+
+To enable the Drive mirror, configure these GitHub Actions repository secrets:
+
+- `VERDOFAMILY_DRIVE_WEBHOOK_URL`
+- `VERDOFAMILY_DRIVE_WEBHOOK_SECRET`
+
+The Apps Script must also contain this Script Property:
+
+- `VERDOFAMILY_PROGRAM_BACKUP_FOLDER_ID`
 
 ## 2. Recover Supabase structure
 
@@ -58,8 +69,9 @@ Configure Script Properties with fresh/recovered values for:
 - `VERDOFAMILY_HEALTH_VISITS_FOLDER_ID`
 - `VERDOFAMILY_HEALTH_RECORDS_FOLDER_ID`
 - `VERDOFAMILY_HEALTH_THERAPIES_FOLDER_ID`
+- `VERDOFAMILY_PROGRAM_BACKUP_FOLDER_ID`
 
-The values belong in Google Apps Script / database configuration only, not in GitHub.
+The values belong in Google Apps Script / database/GitHub Secrets configuration only, not in committed source.
 
 Configure the family Drive webhook through VerdoFamily/Supabase so the Apps Script URL and webhook secret match.
 
@@ -109,6 +121,7 @@ After a rebuild, verify all of the following before considering recovery complet
 - manual and scheduled Drive JSON backups work;
 - private health attachment upload/open/delete works;
 - health attachment copy to Drive works;
+- source ZIP mirror appears in `Backup/Programma` when GitHub Secrets are configured;
 - follow-up visit reminders and Calendar linkage work;
 - Vercel production URL returns the expected release.
 
@@ -122,4 +135,4 @@ Every production integration must be represented in GitHub in the same change th
 - scheduled infrastructure -> reproducible file under `supabase/ops/`;
 - frontend changes -> normal application source.
 
-A change is not considered fully backed up until its source/recovery configuration is committed.
+A change is not considered fully backed up until its source/recovery configuration is committed. The source snapshot workflow then archives the updated repository automatically.
