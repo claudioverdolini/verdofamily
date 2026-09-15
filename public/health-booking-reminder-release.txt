@@ -2,3 +2,4 @@ VerdoFamily health booking reminder release
 2026-09-15
 Deployment trigger after Vercel project cleanup.
 Google Calendar multi-user integration release.
+Google Calendar OAuth configuration deployment trigger.
