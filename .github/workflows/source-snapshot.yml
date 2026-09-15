@@ -13,6 +13,9 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
+    env:
+      DRIVE_WEBHOOK_URL: ${{ secrets.VERDOFAMILY_DRIVE_WEBHOOK_URL }}
+      DRIVE_WEBHOOK_SECRET: ${{ secrets.VERDOFAMILY_DRIVE_WEBHOOK_SECRET }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,3 +34,41 @@ jobs:
           path: recovery-artifact/*.zip
           retention-days: 90
           if-no-files-found: error
+
+      - name: Prepare Google Drive payload
+        if: ${{ env.DRIVE_WEBHOOK_URL != '' && env.DRIVE_WEBHOOK_SECRET != '' }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, pathlib, datetime
+          archive = next(pathlib.Path('recovery-artifact').glob('*.zip'))
+          payload = {
+              'type': 'program_backup',
+              'secret': os.environ['DRIVE_WEBHOOK_SECRET'],
+              'fileName': archive.name,
+              'mimeType': 'application/zip',
+              'contentBase64': base64.b64encode(archive.read_bytes()).decode('ascii'),
+              'commitSha': os.environ.get('GITHUB_SHA', ''),
+              'repository': os.environ.get('GITHUB_REPOSITORY', ''),
+              'createdAt': datetime.datetime.now(datetime.timezone.utc).isoformat()
+          }
+          pathlib.Path('recovery-artifact/drive-payload.json').write_text(json.dumps(payload), encoding='utf-8')
+          PY
+
+      - name: Copy source snapshot to Google Drive
+        if: ${{ env.DRIVE_WEBHOOK_URL != '' && env.DRIVE_WEBHOOK_SECRET != '' }}
+        run: |
+          curl --silent --show-error --fail-with-body --location \
+            -H 'Content-Type: text/plain;charset=utf-8' \
+            --data-binary @recovery-artifact/drive-payload.json \
+            "$DRIVE_WEBHOOK_URL" > recovery-artifact/drive-response.json
+          python3 - <<'PY'
+          import json, pathlib
+          result = json.loads(pathlib.Path('recovery-artifact/drive-response.json').read_text(encoding='utf-8'))
+          if result.get('ok') is not True or result.get('type') != 'program_backup':
+              raise SystemExit('Google Drive program backup failed')
+          print('Google Drive source backup completed:', result.get('fileName', 'snapshot'))
+          PY
+
+      - name: Drive backup not configured
+        if: ${{ env.DRIVE_WEBHOOK_URL == '' || env.DRIVE_WEBHOOK_SECRET == '' }}
+        run: echo 'Google Drive source mirroring is not configured yet; GitHub artifact backup completed.'
