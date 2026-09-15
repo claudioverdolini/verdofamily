@@ -57,17 +57,30 @@ jobs:
       - name: Copy source snapshot to Google Drive
         if: ${{ env.DRIVE_WEBHOOK_URL != '' && env.DRIVE_WEBHOOK_SECRET != '' }}
         run: |
-          curl --silent --show-error --fail-with-body --location \
-            -H 'Content-Type: text/plain;charset=utf-8' \
-            --data-binary @recovery-artifact/drive-payload.json \
-            "$DRIVE_WEBHOOK_URL" > recovery-artifact/drive-response.json
-          python3 - <<'PY'
-          import json, pathlib
-          result = json.loads(pathlib.Path('recovery-artifact/drive-response.json').read_text(encoding='utf-8'))
-          if result.get('ok') is not True or result.get('type') != 'program_backup':
-              raise SystemExit('Google Drive program backup failed')
-          print('Google Drive source backup completed:', result.get('fileName', 'snapshot'))
-          PY
+          node <<'NODE'
+          const fs = require('fs')
+          ;(async () => {
+            const payload = fs.readFileSync('recovery-artifact/drive-payload.json', 'utf8')
+            const response = await fetch(process.env.DRIVE_WEBHOOK_URL, {
+              method: 'POST',
+              redirect: 'follow',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: payload
+            })
+            const text = await response.text()
+            fs.writeFileSync('recovery-artifact/drive-response.json', text)
+            if (!response.ok) throw new Error(`Google Drive webhook HTTP ${response.status}: ${text.slice(0, 300)}`)
+            let result
+            try { result = JSON.parse(text) } catch { throw new Error(`Google Drive webhook returned non-JSON: ${text.slice(0, 300)}`) }
+            if (result.ok !== true || result.type !== 'program_backup') {
+              throw new Error(`Google Drive program backup failed: ${text.slice(0, 300)}`)
+            }
+            console.log('Google Drive source backup completed:', result.fileName || 'snapshot')
+          })().catch(error => {
+            console.error(error.message)
+            process.exit(1)
+          })
+          NODE
 
       - name: Drive backup not configured
         if: ${{ env.DRIVE_WEBHOOK_URL == '' || env.DRIVE_WEBHOOK_SECRET == '' }}
