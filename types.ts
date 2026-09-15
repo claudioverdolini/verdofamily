@@ -48,6 +48,8 @@ export type CalendarEvent = {
   time: string
   endTime?: string
   userId: number
+  userIds?: number[]
+  audience?: 'users' | 'family'
   notes?: string
   linkedHealthVisitId?: number
   linkedHealthReminderType?: 'visit' | 'booking'

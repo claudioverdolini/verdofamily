@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Check, ClipboardCopy, Cloud, Download, RefreshCw, RotateCcw, Upload } from 'lucide-react'
+import { CalendarDays, Check, ClipboardCopy, Cloud, Download, Link2, RefreshCw, RotateCcw, Unlink, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
 import type { PageKey, ThemeMode } from '../types'
@@ -53,6 +53,28 @@ type BackupHealth = {
   ok: boolean
   title: string
   detail: string
+}
+
+type GoogleCalendarChoice = {
+  id: string
+  summary: string
+  primary?: boolean
+  accessRole?: string
+  timeZone?: string
+}
+
+type GoogleCalendarStatus = {
+  configured: boolean
+  connected: boolean
+  redirectUri?: string
+  connection?: {
+    googleEmail?: string
+    personalCalendarId?: string
+    personalCalendarName?: string
+    familyCalendarId?: string
+    familyCalendarName?: string
+    familyEventTarget?: 'personal' | 'shared' | 'both'
+  } | null
 }
 
 function formatDateTime(value?: string | null) {
@@ -126,12 +148,23 @@ export default function SettingsPage() {
   const [backupHistory, setBackupHistory] = useState<BackupHistoryItem[]>([])
   const [backupBusy, setBackupBusy] = useState(false)
   const [backupLoading, setBackupLoading] = useState(false)
+  const [googleStatus, setGoogleStatus] = useState<GoogleCalendarStatus | null>(null)
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarChoice[]>([])
+  const [googleBusy, setGoogleBusy] = useState(false)
+  const [googleMessage, setGoogleMessage] = useState('')
+  const [googleDraft, setGoogleDraft] = useState({ personalCalendarId: 'primary', familyCalendarId: '', familyEventTarget: 'personal' as 'personal' | 'shared' | 'both' })
 
   const prefs = authUser?.prefs
   const backupHealth = getBackupHealth(driveStatus)
 
   useEffect(() => {
     void refreshBackupStatus()
+    void refreshGoogleCalendar()
+    const params = new URLSearchParams(window.location.search)
+    const googleResult = params.get('googleCalendar')
+    if (googleResult === 'connected') setGoogleMessage('Google Calendar collegato. Scegli ora dove sincronizzare gli eventi.')
+    if (googleResult === 'error') setGoogleMessage(`Collegamento Google non riuscito${params.get('reason') ? `: ${params.get('reason')}` : '.'}`)
+    if (googleResult) window.history.replaceState({}, '', window.location.pathname)
   }, [familyId, cloudAuthenticated])
 
   useEffect(() => {
@@ -169,6 +202,101 @@ export default function SettingsPage() {
       if (!historyResult.error) setBackupHistory((historyResult.data || []) as BackupHistoryItem[])
     } finally {
       setBackupLoading(false)
+    }
+  }
+
+  async function callGoogleCalendar(action: string, extra: Record<string, any> = {}) {
+    if (!supabase || !familyId) throw new Error('Cloud non disponibile.')
+    const { data: result, error } = await supabase.functions.invoke('google-calendar-sync', { body: { action, familyId, ...extra } })
+    if (error) throw new Error(error.message || 'Errore Google Calendar')
+    if (result?.error) throw new Error(result.error)
+    return result
+  }
+
+  async function refreshGoogleCalendar() {
+    if (!supabase || !familyId || !cloudAuthenticated) {
+      setGoogleStatus(null)
+      setGoogleCalendars([])
+      return
+    }
+    setGoogleBusy(true)
+    try {
+      const status = await callGoogleCalendar('status') as GoogleCalendarStatus
+      setGoogleStatus(status)
+      const connection = status?.connection
+      setGoogleDraft({
+        personalCalendarId: connection?.personalCalendarId || 'primary',
+        familyCalendarId: connection?.familyCalendarId || '',
+        familyEventTarget: connection?.familyEventTarget || 'personal'
+      })
+      if (status?.connected) {
+        const result = await callGoogleCalendar('calendars')
+        setGoogleCalendars(result?.calendars || [])
+      } else setGoogleCalendars([])
+    } catch (error: any) {
+      setGoogleMessage(`Google Calendar: ${error?.message || 'stato non disponibile'}`)
+    } finally {
+      setGoogleBusy(false)
+    }
+  }
+
+  async function connectGoogleCalendar() {
+    setGoogleBusy(true)
+    setGoogleMessage('')
+    try {
+      const result = await callGoogleCalendar('auth-url')
+      if (!result?.url) throw new Error('URL di collegamento non disponibile.')
+      window.location.assign(result.url)
+    } catch (error: any) {
+      setGoogleMessage(`Collegamento non riuscito: ${error?.message || 'errore sconosciuto'}`)
+      setGoogleBusy(false)
+    }
+  }
+
+  async function saveGoogleCalendarSettings() {
+    if ((googleDraft.familyEventTarget === 'shared' || googleDraft.familyEventTarget === 'both') && !googleDraft.familyCalendarId) {
+      setGoogleMessage('Scegli prima un calendario famiglia condiviso.')
+      return
+    }
+    setGoogleBusy(true)
+    setGoogleMessage('')
+    try {
+      await callGoogleCalendar('save-settings', googleDraft)
+      setGoogleMessage('Impostazioni Google Calendar salvate e calendario sincronizzato.')
+      await refreshGoogleCalendar()
+    } catch (error: any) {
+      setGoogleMessage(`Salvataggio non riuscito: ${error?.message || 'errore sconosciuto'}`)
+    } finally {
+      setGoogleBusy(false)
+    }
+  }
+
+  async function syncGoogleCalendarNow() {
+    setGoogleBusy(true)
+    setGoogleMessage('')
+    try {
+      await syncNow()
+      const result = await callGoogleCalendar('sync-all')
+      setGoogleMessage(`Google Calendar sincronizzato${typeof result?.synced === 'number' ? `: ${result.synced} collegamenti evento aggiornati` : ''}.`)
+    } catch (error: any) {
+      setGoogleMessage(`Sincronizzazione non riuscita: ${error?.message || 'errore sconosciuto'}`)
+    } finally {
+      setGoogleBusy(false)
+    }
+  }
+
+  async function disconnectGoogleCalendar() {
+    if (!confirm('Scollegare il tuo account Google Calendar da VerdoFamily? Gli eventi già copiati su Google non vengono cancellati.')) return
+    setGoogleBusy(true)
+    setGoogleMessage('')
+    try {
+      await callGoogleCalendar('disconnect')
+      setGoogleMessage('Account Google Calendar scollegato.')
+      await refreshGoogleCalendar()
+    } catch (error: any) {
+      setGoogleMessage(`Scollegamento non riuscito: ${error?.message || 'errore sconosciuto'}`)
+    } finally {
+      setGoogleBusy(false)
     }
   }
 
@@ -327,6 +455,27 @@ export default function SettingsPage() {
           ].map(([key, label, sub]) => <label key={key}><div><strong>{label}</strong><span>{sub}</span></div><input type="checkbox" checked={(prefs.notifications as any)[key]} onChange={e => updateCurrentPrefs({ notifications: { ...prefs.notifications, [key]: e.target.checked } })} /></label>)}
         </div>
         <div className="callout">Le preferenze sono operative nell’app; per push e WhatsApp automatici serve il backend cloud, che questa interfaccia è già pronta a collegare.</div>
+      </Card>
+
+      <Card className="settings-card--wide">
+        <CardHeader title="Google Calendar" subtitle="Ogni adulto può collegare il proprio account e scegliere dove ricevere gli eventi VerdoFamily." />
+        {!cloudAuthenticated || !familyId ? <div className="callout">Accedi con il tuo account VerdoFamily cloud per collegare Google Calendar.</div> : !googleStatus ? <div className="backup-actions"><Button variant="soft" icon={<RefreshCw size={17} />} onClick={refreshGoogleCalendar} disabled={googleBusy}>{googleBusy ? 'Controllo…' : 'Verifica configurazione'}</Button></div> : !googleStatus.configured ? <>
+          <div className="callout"><strong>Integrazione pronta, manca l’autorizzazione Google.</strong><br />Il backend VerdoFamily è già predisposto. Completa una sola volta la configurazione OAuth indicata da ChatGPT, poi ogni utente potrà collegare il proprio account.</div>
+          {googleStatus.redirectUri ? <Field label="URI di reindirizzamento Google" hint="Va inserito tra gli URI autorizzati del client OAuth Google."><input readOnly value={googleStatus.redirectUri} /></Field> : null}
+        </> : !googleStatus.connected ? <>
+          <div className="callout">Collega il tuo account Google. VerdoFamily richiederà accesso agli eventi e all’elenco dei calendari, senza usare inviti automatici ai familiari.</div>
+          <Button icon={<Link2 size={17} />} onClick={connectGoogleCalendar} disabled={googleBusy}>{googleBusy ? 'Collegamento…' : 'Collega Google Calendar'}</Button>
+        </> : <>
+          <div className="callout callout--success"><strong>✅ Google Calendar collegato</strong>{googleStatus.connection?.googleEmail ? <><br />{googleStatus.connection.googleEmail}</> : null}</div>
+          <div className="form-grid form-grid--2">
+            <Field label="Calendario personale" hint="Visite e impegni assegnati a te vengono copiati qui."><select value={googleDraft.personalCalendarId} onChange={e => setGoogleDraft({ ...googleDraft, personalCalendarId: e.target.value })}><option value="primary">Calendario principale Google</option>{googleCalendars.filter(item => !item.primary).map(item => <option key={item.id} value={item.id}>{item.summary}</option>)}</select></Field>
+            <Field label="Calendario famiglia condiviso" hint="Opzionale: usato dagli eventi marcati Famiglia."><select value={googleDraft.familyCalendarId} onChange={e => setGoogleDraft({ ...googleDraft, familyCalendarId: e.target.value })}><option value="">Nessuno</option>{googleCalendars.map(item => <option key={item.id} value={item.id}>{item.summary}{item.primary ? ' (principale)' : ''}</option>)}</select></Field>
+            <Field label="Eventi Famiglia" className="field--wide"><Segmented value={googleDraft.familyEventTarget} onChange={(familyEventTarget: any) => setGoogleDraft({ ...googleDraft, familyEventTarget })} options={[{ value: 'personal', label: 'Calendari personali' }, { value: 'shared', label: 'Solo condiviso' }, { value: 'both', label: 'Entrambi' }]} /></Field>
+          </div>
+          <div className="callout"><CalendarDays size={16} /> Gli eventi assegnati a più persone vengono copiati nel calendario personale di ciascun partecipante che ha collegato Google. Gli eventi “Famiglia” seguono invece la scelta qui sopra. Non vengono inviati inviti Google.</div>
+          <div className="backup-actions"><Button onClick={saveGoogleCalendarSettings} disabled={googleBusy}>Salva e sincronizza</Button><Button variant="soft" icon={<RefreshCw size={17} />} onClick={syncGoogleCalendarNow} disabled={googleBusy}>Sincronizza ora</Button><Button variant="ghost" icon={<Unlink size={17} />} onClick={disconnectGoogleCalendar} disabled={googleBusy}>Scollega</Button></div>
+        </>}
+        {googleMessage ? <div className="callout" style={{ marginTop: 12 }}>{googleMessage}</div> : null}
       </Card>
 
       <Card className="settings-card--wide">

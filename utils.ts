@@ -416,7 +416,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 4,
+    version: 5,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -430,7 +430,12 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
           prefs: mergePrefs(u.prefs)
         }))
       : fallback.users,
-    calendarEvents: Array.isArray(source.calendarEvents) ? source.calendarEvents : [],
+    calendarEvents: Array.isArray(source.calendarEvents) ? source.calendarEvents.map((event: any) => {
+      const userId = Number(event?.userId || 0)
+      const rawIds = Array.isArray(event?.userIds) ? event.userIds.map(Number).filter((id: number) => id > 0) : []
+      const userIds = Array.from(new Set(rawIds.length ? rawIds : (userId ? [userId] : []))) as number[]
+      return { ...event, id: Number(event.id), userId: userId || userIds[0] || 0, userIds, audience: event?.audience === 'family' ? 'family' : 'users' }
+    }) : [],
     deadlines: migrateDeadlines(source.deadlines),
     categories: Array.isArray(source.categories) && source.categories.length ? source.categories : fallback.categories,
     pantry: Array.isArray(source.pantry) ? source.pantry : [],

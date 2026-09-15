@@ -140,7 +140,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const [familyId, setFamilyId] = useState<string | null>(null)
   const [familyName, setFamilyName] = useState('')
   const [needsFamilySetup, setNeedsFamilySetup] = useState(false)
-  const [activePage, setActivePage] = useState<PageKey>('home')
+  const [activePage, setActivePage] = useState<PageKey>(() => new URLSearchParams(window.location.search).has('googleCalendar') ? 'settings' : 'home')
 
   const revisionRef = useRef(0)
   const familyIdRef = useRef<string | null>(null)
@@ -148,6 +148,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const saveTimerRef = useRef<number | null>(null)
   const realtimeChannelRef = useRef<any>(null)
   const currentCloudUserRef = useRef<any>(null)
+  const calendarSyncHashRef = useRef('')
 
   familyIdRef.current = familyId
 
@@ -198,6 +199,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error
     const raw = document?.data && Object.keys(document.data).length ? document.data : deepClone(initialData)
     const linked = linkCloudIdentity(migrateData(raw, deepClone(initialData)), profile, role)
+    calendarSyncHashRef.current = JSON.stringify(linked.calendarEvents || [])
     suppressNextPushRef.current = true
     revisionRef.current = Number(document?.revision || 0)
     setFamilyId(targetFamilyId)
@@ -319,6 +321,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!error) {
       revisionRef.current = Number(newRevision || expected + 1)
       setCloudStatus('synced')
+      const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
+      if (calendarHash !== calendarSyncHashRef.current) {
+        calendarSyncHashRef.current = calendarHash
+        void supabase.functions.invoke('google-calendar-sync', { body: { action: 'sync-all', familyId: familyIdRef.current } }).then(({ error }) => {
+          if (error) console.warn('Google Calendar sync deferred:', error.message)
+        })
+      }
       return
     }
     if (String(error.message || '').includes('revision_conflict')) {
