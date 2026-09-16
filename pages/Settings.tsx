@@ -4,6 +4,7 @@ import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
 import type { PageKey, ThemeMode } from '../types'
 import { Avatar, Button, Card, CardHeader, Field, PageIntro, Segmented } from '../ui'
+import TelegramReportsCard from '../components/TelegramReportsCard'
 
 const ACCENTS = [
   { name: 'Indigo', color: '#5B5BD6' },
@@ -477,6 +478,8 @@ export default function SettingsPage() {
         </>}
         {googleMessage ? <div className="callout" style={{ marginTop: 12 }}>{googleMessage}</div> : null}
       </Card>
+
+      <TelegramReportsCard />
 
       <Card className="settings-card--wide">
         <CardHeader title="Dati & backup" subtitle="Backup automatici nel cloud e su Google Drive, più esportazione manuale locale." />
