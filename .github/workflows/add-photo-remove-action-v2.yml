@@ -1,0 +1,46 @@
+name: Add pantry photo remove action v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/add-photo-remove-action-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch pantry photo controls
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('pages/ShoppingPantry.tsx')
+          s = p.read_text()
+          marker = "  async function analyzePantryPhoto() {\n"
+          helper = "  function clearPantryPhoto() {\n    setPhotoBusy(false)\n    setPhotoError('')\n    setPhotoRows([])\n    setPhotoPreview('')\n    setPhotoPayload(null)\n  }\n\n"
+          if helper.strip() not in s:
+              if marker not in s:
+                  raise SystemExit('analyze marker not found')
+              s = s.replace(marker, helper + marker, 1)
+          old = "              {photoPreview ? <div className=\"pantry-photo-preview\"><img src={photoPreview} alt=\"Foto dispensa da analizzare\" /><span>Foto pronta per il riconoscimento</span></div> : null}\n              <div className=\"image-source-grid image-source-grid--pantry\">"
+          new = "              {photoPreview ? <div className=\"pantry-photo-preview\"><img src={photoPreview} alt=\"Foto dispensa da analizzare\" /><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><span>Foto pronta per il riconoscimento</span><Button variant=\"danger\" size=\"sm\" icon={<Trash2 size={16} />} onClick={clearPantryPhoto}>Rimuovi foto</Button></div></div> : null}\n              <div className=\"image-source-grid image-source-grid--pantry\">"
+          if old not in s:
+              raise SystemExit('preview block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Build application
+        run: npm ci && npm run build
+      - name: Commit fix
+        run: |
+          rm .github/workflows/add-photo-remove-action.yml || true
+          rm .github/workflows/add-photo-remove-action-v2.yml
+          git config user.name "VerdoFamily Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add pages/ShoppingPantry.tsx .github/workflows/add-photo-remove-action.yml .github/workflows/add-photo-remove-action-v2.yml
+          git commit -m "Allow removing selected pantry photo"
+          git push
