@@ -28,7 +28,15 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const geminiKey = Deno.env.get("GEMINI_API_KEY") || "";
-    const geminiModel = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
+    const configuredModel = Deno.env.get("GEMINI_MODEL") || "";
+    const geminiModels = [...new Set([
+      configuredModel,
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash"
+    ].filter(Boolean))];
+    const geminiModel = geminiModels[0];
     const client = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
 
     const authHeader = req.headers.get("authorization") || "";
@@ -54,7 +62,7 @@ Deno.serve(async (req) => {
     if (memberError || !membership) return json({ ok: false, error: "forbidden" }, 403);
 
     if (body?.action === "status") {
-      return json({ ok: true, configured: !!geminiKey, model: geminiKey ? geminiModel : null });
+      return json({ ok: true, configured: !!geminiKey, model: geminiKey ? geminiModel : null, fallbackModels: geminiKey ? geminiModels : [] });
     }
 
     if (body?.action !== "analyze") return json({ ok: false, error: "unknown_action" }, 400);
@@ -107,31 +115,64 @@ Deno.serve(async (req) => {
       required: ["items"]
     };
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": geminiKey
-      },
-      body: JSON.stringify({
-        contents: [{
-          role: "user",
-          parts: [
-            { inlineData: { mimeType, data: imageData } },
-            { text: prompt }
-          ]
-        }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: schema
-        }
-      })
+    const requestBody = JSON.stringify({
+      contents: [{
+        role: "user",
+        parts: [
+          { inlineData: { mimeType, data: imageData } },
+          { text: prompt }
+        ]
+      }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: schema
+      }
     });
 
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const message = result?.error?.message || `gemini_http_${response.status}`;
-      return json({ ok: false, error: message }, response.status >= 500 ? 502 : 400);
+    let result: any = null;
+    let usedModel = "";
+    let lastStatus = 0;
+    let lastMessage = "";
+
+    for (const model of geminiModels) {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiKey
+        },
+        body: requestBody
+      });
+
+      const candidate = await response.json().catch(() => ({}));
+      if (response.ok) {
+        result = candidate;
+        usedModel = model;
+        break;
+      }
+
+      lastStatus = response.status;
+      lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
+      const lower = lastMessage.toLowerCase();
+      const retryable = [404, 429, 500, 502, 503, 504].includes(response.status)
+        || lower.includes("high demand")
+        || lower.includes("overloaded")
+        || lower.includes("temporarily")
+        || lower.includes("unavailable");
+
+      if (!retryable) {
+        return json({ ok: false, error: lastMessage }, response.status >= 500 ? 502 : 400);
+      }
+    }
+
+    if (!result || !usedModel) {
+      return json({
+        ok: false,
+        error: "Il riconoscimento AI è momentaneamente molto richiesto. VerdoFamily ha provato automaticamente più modelli, ma sono tutti occupati. Riprova tra qualche istante.",
+        code: "ai_temporarily_unavailable",
+        lastStatus,
+        lastMessage
+      }, 503);
     }
 
     const output = textPart(result);
@@ -143,7 +184,7 @@ Deno.serve(async (req) => {
 
     return json({
       ok: true,
-      model: geminiModel,
+      model: usedModel,
       items: items.map((item: any) => ({
         detectedName: String(item?.detectedName || "").trim(),
         matchName: String(item?.matchName || "").trim(),
