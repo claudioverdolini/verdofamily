@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Camera, Check, ChevronRight, PackageOpen, Plus, ScanLine, Search, ShoppingBasket, Trash2 } from 'lucide-react'
+import { Camera, Check, ChevronRight, PackageOpen, Plus, ScanLine, Search, ShoppingBasket, Trash2, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { normalize, parseReceiptLines, similarity } from '../utils'
@@ -403,12 +403,21 @@ export default function ShoppingPantryPage() {
           {scanMode === 'receipt' ? <div className="scan-layout">
           <Card>
             <CardHeader title="1. Leggi lo scontrino" subtitle="Fotocamera su iPhone/Android oppure testo incollato." />
-            <label className="receipt-drop">
-              <input type="file" accept="image/*" capture="environment" onChange={e => { const file = e.target.files?.[0]; if (file) runOcr(file) }} />
-              <Camera size={32} />
-              <strong>Scatta o carica una foto</strong>
-              <span>Meglio se dritta, nitida e ben illuminata.</span>
-            </label>
+            <div className="image-source-grid">
+              <label className="image-source-option">
+                <input type="file" accept="image/*" capture="environment" onChange={e => { const file = e.target.files?.[0]; if (file) runOcr(file); e.currentTarget.value = '' }} />
+                <Camera size={28} />
+                <strong>Scatta foto</strong>
+                <span>Apri direttamente la fotocamera.</span>
+              </label>
+              <label className="image-source-option">
+                <input type="file" accept="image/*" onChange={e => { const file = e.target.files?.[0]; if (file) runOcr(file); e.currentTarget.value = '' }} />
+                <Upload size={28} />
+                <strong>Scegli foto esistente</strong>
+                <span>Apri galleria, Foto o File del dispositivo.</span>
+              </label>
+            </div>
+            <div className="image-source-hint">Meglio se la foto è dritta, nitida e ben illuminata.</div>
             {ocrBusy ? <div className="progress-row"><div className="progress-track"><span style={{ width: `${Math.round(ocrProgress * 100)}%` }} /></div><strong>{Math.round(ocrProgress * 100)}%</strong></div> : null}
             {ocrError ? <div className="callout callout--warning">{ocrError}</div> : null}
             <Field label="Testo riconosciuto" hint="Puoi correggerlo prima dell'analisi.">
@@ -465,12 +474,22 @@ export default function ShoppingPantryPage() {
             <Card>
               <CardHeader title="1. Fotografa la dispensa" subtitle="Puoi fotografare uno scaffale, il frigorifero o un gruppo di prodotti." />
               {!cloudAuthenticated || !familyId ? <div className="callout">Accedi al cloud VerdoFamily per usare il riconoscimento fotografico.</div> : visionStatus && !visionStatus.configured ? <div className="callout callout--warning"><strong>Riconoscimento AI da attivare</strong><br />Il modulo è installato, ma manca la chiave Gemini nel backend.</div> : null}
-              <label className="receipt-drop pantry-photo-drop">
-                <input type="file" accept="image/*" capture="environment" onChange={e => { const file = e.target.files?.[0]; if (file) void selectPantryPhoto(file); e.currentTarget.value = '' }} />
-                {photoPreview ? <img src={photoPreview} alt="Foto dispensa da analizzare" /> : <Camera size={38} />}
-                <strong>{photoPreview ? 'Cambia foto' : 'Scatta o carica una foto'}</strong>
-                <span>Per risultati migliori: foto frontale, luce uniforme e prodotti non troppo sovrapposti.</span>
-              </label>
+              {photoPreview ? <div className="pantry-photo-preview"><img src={photoPreview} alt="Foto dispensa da analizzare" /><span>Foto pronta per il riconoscimento</span></div> : null}
+              <div className="image-source-grid image-source-grid--pantry">
+                <label className="image-source-option">
+                  <input type="file" accept="image/*" capture="environment" onChange={e => { const file = e.target.files?.[0]; if (file) void selectPantryPhoto(file); e.currentTarget.value = '' }} />
+                  <Camera size={30} />
+                  <strong>{photoPreview ? 'Scatta un’altra foto' : 'Scatta foto'}</strong>
+                  <span>Usa la fotocamera del tablet o telefono.</span>
+                </label>
+                <label className="image-source-option">
+                  <input type="file" accept="image/*" onChange={e => { const file = e.target.files?.[0]; if (file) void selectPantryPhoto(file); e.currentTarget.value = '' }} />
+                  <Upload size={30} />
+                  <strong>{photoPreview ? 'Scegli un’altra foto' : 'Scegli foto esistente'}</strong>
+                  <span>Apri galleria, Foto o File del dispositivo.</span>
+                </label>
+              </div>
+              <div className="image-source-hint">Per risultati migliori: foto frontale, luce uniforme e prodotti non troppo sovrapposti.</div>
               <div className="callout">🔒 La foto viene usata solo per il riconoscimento e non viene salvata nella dispensa o negli allegati.</div>
               {photoError ? <div className="callout callout--warning">{photoError}</div> : null}
               <Button icon={<ScanLine size={18} />} disabled={!photoPayload || photoBusy || visionStatus?.configured === false} onClick={analyzePantryPhoto}>{photoBusy ? 'Riconoscimento in corso…' : 'Riconosci prodotti'}</Button>
