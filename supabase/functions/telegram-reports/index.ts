@@ -361,7 +361,7 @@ async function processTelegramUpdates() {
     maxUpdateId = Math.max(maxUpdateId, Number(update?.update_id || 0));
     const message = update?.message;
     const text = String(message?.text || "").trim();
-    const match = text.match(/^\\/start(?:@\\w++)?(?:\\s+([A-Za-z0-9_-]+))?$/i);
+    const match = text.match(/^\/start(?:@\w+)?(?:\s+([A-Za-z0-9_-]+))?$/i);
     if (!match) continue;
     processed += 1;
 
