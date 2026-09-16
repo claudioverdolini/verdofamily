@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const geminiKey = Deno.env.get("GEMINI_API_KEY") || "";
-    const geminiModel = Deno.env.get("GEMINI_MODEL") || "gemini-3.8-flash";
+    const geminiModel = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";
     const client = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
 
     const authHeader = req.headers.get("authorization") || "";
@@ -122,7 +122,6 @@ Deno.serve(async (req) => {
           ]
         }],
         generationConfig: {
-          temperature: 0.1,
           responseMimeType: "application/json",
           responseSchema: schema
         }

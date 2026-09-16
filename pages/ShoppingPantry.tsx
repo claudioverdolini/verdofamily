@@ -57,7 +57,14 @@ export default function ShoppingPantryPage() {
   async function callPantryVision(action: string, extra: Record<string, any> = {}) {
     if (!supabase || !familyId) throw new Error('Cloud non disponibile.')
     const { data: result, error } = await supabase.functions.invoke('pantry-photo-recognition', { body: { action, familyId, ...extra } })
-    if (error) throw new Error(error.message || 'Riconoscimento fotografico non disponibile.')
+    if (error) {
+      let detail = ''
+      try {
+        const payload = await (error as any)?.context?.json?.()
+        detail = String(payload?.error || payload?.message || '')
+      } catch {}
+      throw new Error(detail || error.message || 'Riconoscimento fotografico non disponibile.')
+    }
     if (result?.error) throw new Error(result.error)
     return result
   }
