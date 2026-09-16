@@ -129,6 +129,14 @@ export default function ShoppingPantryPage() {
     }
   }
 
+  function clearPantryPhoto() {
+    setPhotoBusy(false)
+    setPhotoError('')
+    setPhotoRows([])
+    setPhotoPreview('')
+    setPhotoPayload(null)
+  }
+
   async function analyzePantryPhoto() {
     if (!photoPayload) return
     setPhotoBusy(true)
@@ -495,7 +503,7 @@ export default function ShoppingPantryPage() {
             <Card>
               <CardHeader title="1. Fotografa la dispensa" subtitle="Puoi fotografare uno scaffale, il frigorifero o un gruppo di prodotti." />
               {!cloudAuthenticated || !familyId ? <div className="callout">Accedi al cloud VerdoFamily per usare il riconoscimento fotografico.</div> : visionStatus && !visionStatus.configured ? <div className="callout callout--warning"><strong>Riconoscimento AI da attivare</strong><br />Il modulo è installato, ma manca la chiave Gemini nel backend.</div> : null}
-              {photoPreview ? <div className="pantry-photo-preview"><img src={photoPreview} alt="Foto dispensa da analizzare" /><span>Foto pronta per il riconoscimento</span></div> : null}
+              {photoPreview ? <div className="pantry-photo-preview"><img src={photoPreview} alt="Foto dispensa da analizzare" /><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><span>Foto pronta per il riconoscimento</span><Button variant="danger" size="sm" icon={<Trash2 size={16} />} onClick={clearPantryPhoto}>Rimuovi foto</Button></div></div> : null}
               <div className="image-source-grid image-source-grid--pantry">
                 <label className="image-source-option">
                   <input type="file" accept="image/*" capture="environment" onChange={e => { const file = e.target.files?.[0]; if (file) void selectPantryPhoto(file); e.currentTarget.value = '' }} />
