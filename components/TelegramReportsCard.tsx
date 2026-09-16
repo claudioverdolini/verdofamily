@@ -292,30 +292,36 @@ export default function TelegramReportsCard() {
         </div>)}</div>
       </> : <div className="callout">Nessun report programmato. Configura il primo qui sotto.</div>}
 
-      <CardHeader title={draft.id ? `Modifica “${draft.name}”` : 'Configura un report'} subtitle="Ogni report può avere orario, giorni e contenuti diversi." />
-      <div className="form-grid form-grid--2">
-        <Field label="Nome report"><input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Es. Buongiorno" /></Field>
-        <Field label="Orario"><input type="time" value={draft.time_local} onChange={e => setDraft({ ...draft, time_local: e.target.value })} /></Field>
-        <Field label="Giorno del riepilogo"><Segmented value={String(draft.target_day_offset)} onChange={(value: string) => setDraft({ ...draft, target_day_offset: value === '1' ? 1 : 0 })} options={[{ value: '0', label: 'Oggi' }, { value: '1', label: 'Domani' }]} /></Field>
-        <Field label="Contenuti"><Segmented value={draft.scope} onChange={(scope: 'personal' | 'family') => setDraft({ ...draft, scope })} options={[{ value: 'personal', label: 'I miei' }, { value: 'family', label: 'Famiglia' }]} /></Field>
-      </div>
+      <CardHeader title={draft.id ? `Modifica “${draft.name}”` : 'Configura un report'} subtitle="Impostazioni compatte e touch-friendly, pensate anche per il tablet di casa." />
+      <div className="telegram-report-editor">
+        <div className="telegram-report-basics">
+          <Field label="Nome report"><input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Es. Buongiorno" /></Field>
+          <Field label="Orario"><input type="time" value={draft.time_local} onChange={e => setDraft({ ...draft, time_local: e.target.value })} /></Field>
+          <Field label="Giorno del riepilogo"><Segmented value={String(draft.target_day_offset)} onChange={(value: string) => setDraft({ ...draft, target_day_offset: value === '1' ? 1 : 0 })} options={[{ value: '0', label: 'Oggi' }, { value: '1', label: 'Domani' }]} /></Field>
+          <Field label="Contenuti"><Segmented value={draft.scope} onChange={(scope: 'personal' | 'family') => setDraft({ ...draft, scope })} options={[{ value: 'personal', label: 'I miei' }, { value: 'family', label: 'Famiglia' }]} /></Field>
+        </div>
 
-      <Field label="Giorni di invio">
-        <div className="settings-check-grid">{DAY_OPTIONS.map(day => <label key={day.value} className={draft.days.includes(day.value) ? 'is-selected' : ''}><input type="checkbox" checked={draft.days.includes(day.value)} onChange={() => toggleDay(day.value)} /><span>{day.label}</span></label>)}</div>
-      </Field>
+        <div className="telegram-report-body">
+          <section className="telegram-report-panel">
+            <div className="telegram-report-panel__head"><div><strong>Giorni di invio</strong><span>Quando deve arrivare questo report</span></div></div>
+            <div className="telegram-days-grid">{DAY_OPTIONS.map(day => <label key={day.value} className={`telegram-day-chip ${draft.days.includes(day.value) ? 'is-selected' : ''}`}><input type="checkbox" checked={draft.days.includes(day.value)} onChange={() => toggleDay(day.value)} /><span>{day.label}</span></label>)}</div>
+          </section>
 
-      <Field label="Sezioni del report">
-        <div className="settings-toggle-list">{SECTION_OPTIONS.map(section => <label key={section.key}><div><strong>{section.label}</strong><span>{section.hint}</span></div><input type="checkbox" checked={draft.sections[section.key]} onChange={() => toggleSection(section.key)} /></label>)}</div>
-      </Field>
+          <section className="telegram-report-panel telegram-report-panel--sections">
+            <div className="telegram-report-panel__head"><div><strong>Sezioni del report</strong><span>Scegli cosa vuoi ricevere nel messaggio</span></div></div>
+            <div className="telegram-section-grid">{SECTION_OPTIONS.map(section => <label key={section.key} className={`telegram-section-option ${draft.sections[section.key] ? 'is-selected' : ''}`}><div><strong>{section.label}</strong><span>{section.hint}</span></div><input type="checkbox" checked={draft.sections[section.key]} onChange={() => toggleSection(section.key)} /></label>)}</div>
+          </section>
+        </div>
 
-      <div className={draft.include_health ? 'callout' : 'callout'}>
-        <label className="toggle-row"><input type="checkbox" checked={draft.include_health} onChange={e => setDraft({ ...draft, include_health: e.target.checked })} /><span><strong>Includi dati salute</strong><br />Disattivato di default: visite, terapie e promemoria sanitari non escono dall’app finché non lo abiliti espressamente.</span></label>
-      </div>
+        <div className="callout telegram-health-option">
+          <label className="toggle-row"><input type="checkbox" checked={draft.include_health} onChange={e => setDraft({ ...draft, include_health: e.target.checked })} /><span><strong>Includi dati salute</strong><br />Disattivato di default: visite, terapie e promemoria sanitari non escono dall’app finché non lo abiliti espressamente.</span></label>
+        </div>
 
-      <div className="backup-actions">
-        <Button icon={<Send size={17} />} onClick={saveSchedule} disabled={busy}>{busy ? 'Salvataggio…' : 'Salva report'}</Button>
-        {draft.id ? <Button variant="soft" onClick={newSchedule} disabled={busy}>Annulla modifica</Button> : null}
-        <Button variant="ghost" icon={<Unlink size={17} />} onClick={disconnect} disabled={busy}>Scollega Telegram</Button>
+        <div className="backup-actions telegram-report-actions">
+          <Button icon={<Send size={17} />} onClick={saveSchedule} disabled={busy}>{busy ? 'Salvataggio…' : 'Salva report'}</Button>
+          {draft.id ? <Button variant="soft" onClick={newSchedule} disabled={busy}>Annulla modifica</Button> : null}
+          <Button variant="ghost" icon={<Unlink size={17} />} onClick={disconnect} disabled={busy}>Scollega Telegram</Button>
+        </div>
       </div>
     </>}
 
