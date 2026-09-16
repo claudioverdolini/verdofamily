@@ -410,54 +410,78 @@ export default function SettingsPage() {
   }
 
   return <div className="page">
-    <PageIntro eyebrow="Personalizzazione" title="Impostazioni" description="Ogni utente può scegliere il proprio stile, la navigazione e cosa vedere in primo piano." />
+    <PageIntro eyebrow="Centro di controllo" title="Impostazioni" description="Poche aree chiare: il tuo spazio, l’uso quotidiano, le connessioni e la protezione dei dati." />
 
-    <div className="settings-grid">
-      <Card>
-        <CardHeader title="Profilo" subtitle="Identità visiva personale" />
-        <div className="settings-profile"><Avatar user={authUser} size="xl" /><div><strong>{authUser.name}</strong><span>{authUser.role}</span></div></div>
-        <div className="form-grid form-grid--2">
-          <Field label="Nome"><input value={authUser.name} onChange={e => updateCurrentProfile({ name: e.target.value })} /></Field>
-          <Field label="Colore profilo"><input type="color" value={authUser.color} onChange={e => updateCurrentProfile({ color: e.target.value })} /></Field>
+    <div className="settings-flow">
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>01</span><h2>Il tuo spazio</h2></div>
+          <p>Profilo e aspetto: tutto ciò che riguarda come riconosci e visualizzi il tuo VerdoFamily.</p>
         </div>
-      </Card>
+        <Card className="settings-card--wide settings-unified-card">
+          <div className="settings-unified-grid settings-unified-grid--identity">
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Profilo</strong><span>Nome e colore personale</span></div></div>
+              <div className="settings-profile settings-profile--compact"><Avatar user={authUser} size="lg" /><div><strong>{authUser.name}</strong><span>{authUser.role}</span></div></div>
+              <div className="form-grid form-grid--2">
+                <Field label="Nome"><input value={authUser.name} onChange={e => updateCurrentProfile({ name: e.target.value })} /></Field>
+                <Field label="Colore profilo"><input type="color" value={authUser.color} onChange={e => updateCurrentProfile({ color: e.target.value })} /></Field>
+              </div>
+            </section>
 
-      <Card>
-        <CardHeader title="Aspetto" subtitle="Tema e colore principale" />
-        <Field label="Tema">
-          <Segmented value={prefs.theme} onChange={setTheme} options={[{ value: 'system', label: 'Sistema' }, { value: 'light', label: 'Chiaro' }, { value: 'dark', label: 'Scuro' }]} />
-        </Field>
-        <div className="accent-grid">{ACCENTS.map(item => <button key={item.color} className={`accent-swatch ${prefs.accent === item.color ? 'is-active' : ''}`} onClick={() => updateCurrentPrefs({ accent: item.color })}><span style={{ background: item.color }} /> <strong>{item.name}</strong>{prefs.accent === item.color ? <Check size={15} /> : null}</button>)}</div>
-        <Field label="Colore libero"><input type="color" value={prefs.accent} onChange={e => updateCurrentPrefs({ accent: e.target.value })} /></Field>
-        <Field label="Densità interfaccia"><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
-      </Card>
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Aspetto</strong><span>Tema, colore e densità</span></div></div>
+              <Field label="Tema"><Segmented value={prefs.theme} onChange={setTheme} options={[{ value: 'system', label: 'Sistema' }, { value: 'light', label: 'Chiaro' }, { value: 'dark', label: 'Scuro' }]} /></Field>
+              <div className="accent-grid accent-grid--compact">{ACCENTS.map(item => <button key={item.color} className={`accent-swatch ${prefs.accent === item.color ? 'is-active' : ''}`} onClick={() => updateCurrentPrefs({ accent: item.color })}><span style={{ background: item.color }} /> <strong>{item.name}</strong>{prefs.accent === item.color ? <Check size={15} /> : null}</button>)}</div>
+              <div className="form-grid form-grid--2 settings-inline-fields">
+                <Field label="Colore libero"><input type="color" value={prefs.accent} onChange={e => updateCurrentPrefs({ accent: e.target.value })} /></Field>
+                <Field label="Densità"><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
+              </div>
+            </section>
+          </div>
+        </Card>
+      </section>
 
-      <Card>
-        <CardHeader title="Barra mobile" subtitle="Scegli fino a 4 sezioni sempre a portata di pollice" />
-        <div className="settings-check-grid">{TAB_OPTIONS.map(item => <label key={item.key} className={prefs.bottomTabs.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.bottomTabs.includes(item.key)} onChange={() => toggleBottomTab(item.key)} /><span>{item.label}</span></label>)}</div>
-        <div className="sortable-list">{prefs.bottomTabs.map((key, index) => <div key={key}><span>{TAB_OPTIONS.find(x => x.key === key)?.label || key}</span><div><button disabled={index === 0} onClick={() => moveTab(index, -1)}>↑</button><button disabled={index === prefs.bottomTabs.length - 1} onClick={() => moveTab(index, 1)}>↓</button></div></div>)}</div>
-      </Card>
-
-      <Card>
-        <CardHeader title="Home" subtitle="Scegli quali riepiloghi mostrare" />
-        <div className="settings-check-grid">{HOME_CARDS.map(item => <label key={item.key} className={prefs.homeCards.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.homeCards.includes(item.key)} onChange={() => toggleHomeCard(item.key)} /><span>{item.label}</span></label>)}</div>
-        <label className="toggle-row"><input type="checkbox" checked={prefs.showBalances} onChange={e => updateCurrentPrefs({ showBalances: e.target.checked })} /><span>Mostra i saldi delle paghette</span></label>
-      </Card>
-
-      <Card>
-        <CardHeader title="Notifiche" subtitle="Preferenze pronte per push/WhatsApp" />
-        <div className="settings-toggle-list">
-          {[
-            ['calendar', 'Calendario', 'Impegni e variazioni'],
-            ['deadlines', 'Scadenze', 'Promemoria prima della data'],
-            ['chores', 'Compiti', 'Nuovi compiti e completamenti'],
-            ['shopping', 'Lista spesa', 'Aggiornamenti alla lista'],
-            ['whatsapp', 'WhatsApp', 'Canale preferito quando disponibile']
-          ].map(([key, label, sub]) => <label key={key}><div><strong>{label}</strong><span>{sub}</span></div><input type="checkbox" checked={(prefs.notifications as any)[key]} onChange={e => updateCurrentPrefs({ notifications: { ...prefs.notifications, [key]: e.target.checked } })} /></label>)}
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>02</span><h2>Uso quotidiano</h2></div>
+          <p>Decidi cosa mostrare sul tablet di casa, cosa tenere a portata di mano e quali avvisi vuoi ricevere.</p>
         </div>
-        <div className="callout">Le preferenze sono operative nell’app; per push e WhatsApp automatici serve il backend cloud, che questa interfaccia è già pronta a collegare.</div>
-      </Card>
+        <Card className="settings-card--wide settings-unified-card">
+          <div className="settings-unified-grid settings-unified-grid--daily">
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Home</strong><span>Riepiloghi visibili a colpo d’occhio</span></div></div>
+              <div className="settings-check-grid settings-check-grid--compact">{HOME_CARDS.map(item => <label key={item.key} className={prefs.homeCards.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.homeCards.includes(item.key)} onChange={() => toggleHomeCard(item.key)} /><span>{item.label}</span></label>)}</div>
+              <label className="toggle-row settings-toggle-standalone"><input type="checkbox" checked={prefs.showBalances} onChange={e => updateCurrentPrefs({ showBalances: e.target.checked })} /><span>Mostra i saldi delle paghette</span></label>
+            </section>
 
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Navigazione mobile</strong><span>Fino a 4 sezioni sempre disponibili</span></div></div>
+              <div className="settings-check-grid settings-check-grid--compact">{TAB_OPTIONS.map(item => <label key={item.key} className={prefs.bottomTabs.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.bottomTabs.includes(item.key)} onChange={() => toggleBottomTab(item.key)} /><span>{item.label}</span></label>)}</div>
+              <div className="sortable-list sortable-list--compact">{prefs.bottomTabs.map((key, index) => <div key={key}><span>{TAB_OPTIONS.find(x => x.key === key)?.label || key}</span><div><button disabled={index === 0} onClick={() => moveTab(index, -1)}>↑</button><button disabled={index === prefs.bottomTabs.length - 1} onClick={() => moveTab(index, 1)}>↓</button></div></div>)}</div>
+            </section>
+
+            <section className="settings-subsection settings-subsection--wide">
+              <div className="settings-subsection__head"><div><strong>Avvisi</strong><span>Scegli quali cambiamenti devono attirare la tua attenzione</span></div></div>
+              <div className="settings-toggle-list settings-toggle-list--grid">
+                {[
+                  ['calendar', 'Calendario', 'Impegni e variazioni'],
+                  ['deadlines', 'Scadenze', 'Promemoria prima della data'],
+                  ['chores', 'Compiti', 'Nuovi compiti e completamenti'],
+                  ['shopping', 'Lista spesa', 'Aggiornamenti alla lista'],
+                  ['whatsapp', 'WhatsApp', 'Canale preferito quando disponibile']
+                ].map(([key, label, sub]) => <label key={key}><div><strong>{label}</strong><span>{sub}</span></div><input type="checkbox" checked={(prefs.notifications as any)[key]} onChange={e => updateCurrentPrefs({ notifications: { ...prefs.notifications, [key]: e.target.checked } })} /></label>)}
+              </div>
+            </section>
+          </div>
+        </Card>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>03</span><h2>Connessioni & automazioni</h2></div>
+          <p>Servizi esterni che lavorano con VerdoFamily: calendario, report e notifiche automatiche.</p>
+        </div>
       <Card className="settings-card--wide">
         <CardHeader title="Google Calendar" subtitle="Ogni adulto può collegare il proprio account e scegliere dove ricevere gli eventi VerdoFamily." />
         {!cloudAuthenticated || !familyId ? <div className="callout">Accedi con il tuo account VerdoFamily cloud per collegare Google Calendar.</div> : !googleStatus ? <div className="backup-actions"><Button variant="soft" icon={<RefreshCw size={17} />} onClick={refreshGoogleCalendar} disabled={googleBusy}>{googleBusy ? 'Controllo…' : 'Verifica configurazione'}</Button></div> : !googleStatus.configured ? <>
@@ -480,6 +504,13 @@ export default function SettingsPage() {
       </Card>
 
       <TelegramReportsCard />
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>04</span><h2>Dati & recupero</h2></div>
+          <p>Backup, cronologia e strumenti di emergenza raccolti in un unico punto.</p>
+        </div>
 
       <Card className="settings-card--wide">
         <CardHeader title="Dati & backup" subtitle="Backup automatici nel cloud e su Google Drive, più esportazione manuale locale." />
@@ -508,6 +539,7 @@ export default function SettingsPage() {
         <div className="backup-footer"><Button variant="ghost" icon={<Upload size={17} />} onClick={doImport}>Importa</Button><Button variant="danger" icon={<RotateCcw size={17} />} onClick={() => { if (confirm('Ripristinare i dati demo? Questa operazione cancella i dati locali.')) resetData() }}>Ripristina dati demo</Button></div>
         {message ? <div className="callout callout--success">{message}</div> : null}
       </Card>
+      </section>
     </div>
   </div>
 }
