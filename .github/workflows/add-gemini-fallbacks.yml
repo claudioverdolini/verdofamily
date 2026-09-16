@@ -1,0 +1,144 @@
+name: Add Gemini fallback models
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/add-gemini-fallbacks.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add automatic fallback across stable Gemini Flash models
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('supabase/functions/pantry-photo-recognition/index.ts')
+          s = p.read_text()
+
+          s = s.replace('''    const geminiModel = Deno.env.get("GEMINI_MODEL") || "gemini-3.6-flash";''', '''    const configuredModel = Deno.env.get("GEMINI_MODEL") || "";
+    const geminiModels = [...new Set([
+      configuredModel,
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash"
+    ].filter(Boolean))];
+    const geminiModel = geminiModels[0];''')
+
+          s = s.replace('''      return json({ ok: true, configured: !!geminiKey, model: geminiKey ? geminiModel : null });''', '''      return json({ ok: true, configured: !!geminiKey, model: geminiKey ? geminiModel : null, fallbackModels: geminiKey ? geminiModels : [] });''')
+
+          old = '''    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiKey
+      },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: imageData } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: schema
+        }
+      })
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = result?.error?.message || `gemini_http_${response.status}`;
+      return json({ ok: false, error: message }, response.status >= 500 ? 502 : 400);
+    }
+
+    const output = textPart(result);
+    if (!output) return json({ ok: false, error: "empty_vision_response" }, 502);
+'''
+          new = '''    const requestBody = JSON.stringify({
+      contents: [{
+        role: "user",
+        parts: [
+          { inlineData: { mimeType, data: imageData } },
+          { text: prompt }
+        ]
+      }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: schema
+      }
+    });
+
+    let result: any = null;
+    let usedModel = "";
+    let lastStatus = 0;
+    let lastMessage = "";
+
+    for (const model of geminiModels) {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": geminiKey
+        },
+        body: requestBody
+      });
+
+      const candidate = await response.json().catch(() => ({}));
+      if (response.ok) {
+        result = candidate;
+        usedModel = model;
+        break;
+      }
+
+      lastStatus = response.status;
+      lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
+      const lower = lastMessage.toLowerCase();
+      const retryable = [404, 429, 500, 502, 503, 504].includes(response.status)
+        || lower.includes("high demand")
+        || lower.includes("overloaded")
+        || lower.includes("temporarily")
+        || lower.includes("unavailable");
+
+      if (!retryable) {
+        return json({ ok: false, error: lastMessage }, response.status >= 500 ? 502 : 400);
+      }
+    }
+
+    if (!result || !usedModel) {
+      return json({
+        ok: false,
+        error: "Il riconoscimento AI è momentaneamente molto richiesto. VerdoFamily ha provato automaticamente più modelli, ma sono tutti occupati. Riprova tra qualche istante.",
+        code: "ai_temporarily_unavailable",
+        lastStatus,
+        lastMessage
+      }, 503);
+    }
+
+    const output = textPart(result);
+    if (!output) return json({ ok: false, error: "empty_vision_response" }, 502);
+'''
+          if old not in s:
+              raise SystemExit('Gemini request block not found')
+          s = s.replace(old, new, 1)
+
+          s = s.replace('''      model: geminiModel,''', '''      model: usedModel,''', 1)
+          p.write_text(s)
+          PY
+      - name: Build application
+        run: npm ci && npm run build
+      - name: Commit fix
+        run: |
+          rm .github/workflows/add-gemini-fallbacks.yml
+          git config user.name "VerdoFamily Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add supabase/functions/pantry-photo-recognition/index.ts .github/workflows/add-gemini-fallbacks.yml
+          git commit -m "Add Gemini fallback models for pantry recognition"
+          git push
