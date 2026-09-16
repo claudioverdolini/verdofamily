@@ -247,7 +247,7 @@ async function buildReport(schedule: ReportSchedule) {
   const titlePrefix = schedule.target_day_offset === 1 ? "🌙 Domani" : "☀️ Oggi";
   const lines: string[] = [
     `${titlePrefix} · ${schedule.name}`,
-    `📅 d{niceDate(targetDate)}`
+    `📅 ${niceDate(targetDate)}`
   ];
 
   if (schedule.sections.agenda) {
@@ -618,6 +618,7 @@ async function appAction(req: Request, body: any) {
       ok: true,
       botUsername: bot.username,
       url: `https://t.me/${bot.username}?start=${token}`,
+      startCommand: `/start ${token}`,
       expiresInMinutes: 30
     });
   }

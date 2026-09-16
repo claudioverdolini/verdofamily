@@ -90,6 +90,8 @@ export default function TelegramReportsCard() {
   const [draft, setDraft] = useState<ReportSchedule>(() => blankSchedule())
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [linkCommand, setLinkCommand] = useState('')
+  const [linkUrl, setLinkUrl] = useState('')
 
   useEffect(() => {
     void refreshStatus()
@@ -122,24 +124,31 @@ export default function TelegramReportsCard() {
   }
 
   async function startLink() {
-    const popup = window.open('about:blank', '_blank')
     setBusy(true)
     setMessage('')
     try {
       const result = await callTelegram('link-url')
       if (!result?.url) throw new Error('Link Telegram non disponibile.')
-      setMessage('In Telegram premi “Avvia/Start”, poi torna qui e clicca “Verifica collegamento”.')
-      if (popup) {
-        popup.opener = null
-        popup.location.href = result.url
-      } else {
-        window.location.assign(result.url)
-      }
+      const token = new URL(result.url).searchParams.get('start') || ''
+      const command = result?.startCommand || (token ? `/start ${token}` : '')
+      setLinkUrl(result.url)
+      setLinkCommand(command)
+      setMessage('Apri Telegram e premi Avvia/Start. Se il pulsante non reagisce, usa il comando manuale mostrato qui sotto.')
+      window.location.assign(result.url)
     } catch (error: any) {
-      popup?.close()
       setMessage(`Collegamento non riuscito: ${error?.message || 'errore sconosciuto'}`)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function copyLinkCommand() {
+    if (!linkCommand) return
+    try {
+      await navigator.clipboard.writeText(linkCommand)
+      setMessage('Comando copiato. Apri la chat privata del bot Telegram, incollalo e invialo.')
+    } catch {
+      setMessage('Copia manualmente il comando qui sotto e invialo nella chat privata del bot Telegram.')
     }
   }
 
@@ -253,6 +262,16 @@ export default function TelegramReportsCard() {
         <Button icon={<ExternalLink size={17} />} onClick={startLink} disabled={busy}>{busy ? 'Preparazione…' : `Collega @${status.bot?.username || 'bot Telegram'}`}</Button>
         <Button variant="soft" icon={<RefreshCw size={17} />} onClick={pollLink} disabled={busy}>Verifica collegamento</Button>
       </div>
+      {linkCommand ? <div className="callout" style={{ marginTop: 12 }}>
+        <strong>Se “Start bot” non reagisce</strong><br />
+        Cerca <strong>@{status.bot?.username || 'il bot Telegram'}</strong> direttamente nell'app Telegram, apri la chat privata e invia questo comando:
+        <div className="backup-actions" style={{ marginTop: 10 }}>
+          <input readOnly value={linkCommand} style={{ flex: 1, minWidth: 220 }} onFocus={e => e.currentTarget.select()} />
+          <Button variant="soft" onClick={copyLinkCommand}>Copia comando</Button>
+          {linkUrl ? <Button variant="ghost" onClick={() => window.location.assign(linkUrl)}>Apri bot</Button> : null}
+        </div>
+        <small>Il comando è temporaneo e collega soltanto il tuo utente VerdoFamily.</small>
+      </div> : null}
     </> : <>
       <div className="callout callout--success"><CheckCircle2 size={17} /> <strong>Telegram collegato</strong>{status.connection?.firstName ? ` · ${status.connection.firstName}` : ''}{status.connection?.telegramUsername ? ` (@${status.connection.telegramUsername})` : ''}</div>
 
