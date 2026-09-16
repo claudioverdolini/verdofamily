@@ -1,0 +1,36 @@
+name: Harden Telegram link flow
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/harden-telegram-link-flow.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Persist manual Telegram link fallback
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('components/TelegramReportsCard.tsx')
+          s = p.read_text()
+          s = s.replace("  const [linkCommand, setLinkCommand] = useState('')\n  const [linkUrl, setLinkUrl] = useState('')\n", "  const [linkCommand, setLinkCommand] = useState(() => sessionStorage.getItem('verdofamily_telegram_link_command') || '')\n  const [linkUrl, setLinkUrl] = useState(() => sessionStorage.getItem('verdofamily_telegram_link_url') || '')\n")
+          s = s.replace("      setLinkUrl(result.url)\n      setLinkCommand(command)\n      setMessage('Apri Telegram e premi Avvia/Start. Se il pulsante non reagisce, usa il comando manuale mostrato qui sotto.')\n      window.location.assign(result.url)\n", "      setLinkUrl(result.url)\n      setLinkCommand(command)\n      sessionStorage.setItem('verdofamily_telegram_link_url', result.url)\n      sessionStorage.setItem('verdofamily_telegram_link_command', command)\n      setMessage('Collegamento pronto. Premi “Apri bot” qui sotto; se Start non reagisce, copia e invia il comando manuale.')\n")
+          s = s.replace("      if (result?.connected) {\n        setMessage('✅ Telegram collegato correttamente.')\n", "      if (result?.connected) {\n        sessionStorage.removeItem('verdofamily_telegram_link_url')\n        sessionStorage.removeItem('verdofamily_telegram_link_command')\n        setLinkUrl('')\n        setLinkCommand('')\n        setMessage('✅ Telegram collegato correttamente.')\n")
+          p.write_text(s)
+          PY
+      - name: Build application
+        run: npm ci && npm run build
+      - name: Commit fix
+        run: |
+          rm .github/workflows/harden-telegram-link-flow.yml
+          git config user.name "VerdoFamily Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add components/TelegramReportsCard.tsx .github/workflows/harden-telegram-link-flow.yml
+          git commit -m "Harden Telegram linking flow"
+          git push
