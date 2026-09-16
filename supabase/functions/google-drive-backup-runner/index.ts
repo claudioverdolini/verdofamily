@@ -12,6 +12,17 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json", ...cors }
 });
 
+function isAcceptedAppsScriptRedirect(response: Response) {
+  if (response.status < 300 || response.status >= 400) return false;
+  const location = response.headers.get("location") || "";
+  try {
+    const host = new URL(location).hostname.toLowerCase();
+    return host === "script.googleusercontent.com" || host.endsWith(".googleusercontent.com");
+  } catch {
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -105,22 +116,40 @@ Deno.serve(async (req) => {
           data: doc.data || {}
         };
 
+        // Google Apps Script ContentService intentionally answers through a 3xx
+        // redirect to script.googleusercontent.com. Following that redirect from
+        // server runtimes can yield a 404 even though doPost has already run and
+        // the Drive file has been created. Keep the redirect manual and consider
+        // only the trusted Google content redirect an accepted execution.
         const response = await fetch(cfg.webhook_url, {
           method: "POST",
-          redirect: "follow",
+          redirect: "manual",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify(payload)
         });
-        const text = await response.text();
+
         let parsed: any = null;
-        try { parsed = JSON.parse(text); } catch { parsed = null; }
-        if (!response.ok || parsed?.ok !== true) {
-          throw new Error(parsed?.error || `drive_webhook_http_${response.status}`);
+        let acceptedRedirect = false;
+        if (isAcceptedAppsScriptRedirect(response)) {
+          acceptedRedirect = true;
+        } else {
+          const text = await response.text();
+          try { parsed = JSON.parse(text); } catch { parsed = null; }
+          if (!response.ok || parsed?.ok !== true) {
+            throw new Error(parsed?.error || `drive_webhook_http_${response.status}`);
+          }
         }
 
         const successAt = new Date().toISOString();
         await client.from("drive_backup_configs").update({ last_success_at: successAt, last_error: null }).eq("family_id", familyId);
-        results.push({ familyId, ok: true, fileId: parsed?.fileId || null, fileName: parsed?.fileName || null, successAt });
+        results.push({
+          familyId,
+          ok: true,
+          acceptedRedirect,
+          fileId: parsed?.fileId || null,
+          fileName: parsed?.fileName || null,
+          successAt
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await client.from("drive_backup_configs").update({ last_error: message.slice(0, 1000) }).eq("family_id", familyId);
