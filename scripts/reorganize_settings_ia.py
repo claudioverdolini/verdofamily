@@ -1,0 +1,121 @@
+from pathlib import Path
+
+p = Path('pages/Settings.tsx')
+s = p.read_text()
+
+start = s.index('    <div className="settings-grid">')
+google = s.index('      <Card className="settings-card--wide">', start)
+
+prefix = '''    <div className="settings-flow">
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>01</span><h2>Il tuo spazio</h2></div>
+          <p>Profilo e aspetto: tutto ciò che riguarda come riconosci e visualizzi il tuo VerdoFamily.</p>
+        </div>
+        <Card className="settings-card--wide settings-unified-card">
+          <div className="settings-unified-grid settings-unified-grid--identity">
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Profilo</strong><span>Nome e colore personale</span></div></div>
+              <div className="settings-profile settings-profile--compact"><Avatar user={authUser} size="lg" /><div><strong>{authUser.name}</strong><span>{authUser.role}</span></div></div>
+              <div className="form-grid form-grid--2">
+                <Field label="Nome"><input value={authUser.name} onChange={e => updateCurrentProfile({ name: e.target.value })} /></Field>
+                <Field label="Colore profilo"><input type="color" value={authUser.color} onChange={e => updateCurrentProfile({ color: e.target.value })} /></Field>
+              </div>
+            </section>
+
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Aspetto</strong><span>Tema, colore e densità</span></div></div>
+              <Field label="Tema"><Segmented value={prefs.theme} onChange={setTheme} options={[{ value: 'system', label: 'Sistema' }, { value: 'light', label: 'Chiaro' }, { value: 'dark', label: 'Scuro' }]} /></Field>
+              <div className="accent-grid accent-grid--compact">{ACCENTS.map(item => <button key={item.color} className={`accent-swatch ${prefs.accent === item.color ? 'is-active' : ''}`} onClick={() => updateCurrentPrefs({ accent: item.color })}><span style={{ background: item.color }} /> <strong>{item.name}</strong>{prefs.accent === item.color ? <Check size={15} /> : null}</button>)}</div>
+              <div className="form-grid form-grid--2 settings-inline-fields">
+                <Field label="Colore libero"><input type="color" value={prefs.accent} onChange={e => updateCurrentPrefs({ accent: e.target.value })} /></Field>
+                <Field label="Densità"><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
+              </div>
+            </section>
+          </div>
+        </Card>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>02</span><h2>Uso quotidiano</h2></div>
+          <p>Decidi cosa mostrare sul tablet di casa, cosa tenere a portata di mano e quali avvisi vuoi ricevere.</p>
+        </div>
+        <Card className="settings-card--wide settings-unified-card">
+          <div className="settings-unified-grid settings-unified-grid--daily">
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Home</strong><span>Riepiloghi visibili a colpo d’occhio</span></div></div>
+              <div className="settings-check-grid settings-check-grid--compact">{HOME_CARDS.map(item => <label key={item.key} className={prefs.homeCards.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.homeCards.includes(item.key)} onChange={() => toggleHomeCard(item.key)} /><span>{item.label}</span></label>)}</div>
+              <label className="toggle-row settings-toggle-standalone"><input type="checkbox" checked={prefs.showBalances} onChange={e => updateCurrentPrefs({ showBalances: e.target.checked })} /><span>Mostra i saldi delle paghette</span></label>
+            </section>
+
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Navigazione mobile</strong><span>Fino a 4 sezioni sempre disponibili</span></div></div>
+              <div className="settings-check-grid settings-check-grid--compact">{TAB_OPTIONS.map(item => <label key={item.key} className={prefs.bottomTabs.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.bottomTabs.includes(item.key)} onChange={() => toggleBottomTab(item.key)} /><span>{item.label}</span></label>)}</div>
+              <div className="sortable-list sortable-list--compact">{prefs.bottomTabs.map((key, index) => <div key={key}><span>{TAB_OPTIONS.find(x => x.key === key)?.label || key}</span><div><button disabled={index === 0} onClick={() => moveTab(index, -1)}>↑</button><button disabled={index === prefs.bottomTabs.length - 1} onClick={() => moveTab(index, 1)}>↓</button></div></div>)}</div>
+            </section>
+
+            <section className="settings-subsection settings-subsection--wide">
+              <div className="settings-subsection__head"><div><strong>Avvisi</strong><span>Scegli quali cambiamenti devono attirare la tua attenzione</span></div></div>
+              <div className="settings-toggle-list settings-toggle-list--grid">
+                {[
+                  ['calendar', 'Calendario', 'Impegni e variazioni'],
+                  ['deadlines', 'Scadenze', 'Promemoria prima della data'],
+                  ['chores', 'Compiti', 'Nuovi compiti e completamenti'],
+                  ['shopping', 'Lista spesa', 'Aggiornamenti alla lista'],
+                  ['whatsapp', 'WhatsApp', 'Canale preferito quando disponibile']
+                ].map(([key, label, sub]) => <label key={key}><div><strong>{label}</strong><span>{sub}</span></div><input type="checkbox" checked={(prefs.notifications as any)[key]} onChange={e => updateCurrentPrefs({ notifications: { ...prefs.notifications, [key]: e.target.checked } })} /></label>)}
+              </div>
+            </section>
+          </div>
+        </Card>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>03</span><h2>Connessioni & automazioni</h2></div>
+          <p>Servizi esterni che lavorano con VerdoFamily: calendario, report e notifiche automatiche.</p>
+        </div>
+'''
+
+s = s[:start] + prefix + s[google:]
+
+telegram_marker = '      <TelegramReportsCard />'
+s = s.replace(telegram_marker, telegram_marker + '''
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section__head">
+          <div><span>04</span><h2>Dati & recupero</h2></div>
+          <p>Backup, cronologia e strumenti di emergenza raccolti in un unico punto.</p>
+        </div>''', 1)
+
+end_marker = '''      </Card>
+    </div>
+  </div>
+}'''
+replacement = '''      </Card>
+      </section>
+    </div>
+  </div>
+}'''
+if end_marker not in s:
+    raise SystemExit('final settings wrapper marker not found')
+s = s.replace(end_marker, replacement, 1)
+
+s = s.replace('''<PageIntro eyebrow="Personalizzazione" title="Impostazioni" description="Ogni utente può scegliere il proprio stile, la navigazione e cosa vedere in primo piano." />''', '''<PageIntro eyebrow="Centro di controllo" title="Impostazioni" description="Poche aree chiare: il tuo spazio, l’uso quotidiano, le connessioni e la protezione dei dati." />''')
+p.write_text(s)
+
+css = Path('responsive.css')
+c = css.read_text()
+marker = '/* Settings information architecture: fewer containers, clearer hierarchy */'
+if marker not in c:
+    c += r'''
+
+/* Settings information architecture: fewer containers, clearer hierarchy */
+.settings-flow{display:grid;gap:24px}.settings-section{display:grid;gap:12px;min-width:0}.settings-section__head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;padding:0 4px}.settings-section__head>div{display:flex;align-items:baseline;gap:9px;min-width:0}.settings-section__head>div>span{color:var(--accent);font-size:10px;font-weight:900;letter-spacing:.08em}.settings-section__head h2{margin:0;font-size:18px;letter-spacing:-.02em}.settings-section__head p{max-width:600px;margin:0;color:var(--muted);font-size:10px;line-height:1.45;text-align:right}.settings-unified-card{padding:18px}.settings-unified-grid{display:grid;gap:0;min-width:0}.settings-unified-grid--identity,.settings-unified-grid--daily{grid-template-columns:repeat(2,minmax(0,1fr))}.settings-subsection{min-width:0;padding:4px 18px 8px}.settings-subsection+.settings-subsection{border-left:1px solid var(--border)}.settings-subsection:first-child{padding-left:2px}.settings-subsection:nth-child(2){padding-right:2px}.settings-subsection--wide{grid-column:1/-1;margin-top:14px;padding:16px 2px 2px;border-top:1px solid var(--border);border-left:0!important}.settings-subsection__head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:13px}.settings-subsection__head>div{display:flex;flex-direction:column;gap:3px}.settings-subsection__head strong{font-size:13px}.settings-subsection__head span{color:var(--muted);font-size:9px}.settings-profile--compact{margin-bottom:14px}.settings-inline-fields{margin-top:12px}.accent-grid--compact{margin-top:10px}.settings-check-grid--compact{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.settings-check-grid--compact label{min-height:42px}.settings-toggle-standalone{margin-top:12px}.sortable-list--compact{margin-top:10px}.sortable-list--compact>div{min-height:38px}.settings-toggle-list--grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.settings-toggle-list--grid>label{min-height:58px;padding:9px 10px;border:1px solid var(--border);border-radius:12px;background:var(--surface2)}
+@media (min-width:821px) and (max-width:1180px){.settings-flow{gap:20px}.settings-section__head p{max-width:430px}.settings-unified-card{padding:15px}.settings-subsection{padding-left:14px;padding-right:14px}.settings-toggle-list--grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:820px){.settings-flow{gap:18px}.settings-section{gap:9px}.settings-section__head{display:block;padding:0 2px}.settings-section__head p{margin-top:4px;max-width:none;text-align:left}.settings-unified-grid--identity,.settings-unified-grid--daily{grid-template-columns:minmax(0,1fr)}.settings-subsection,.settings-subsection:first-child,.settings-subsection:nth-child(2){padding:6px 0 14px}.settings-subsection+.settings-subsection{border-left:0;border-top:1px solid var(--border);padding-top:16px}.settings-subsection--wide{margin-top:0}.settings-toggle-list--grid{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:520px){.settings-unified-card{padding:12px}.settings-check-grid--compact{grid-template-columns:minmax(0,1fr)}.settings-section__head h2{font-size:16px}}
+'''
+    css.write_text(c)
