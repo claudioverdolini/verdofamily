@@ -14,47 +14,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Group navigation by daily logic
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('App.tsx')
-          s = p.read_text()
-          old = '''const NAV: Array<{ key: PageKey; label: string; icon: React.ReactNode; group?: string }> = [
-  { key: 'home', label: 'Home', icon: <Home size={20} /> },
-  { key: 'calendar', label: 'Calendario', icon: <CalendarDays size={20} /> },
-  { key: 'shopping', label: 'Spesa & Dispensa', icon: <ShoppingBasket size={20} /> },
-  { key: 'meals', label: 'Pasti', icon: <Utensils size={20} /> },
-  { key: 'chores', label: 'Compiti & Paghette', icon: <WalletCards size={20} /> },
-  { key: 'health', label: 'Salute', icon: <HeartPulse size={20} /> },
-  { key: 'deadlines', label: 'Scadenze', icon: <ReceiptText size={20} /> },
-  { key: 'todos', label: 'ToDo List', icon: <CheckSquare2 size={20} /> },
-  { key: 'users', label: 'Utenti', icon: <Users size={20} />, group: 'Gestione' },
-  { key: 'settings', label: 'Impostazioni', icon: <Settings size={20} />, group: 'Gestione' }
-]'''
-          new = '''const NAV: Array<{ key: PageKey; label: string; icon: React.ReactNode; group?: string }> = [
-  { key: 'home', label: 'Home', icon: <Home size={20} />, group: 'Oggi' },
-  { key: 'calendar', label: 'Calendario', icon: <CalendarDays size={20} />, group: 'Oggi' },
-  { key: 'shopping', label: 'Spesa & Dispensa', icon: <ShoppingBasket size={20} />, group: 'Casa' },
-  { key: 'meals', label: 'Pasti', icon: <Utensils size={20} />, group: 'Casa' },
-  { key: 'chores', label: 'Compiti & Paghette', icon: <WalletCards size={20} />, group: 'Famiglia' },
-  { key: 'health', label: 'Salute', icon: <HeartPulse size={20} />, group: 'Famiglia' },
-  { key: 'deadlines', label: 'Scadenze', icon: <ReceiptText size={20} />, group: 'Famiglia' },
-  { key: 'todos', label: 'Da fare', icon: <CheckSquare2 size={20} />, group: 'Famiglia' },
-  { key: 'users', label: 'Membri', icon: <Users size={20} />, group: 'Gestione' },
-  { key: 'settings', label: 'Impostazioni', icon: <Settings size={20} />, group: 'Gestione' }
-]'''
-          if old not in s:
-              raise SystemExit('NAV block not found')
-          p.write_text(s.replace(old, new))
-          PY
+      - name: Apply navigation cleanup
+        run: python scripts/reorganize_navigation.py
       - name: Build application
         run: npm ci && npm run build
       - name: Commit navigation cleanup
         run: |
-          rm .github/workflows/reorganize-navigation.yml
+          rm .github/workflows/reorganize-navigation.yml scripts/reorganize_navigation.py
           git config user.name "VerdoFamily Automation"
           git config user.email "actions@users.noreply.github.com"
-          git add App.tsx .github/workflows/reorganize-navigation.yml
+          git add App.tsx .github/workflows/reorganize-navigation.yml scripts/reorganize_navigation.py
           git commit -m "Group navigation by daily family logic"
           git push
