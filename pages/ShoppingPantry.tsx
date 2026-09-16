@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Camera, Check, ChevronRight, PackageOpen, Plus, ScanLine, Search, ShoppingBasket, Trash2 } from 'lucide-react'
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { normalize, parseReceiptLines, similarity } from '../utils'
+import { supabase } from '../supabaseClient'
 
 export default function ShoppingPantryPage() {
   const {
@@ -17,7 +18,9 @@ export default function ShoppingPantryPage() {
     addCategory,
     renameCategory,
     deleteCategory,
-    importReceiptItems
+    importReceiptItems,
+    cloudAuthenticated,
+    familyId
   } = useFamily()
 
   const [tab, setTab] = useState<'shopping' | 'pantry' | 'scan'>('shopping')
@@ -37,6 +40,155 @@ export default function ShoppingPantryPage() {
   const [receiptText, setReceiptText] = useState('')
   const [receiptRows, setReceiptRows] = useState<any[]>([])
   const [removeFromShopping, setRemoveFromShopping] = useState(true)
+
+  const [scanMode, setScanMode] = useState<'receipt' | 'pantry-photo'>('receipt')
+  const [visionStatus, setVisionStatus] = useState<{ configured: boolean; model?: string | null } | null>(null)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoError, setPhotoError] = useState('')
+  const [photoPreview, setPhotoPreview] = useState('')
+  const [photoPayload, setPhotoPayload] = useState<{ imageData: string; mimeType: string } | null>(null)
+  const [photoRows, setPhotoRows] = useState<any[]>([])
+
+  useEffect(() => {
+    if (scanMode !== 'pantry-photo' || !cloudAuthenticated || !familyId || !supabase) return
+    void refreshVisionStatus()
+  }, [scanMode, cloudAuthenticated, familyId])
+
+  async function callPantryVision(action: string, extra: Record<string, any> = {}) {
+    if (!supabase || !familyId) throw new Error('Cloud non disponibile.')
+    const { data: result, error } = await supabase.functions.invoke('pantry-photo-recognition', { body: { action, familyId, ...extra } })
+    if (error) throw new Error(error.message || 'Riconoscimento fotografico non disponibile.')
+    if (result?.error) throw new Error(result.error)
+    return result
+  }
+
+  async function refreshVisionStatus() {
+    try {
+      const result = await callPantryVision('status')
+      setVisionStatus({ configured: !!result?.configured, model: result?.model || null })
+    } catch {
+      setVisionStatus({ configured: false })
+    }
+  }
+
+  function readFileAsDataUrl(file: File) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('Impossibile leggere la foto.'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  async function preparePantryPhoto(file: File) {
+    if (!file.type.startsWith('image/')) throw new Error('Seleziona una foto valida.')
+    const original = await readFileAsDataUrl(file)
+    const supportedRaw = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(file.type.toLowerCase())
+
+    // Keep small files untouched; for normal phone photos resize to reduce latency/data usage.
+    if (file.size <= 2_800_000 && supportedRaw) {
+      return { preview: original, imageData: original.split(',')[1] || '', mimeType: file.type.toLowerCase() }
+    }
+
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('decode'))
+        img.src = original
+      })
+      const maxSide = 1600
+      const scale = Math.min(1, maxSide / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height))
+      const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale))
+      const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale))
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('canvas')
+      ctx.drawImage(image, 0, 0, width, height)
+      const compressed = canvas.toDataURL('image/jpeg', .82)
+      return { preview: compressed, imageData: compressed.split(',')[1] || '', mimeType: 'image/jpeg' }
+    } catch {
+      if (!supportedRaw || file.size > 8_500_000) throw new Error('La foto è troppo grande o in un formato non supportato. Prova con JPG/PNG oppure riduci la dimensione.')
+      return { preview: original, imageData: original.split(',')[1] || '', mimeType: file.type.toLowerCase() }
+    }
+  }
+
+  async function selectPantryPhoto(file: File) {
+    setPhotoError('')
+    setPhotoRows([])
+    try {
+      const prepared = await preparePantryPhoto(file)
+      setPhotoPreview(prepared.preview)
+      setPhotoPayload({ imageData: prepared.imageData, mimeType: prepared.mimeType })
+    } catch (error: any) {
+      setPhotoPreview('')
+      setPhotoPayload(null)
+      setPhotoError(error?.message || 'Non riesco a preparare questa foto.')
+    }
+  }
+
+  async function analyzePantryPhoto() {
+    if (!photoPayload) return
+    setPhotoBusy(true)
+    setPhotoError('')
+    try {
+      const result = await callPantryVision('analyze', photoPayload)
+      const catalog = catalogNames()
+      const rows = (result?.items || []).map((item: any, index: number) => {
+        const exact = item.matchName && catalog.some(name => normalize(name) === normalize(item.matchName))
+          ? catalog.find(name => normalize(name) === normalize(item.matchName))
+          : ''
+        const searchText = `${item.detectedName || ''} ${item.observedText || ''}`.trim()
+        const suggestions = catalog
+          .map(name => ({ name, score: similarity(searchText, name) }))
+          .filter(x => x.score >= .16)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 5)
+        const top = suggestions[0]
+        const confidentExisting = !!exact || (!!top && top.score >= .78)
+        const chosenName = exact || (confidentExisting ? top.name : String(item.detectedName || '').trim())
+        const category = data.categories.includes(item.category) ? item.category : 'Generico'
+        return {
+          id: `photo-${Date.now()}-${index}`,
+          raw: String(item.detectedName || '').trim(),
+          observedText: String(item.observedText || '').trim(),
+          notes: String(item.notes || '').trim(),
+          confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
+          include: true,
+          mode: confidentExisting ? 'existing' : 'new',
+          name: chosenName,
+          qty: Math.max(1, Number(item.qty) || 1),
+          unit: item.unit || 'pz',
+          category,
+          suggestions
+        }
+      }).filter((row: any) => row.raw)
+      setPhotoRows(rows)
+      if (!rows.length) setPhotoError('Non ho riconosciuto prodotti con sufficiente affidabilità. Prova una foto più vicina e ben illuminata.')
+    } catch (error: any) {
+      const raw = error?.message || 'errore sconosciuto'
+      setPhotoError(raw.includes('vision_not_configured') ? 'Il riconoscimento fotografico deve ancora essere attivato nelle impostazioni cloud.' : `Analisi non riuscita: ${raw}`)
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
+  function importPhotoRecognition() {
+    const selected = photoRows.filter(x => x.include && x.name.trim()).map(x => ({
+      name: x.name.trim(),
+      qty: Math.max(1, Number(x.qty) || 1),
+      unit: x.unit || 'pz',
+      category: x.category || 'Generico'
+    }))
+    if (!selected.length) return
+    importReceiptItems(selected, removeFromShopping)
+    setPhotoRows([])
+    setPhotoPreview('')
+    setPhotoPayload(null)
+    setTab('pantry')
+  }
 
   const pending = data.shopping.filter(x => !x.taken)
   const taken = data.shopping.filter(x => x.taken)
@@ -155,7 +307,7 @@ export default function ShoppingPantryPage() {
           options={[
             { value: 'shopping', label: `Lista spesa · ${pending.length}` },
             { value: 'pantry', label: `Dispensa · ${data.pantry.length}` },
-            { value: 'scan', label: 'Scansiona scontrino' }
+            { value: 'scan', label: 'Acquisisci' }
           ]}
         />
       </div>
@@ -242,7 +394,13 @@ export default function ShoppingPantryPage() {
       ) : null}
 
       {tab === 'scan' ? (
-        <div className="scan-layout">
+        <div>
+          <div className="scan-mode-switch">
+            <Segmented value={scanMode} onChange={setScanMode} options={[{ value: 'receipt', label: '🧾 Scontrino' }, { value: 'pantry-photo', label: '📷 Foto dispensa' }]} />
+            <span>{scanMode === 'receipt' ? 'Carica gli acquisti leggendo lo scontrino.' : 'Fotografa scaffali o frigorifero e conferma ciò che viene riconosciuto.'}</span>
+          </div>
+
+          {scanMode === 'receipt' ? <div className="scan-layout">
           <Card>
             <CardHeader title="1. Leggi lo scontrino" subtitle="Fotocamera su iPhone/Android oppure testo incollato." />
             <label className="receipt-drop">
@@ -301,6 +459,45 @@ export default function ShoppingPantryPage() {
               <EmptyState icon={<ScanLine size={30} />} title="In attesa dello scontrino" text="Dopo l'analisi compariranno qui i prodotti da confermare." />
             )}
           </Card>
+        </div> : null}
+
+          {scanMode === 'pantry-photo' ? <div className="scan-layout pantry-photo-scan">
+            <Card>
+              <CardHeader title="1. Fotografa la dispensa" subtitle="Puoi fotografare uno scaffale, il frigorifero o un gruppo di prodotti." />
+              {!cloudAuthenticated || !familyId ? <div className="callout">Accedi al cloud VerdoFamily per usare il riconoscimento fotografico.</div> : visionStatus && !visionStatus.configured ? <div className="callout callout--warning"><strong>Riconoscimento AI da attivare</strong><br />Il modulo è installato, ma manca la chiave Gemini nel backend.</div> : null}
+              <label className="receipt-drop pantry-photo-drop">
+                <input type="file" accept="image/*" capture="environment" onChange={e => { const file = e.target.files?.[0]; if (file) void selectPantryPhoto(file); e.currentTarget.value = '' }} />
+                {photoPreview ? <img src={photoPreview} alt="Foto dispensa da analizzare" /> : <Camera size={38} />}
+                <strong>{photoPreview ? 'Cambia foto' : 'Scatta o carica una foto'}</strong>
+                <span>Per risultati migliori: foto frontale, luce uniforme e prodotti non troppo sovrapposti.</span>
+              </label>
+              <div className="callout">🔒 La foto viene usata solo per il riconoscimento e non viene salvata nella dispensa o negli allegati.</div>
+              {photoError ? <div className="callout callout--warning">{photoError}</div> : null}
+              <Button icon={<ScanLine size={18} />} disabled={!photoPayload || photoBusy || visionStatus?.configured === false} onClick={analyzePantryPhoto}>{photoBusy ? 'Riconoscimento in corso…' : 'Riconosci prodotti'}</Button>
+            </Card>
+
+            <Card>
+              <CardHeader title="2. Controlla e carica" subtitle="Nessuna quantità viene modificata senza la tua conferma." />
+              {photoBusy ? <div className="vision-loading"><ScanLine size={28} /><strong>Sto guardando la foto…</strong><span>Leggo confezioni, etichette e quantità visibili.</span></div> : photoRows.length ? <div className="receipt-matches">
+                <div className="vision-summary"><strong>{photoRows.length} {photoRows.length === 1 ? 'prodotto riconosciuto' : 'prodotti riconosciuti'}</strong><span>Controlla soprattutto le righe con confidenza più bassa.</span></div>
+                {photoRows.map(row => <div key={row.id} className="receipt-match">
+                  <div className="receipt-match__head">
+                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.observedText ? <small> · letto: {row.observedText}</small> : null}</span></label>
+                    <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge>
+                  </div>
+                  {row.include ? <div className="receipt-match__grid">
+                    <Field label="Associazione"><select value={row.mode} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, mode: e.target.value } : x))}><option value="existing">Prodotto esistente</option><option value="new">Crea nuovo prodotto</option></select></Field>
+                    {row.mode === 'existing' ? <Field label="Prodotto"><select value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))}>{row.suggestions.length ? row.suggestions.map((suggestion: any) => <option key={suggestion.name} value={suggestion.name}>{suggestion.name} · {Math.round(suggestion.score * 100)}%</option>) : <option value={row.name}>{row.name}</option>}{catalogNames().filter(name => !row.suggestions.some((suggestion: any) => suggestion.name === name)).map(name => <option key={name} value={name}>{name}</option>)}</select></Field> : <Field label="Nome prodotto"><input value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>}
+                    <Field label="Quantità"><input type="number" min="1" value={row.qty} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value) } : x))} /></Field>
+                    <Field label="Unità"><select value={row.unit} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
+                    {row.mode === 'new' ? <Field label="Categoria"><select value={row.category} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, category: e.target.value } : x))}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field> : null}
+                  </div> : null}
+                </div>)}
+                <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se un prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
+                <Button icon={<PackageOpen size={18} />} onClick={importPhotoRecognition}>Conferma e carica in dispensa</Button>
+              </div> : <EmptyState icon={<Camera size={30} />} title="In attesa della foto" text="Dopo il riconoscimento vedrai qui i prodotti, le quantità stimate e le associazioni da confermare." />}
+            </Card>
+          </div> : null}
         </div>
       ) : null}
 
