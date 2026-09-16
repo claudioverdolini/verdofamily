@@ -220,6 +220,15 @@ export default function ShoppingPantryPage() {
     setEditingPantry(null)
   }
 
+  function looksLikeReceiptText(text: string) {
+    const clean = text.replace(/\s+/g, ' ').toUpperCase()
+    const priceHits = (clean.match(/\b\d{1,4}[,.]\d{2}\b/g) || []).length
+    const receiptTerms = ['TOTALE', 'SUBTOTALE', 'IMPORTO', 'SCONTRINO', 'RESTO', 'CASSA', 'P.IVA', 'IVA ', 'Q.TA', 'QTA', 'EURO']
+    const keywordHits = receiptTerms.reduce((sum, term) => sum + (clean.includes(term) ? 1 : 0), 0)
+    const usefulLines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length >= 3).length
+    return priceHits >= 3 || keywordHits >= 2 || (keywordHits >= 1 && priceHits >= 1 && usefulLines >= 5)
+  }
+
   async function runOcr(file: File) {
     setOcrBusy(true)
     setOcrProgress(0)
@@ -234,10 +243,22 @@ export default function ShoppingPantryPage() {
       })
       const text = res?.data?.text || ''
       if (!text.trim()) throw new Error('empty')
+
+      // Product/scenery photos can produce pages of meaningless OCR. Never expose
+      // that dump to the user: move the same photo to visual product recognition.
+      if (!looksLikeReceiptText(text)) {
+        setReceiptText('')
+        setReceiptRows([])
+        setScanMode('pantry-photo')
+        await selectPantryPhoto(file)
+        setPhotoError('Questa immagine non sembra uno scontrino. L’ho preparata per il riconoscimento dei prodotti: premi “Riconosci prodotti”.')
+        return
+      }
+
       setReceiptText(text)
       analyzeReceipt(text)
     } catch {
-      setOcrError('Non sono riuscito a leggere bene la foto. Puoi incollare il testo dello scontrino nel riquadro e premere “Analizza”.')
+      setOcrError('Non sono riuscito a leggere bene lo scontrino. Prova una foto più nitida oppure usa “Foto dispensa” per riconoscere direttamente i prodotti.')
     } finally {
       setOcrBusy(false)
     }
@@ -396,8 +417,8 @@ export default function ShoppingPantryPage() {
       {tab === 'scan' ? (
         <div>
           <div className="scan-mode-switch">
-            <Segmented value={scanMode} onChange={setScanMode} options={[{ value: 'receipt', label: '🧾 Scontrino' }, { value: 'pantry-photo', label: '📷 Foto dispensa' }]} />
-            <span>{scanMode === 'receipt' ? 'Carica gli acquisti leggendo lo scontrino.' : 'Fotografa scaffali o frigorifero e conferma ciò che viene riconosciuto.'}</span>
+            <Segmented value={scanMode} onChange={setScanMode} options={[{ value: 'receipt', label: '🧾 Leggi scontrino' }, { value: 'pantry-photo', label: '📷 Riconosci prodotti' }]} />
+            <span>{scanMode === 'receipt' ? 'Usa questa modalità solo per una foto dello scontrino.' : 'Usa questa modalità per prodotti, scaffali, frigorifero o dispensa.'}</span>
           </div>
 
           {scanMode === 'receipt' ? <div className="scan-layout">
