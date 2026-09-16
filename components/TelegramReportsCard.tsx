@@ -90,8 +90,8 @@ export default function TelegramReportsCard() {
   const [draft, setDraft] = useState<ReportSchedule>(() => blankSchedule())
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  const [linkCommand, setLinkCommand] = useState('')
-  const [linkUrl, setLinkUrl] = useState('')
+  const [linkCommand, setLinkCommand] = useState(() => sessionStorage.getItem('verdofamily_telegram_link_command') || '')
+  const [linkUrl, setLinkUrl] = useState(() => sessionStorage.getItem('verdofamily_telegram_link_url') || '')
 
   useEffect(() => {
     void refreshStatus()
@@ -133,8 +133,9 @@ export default function TelegramReportsCard() {
       const command = result?.startCommand || (token ? `/start ${token}` : '')
       setLinkUrl(result.url)
       setLinkCommand(command)
-      setMessage('Apri Telegram e premi Avvia/Start. Se il pulsante non reagisce, usa il comando manuale mostrato qui sotto.')
-      window.location.assign(result.url)
+      sessionStorage.setItem('verdofamily_telegram_link_url', result.url)
+      sessionStorage.setItem('verdofamily_telegram_link_command', command)
+      setMessage('Collegamento pronto. Premi “Apri bot” qui sotto; se Start non reagisce, copia e invia il comando manuale.')
     } catch (error: any) {
       setMessage(`Collegamento non riuscito: ${error?.message || 'errore sconosciuto'}`)
     } finally {
@@ -159,6 +160,10 @@ export default function TelegramReportsCard() {
       const result = await callTelegram('poll-link')
       setStatus(result)
       if (result?.connected) {
+        sessionStorage.removeItem('verdofamily_telegram_link_url')
+        sessionStorage.removeItem('verdofamily_telegram_link_command')
+        setLinkUrl('')
+        setLinkCommand('')
         setMessage('✅ Telegram collegato correttamente.')
       } else {
         setMessage('Non vedo ancora il collegamento. Apri il bot, premi Avvia e riprova tra qualche secondo.')
