@@ -25,6 +25,7 @@ import type {
 import { initialData } from './data'
 import { localDateISO, materializeRecurringChores, mergePrefs, migrateData, nextId, normalize } from './utils'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
+import { notifyFamilyPush, type PushTopics } from './pushNotifications'
 
 const STORAGE_KEY = 'verdofamily_v3'
 const LEGACY_KEYS = ['familyhub_v2', 'familyhub_v1']
@@ -89,6 +90,21 @@ function schoolHash(value: FamilyData) {
     schoolTimetable: value.schoolTimetable,
     schoolItems: value.schoolItems
   })
+}
+
+type PushCategory = keyof PushTopics
+
+const PAGE_KEYS: PageKey[] = ['home', 'calendar', 'shopping', 'meals', 'chores', 'school', 'board', 'health', 'deadlines', 'todos', 'users', 'settings']
+
+function pushCategoryHashes(value: FamilyData): Record<PushCategory, string> {
+  return {
+    calendar: JSON.stringify(value.calendarEvents || []),
+    deadlines: JSON.stringify(value.deadlines || []),
+    chores: JSON.stringify([value.chores || [], value.recurringChores || [], value.transactions || []]),
+    school: JSON.stringify([value.schoolSubjects || [], value.schoolTimetable || [], value.schoolItems || []]),
+    board: JSON.stringify(value.boardPosts || []),
+    shopping: JSON.stringify([value.shopping || [], value.pantry || [], value.pantryMovements || []])
+  }
 }
 
 type CloudStatus = 'offline' | 'connecting' | 'synced' | 'saving' | 'conflict' | 'error'
@@ -255,7 +271,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const [familyId, setFamilyId] = useState<string | null>(null)
   const [familyName, setFamilyName] = useState('')
   const [needsFamilySetup, setNeedsFamilySetup] = useState(false)
-  const [activePage, setActivePage] = useState<PageKey>(() => new URLSearchParams(window.location.search).has('googleCalendar') ? 'settings' : 'home')
+  const [activePage, setActivePage] = useState<PageKey>(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('googleCalendar')) return 'settings'
+    const requested = params.get('page') as PageKey | null
+    return requested && PAGE_KEYS.includes(requested) ? requested : 'home'
+  })
 
   const revisionRef = useRef(0)
   const familyIdRef = useRef<string | null>(null)
@@ -269,6 +290,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const financeSyncHashRef = useRef('')
   const schoolSyncHashRef = useRef('')
   const familySyncHashRef = useRef('')
+  const pushCategoryHashesRef = useRef<Record<PushCategory, string> | null>(null)
 
   familyIdRef.current = familyId
 
@@ -400,6 +422,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     schoolSyncHashRef.current = schoolHash(linked)
     familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
     calendarSyncHashRef.current = JSON.stringify(linked.calendarEvents || [])
+    pushCategoryHashesRef.current = pushCategoryHashes(linked)
     suppressNextPushRef.current = true
     revisionRef.current = Number(result?.revision || 0)
     setFamilyId(targetFamilyId)
@@ -446,6 +469,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       financeSyncHashRef.current = financeHash(linked)
       schoolSyncHashRef.current = schoolHash(linked)
       familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
+      pushCategoryHashesRef.current = pushCategoryHashes(linked)
       suppressNextPushRef.current = true
       setData(linked)
       setCloudStatus('synced')
@@ -484,6 +508,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         financeSyncHashRef.current = financeHash(linked)
         schoolSyncHashRef.current = schoolHash(linked)
         familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
+        pushCategoryHashesRef.current = pushCategoryHashes(linked)
         suppressNextPushRef.current = true
         setData(linked)
         setCloudStatus('synced')
@@ -568,6 +593,17 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   async function pushDocument(snapshot: FamilyData) {
     if (!supabase || !familyIdRef.current || !cloudUserId) return
+    const nextPushHashes = pushCategoryHashes(snapshot)
+    const previousPushHashes = pushCategoryHashesRef.current
+    const changedPushCategories = previousPushHashes
+      ? (Object.keys(nextPushHashes) as PushCategory[]).filter(key => previousPushHashes[key] !== nextPushHashes[key])
+      : []
+    const publishPushUpdates = () => {
+      pushCategoryHashesRef.current = nextPushHashes
+      if (changedPushCategories.length && familyIdRef.current) {
+        void notifyFamilyPush(familyIdRef.current, changedPushCategories)
+      }
+    }
     setCloudStatus('saving')
     const expected = revisionRef.current
     let financeResult: any = null
@@ -600,6 +636,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const nextFamilyHash = JSON.stringify(familyPayload)
       if (nextFamilyHash === familySyncHashRef.current) {
         setCloudStatus('synced')
+        publishPushUpdates()
         return
       }
 
@@ -636,6 +673,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
             if (error) console.warn('Google Calendar sync deferred:', error.message)
           })
         }
+        publishPushUpdates()
         return
       }
 
@@ -659,6 +697,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           financeSyncHashRef.current = financeHash(remote)
           schoolSyncHashRef.current = schoolHash(remote)
           familySyncHashRef.current = JSON.stringify(cloudSafeData(remote))
+          pushCategoryHashesRef.current = pushCategoryHashes(remote)
           setData(remote)
         }
         return
@@ -727,6 +766,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (supabase && cloudUserId) await supabase.auth.signOut()
     stopRealtime()
     revisionRef.current = 0
+    pushCategoryHashesRef.current = null
     suppressNextPushRef.current = true
     setCloudUserId(null)
     setSessionUserId(null)
@@ -760,6 +800,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       financeSyncHashRef.current = financeHash(seed)
       schoolSyncHashRef.current = schoolHash(seed)
       familySyncHashRef.current = JSON.stringify(cloudSafeData(seed))
+      pushCategoryHashesRef.current = pushCategoryHashes(seed)
       revisionRef.current = Number(revision || 1)
       suppressNextPushRef.current = true
       setData(seed)
