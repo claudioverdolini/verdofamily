@@ -4,7 +4,7 @@ import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
 import { Button, Card, CardHeader, Field, Segmented } from '../ui'
 
-type SectionKey = 'agenda' | 'meals' | 'shopping' | 'lowStock' | 'deadlines' | 'todos' | 'chores'
+type SectionKey = 'agenda' | 'meals' | 'shopping' | 'lowStock' | 'deadlines' | 'todos' | 'chores' | 'school'
 
 type ReportSchedule = {
   id?: string
@@ -45,7 +45,8 @@ const SECTION_OPTIONS: Array<{ key: SectionKey; label: string; hint: string }> =
   { key: 'lowStock', label: 'Sotto scorta', hint: 'Prodotti dispensa sotto il minimo' },
   { key: 'deadlines', label: 'Scadenze', hint: 'Scadenze previste nel giorno' },
   { key: 'todos', label: 'ToDo', hint: 'Attività ancora aperte' },
-  { key: 'chores', label: 'Compiti', hint: 'Compiti/paghette in scadenza' }
+  { key: 'chores', label: 'Compiti', hint: 'Compiti/paghette in scadenza' },
+  { key: 'school', label: 'Scuola', hint: 'Lezioni, compiti, verifiche e materiale' }
 ]
 
 function blankSchedule(): ReportSchedule {
@@ -64,7 +65,8 @@ function blankSchedule(): ReportSchedule {
       lowStock: false,
       deadlines: true,
       todos: true,
-      chores: false
+      chores: false,
+      school: true
     },
     include_health: false
   }
