@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { useFamily } from '../store'
 import { Card, CardHeader, EmptyState, ListRow, PageIntro, StatCard } from '../ui'
-import { addDays, dayLabel, localDateISO, money, routineCompletedOn, routineDueOn, weekDates } from '../utils'
+import { addDays, dayLabel, localDateISO, money, pantryExpiryDays, pantryNeedsRestock, routineCompletedOn, routineDueOn, weekDates } from '../utils'
 import './dashboard-command-center.css'
 
 type HomeView = 'today' | 'week' | 'family'
@@ -61,7 +61,10 @@ export default function Dashboard() {
   const dueRoutinesToday = data.routines.filter(routine =>
     routineDueOn(routine, today) && !routineCompletedOn(data.routineCompletions, routine.id, today)
   )
-  const lowStock = data.pantry.filter(x => Number(x.minQty || 0) > 0 && Number(x.qty || 0) <= Number(x.minQty || 0))
+  const lowStock = data.pantry.filter(item => pantryNeedsRestock(item, data.pantryMovements, today))
+  const expiringInventory = data.pantry
+    .map(item => ({ item, days: pantryExpiryDays(item, today) }))
+    .filter(entry => entry.days !== null && entry.days <= 3)
 
   const eventsByDate = useMemo(() => {
     const map: Record<string, typeof data.calendarEvents> = {}
@@ -150,7 +153,8 @@ export default function Dashboard() {
 
   const familyAlerts = [
     pendingShopping.length ? { label: `${pendingShopping.length} articoli da comprare`, page: 'shopping' as const } : null,
-    lowStock.length ? { label: `${lowStock.length} prodotti sotto scorta`, page: 'shopping' as const } : null,
+    lowStock.length ? { label: `${lowStock.length} prodotti da reintegrare`, page: 'shopping' as const } : null,
+    expiringInventory.length ? { label: `${expiringInventory.length} prodotti in scadenza`, page: 'shopping' as const } : null,
     nextDeadlines.length ? { label: `${nextDeadlines.length} scadenze nei prossimi 15 giorni`, page: 'deadlines' as const } : null,
     pendingTodos.length ? { label: `${pendingTodos.length} promemoria aperti`, page: 'todos' as const } : null,
     dueRoutinesToday.length ? { label: `${dueRoutinesToday.length} routine da fare oggi`, page: 'todos' as const } : null,
