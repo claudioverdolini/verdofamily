@@ -639,7 +639,10 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         unit: String(ing?.unit || 'pz')
       })).filter((ing: any) => ing.name) : [],
       prepMinutes: dish.prepMinutes === undefined || dish.prepMinutes === null ? undefined : Math.max(0, Number(dish.prepMinutes) || 0),
-      preferredByUserIds: Array.from(new Set((Array.isArray(dish.preferredByUserIds) ? dish.preferredByUserIds : []).map(Number).filter((id: number) => id > 0)))
+      preferredByUserIds: Array.from(new Set((Array.isArray(dish.preferredByUserIds) ? dish.preferredByUserIds : []).map(Number).filter((id: number) => id > 0))),
+      sourceUrl: /^https?:\/\//i.test(String(dish.sourceUrl || '')) ? String(dish.sourceUrl).trim() : undefined,
+      sourceLabel: dish.sourceLabel ? String(dish.sourceLabel).trim().slice(0, 80) : undefined,
+      notes: dish.notes ? String(dish.notes).trim().slice(0, 2000) : undefined
     })),
     mealPlans: Array.isArray(source.mealPlans) ? source.mealPlans.map((p: any) => ({ ...p, dishId: Number(p.dishId ?? p.mealId) })) : [],
     chores: Array.isArray(source.chores) ? source.chores.map((chore: any) => ({
