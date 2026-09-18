@@ -160,11 +160,10 @@ function dbRoleToApp(role?: string): FamilyUser['role'] {
 }
 
 function cloudSafeData(value: FamilyData): FamilyData {
-  return {
-    ...value,
-    users: value.users.map(user => ({ ...user, password: '' })),
-    deadlines: value.deadlines.filter(item => !isHealthDeadline(item))
-  }
+  // Transitional dual-write: health data is already normalized and protected
+  // by row-level policies, but we keep the legacy health copy inside the family
+  // document until backup/restore has been migrated to the normalized schema.
+  return { ...value, users: value.users.map(user => ({ ...user, password: '' })) }
 }
 
 function profileToUser(profile: any, memberRole: string, existing?: FamilyUser): FamilyUser {
