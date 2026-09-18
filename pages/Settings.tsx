@@ -22,6 +22,7 @@ const TAB_OPTIONS: Array<{ key: PageKey; label: string }> = [
   { key: 'meals', label: 'Pasti' },
   { key: 'chores', label: 'Paghette' },
   { key: 'school', label: 'Scuola' },
+  { key: 'board', label: 'Bacheca' },
   { key: 'deadlines', label: 'Scadenze' },
   { key: 'todos', label: 'ToDo' },
   { key: 'users', label: 'Utenti' }
@@ -470,6 +471,7 @@ export default function SettingsPage() {
                   ['deadlines', 'Scadenze', 'Promemoria prima della data'],
                   ['chores', 'Compiti', 'Nuovi compiti e completamenti'],
                   ['school', 'Scuola', 'Compiti, verifiche e materiale'],
+                  ['board', 'Bacheca', 'Nuovi messaggi e promemoria familiari'],
                   ['shopping', 'Lista spesa', 'Aggiornamenti alla lista'],
                   ['whatsapp', 'WhatsApp', 'Canale preferito quando disponibile']
                 ].map(([key, label, sub]) => <label key={key}><div><strong>{label}</strong><span>{sub}</span></div><input type="checkbox" checked={(prefs.notifications as any)[key]} onChange={e => updateCurrentPrefs({ notifications: { ...prefs.notifications, [key]: e.target.checked } })} /></label>)}
