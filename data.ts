@@ -4,6 +4,7 @@ import { DEFAULT_PREFS } from './utils'
 export const initialData: FamilyData = {
   version: 12,
   storageModel: 'normalized-v2',
+  assistantName: 'Verdo',
   users: [
     {
       id: 1,

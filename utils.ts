@@ -585,6 +585,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       : source.storageModel === 'normalized-v1'
         ? 'normalized-v1'
         : undefined,
+    assistantName: String(source.assistantName || fallback.assistantName || 'Verdo').trim().slice(0, 24) || 'Verdo',
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),

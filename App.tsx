@@ -39,6 +39,7 @@ import DeadlinesPage from './pages/Deadlines'
 import TodosPage from './pages/Todos'
 import UsersPage from './pages/Users'
 import SettingsPage from './pages/Settings'
+import VoiceAssistant from './components/VoiceAssistant'
 
 const NAV: Array<{ key: PageKey; label: string; icon: React.ReactNode; group?: string }> = [
   { key: 'home', label: 'Home', icon: <Home size={20} />, group: 'Oggi' },
@@ -709,6 +710,8 @@ function AppShell() {
     </div>
 
     <nav className="bottom-nav" aria-label="Navigazione mobile">{bottomTabs.map(key => { const item = NAV.find(n => n.key === key); if (!item) return null; return <button key={key} className={activePage === key ? 'is-active' : ''} onClick={() => navigate(key)}><span>{item.icon}</span><small>{item.label.replace(' & Dispensa','').replace('Compiti & Paghette','Paghette')}</small></button> })}<button className={bottomTabs.includes(activePage) ? '' : 'is-active'} onClick={() => setMoreOpen(true)}><span><MoreHorizontal size={20} /></span><small>Altro</small></button></nav>
+
+    <VoiceAssistant />
 
     {moreOpen ? <div className="mobile-more-layer" onMouseDown={e => { if (e.target === e.currentTarget) setMoreOpen(false) }}><div className="mobile-more"><div className="mobile-more__handle" /><div className="mobile-more__head"><strong>Altre sezioni</strong><IconButton label="Chiudi" onClick={() => setMoreOpen(false)}><X size={20} /></IconButton></div><div className="mobile-more__status"><SyncIndicator /></div><div className="mobile-more__grid">{NAV.filter(n => !bottomTabs.includes(n.key)).map(item => <button key={item.key} onClick={() => navigate(item.key)} className={activePage === item.key ? 'is-active' : ''}><span>{item.icon}</span><strong>{item.label}</strong></button>)}</div><button className="mobile-more__logout" onClick={() => logout()}><LogOut size={18} /> Esci</button></div></div> : null}
   </div>

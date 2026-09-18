@@ -204,6 +204,7 @@ export default function BoardPage() {
 
   async function deleteAttachment(attachment: BoardAttachment) {
     if (!editing?.id || !familyId || !supabase) return
+    if (!confirm('Eliminare l’allegato “' + attachment.name + '” dalla bacheca?')) return
     setBusy(true)
     setPhotoMessage('')
     try {

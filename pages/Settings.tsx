@@ -135,9 +135,11 @@ function getBackupHealth(status: DriveBackupStatus | null): BackupHealth {
 
 export default function SettingsPage() {
   const {
+    data,
     authUser,
     updateCurrentPrefs,
     updateCurrentProfile,
+    setAssistantName,
     exportData,
     importData,
     resetData,
@@ -452,6 +454,14 @@ export default function SettingsPage() {
         <Card className="settings-card--wide settings-unified-card">
           <div className="settings-unified-grid settings-unified-grid--daily">
             <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Assistente vocale</strong><span>Personalizza come chiamarlo in tutta la famiglia</span></div></div>
+              <Field label="Nome assistente" hint="Massimo 24 caratteri. Il nome è condiviso su tutti i dispositivi.">
+                <input key={data.assistantName || 'Verdo'} defaultValue={data.assistantName || 'Verdo'} maxLength={24} disabled={authUser.role === 'bimbo'} onBlur={e => setAssistantName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur() }} />
+              </Field>
+              <div className="callout">Tocca il microfono “Parla con {data.assistantName || 'Verdo'}”. L’ascolto parte solo quando lo attivi.</div>
+            </section>
+
+            <section className="settings-subsection">
               <div className="settings-subsection__head"><div><strong>Home</strong><span>Riepiloghi visibili a colpo d’occhio</span></div></div>
               <div className="settings-check-grid settings-check-grid--compact">{HOME_CARDS.map(item => <label key={item.key} className={prefs.homeCards.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.homeCards.includes(item.key)} onChange={() => toggleHomeCard(item.key)} /><span>{item.label}</span></label>)}</div>
               <label className="toggle-row settings-toggle-standalone"><input type="checkbox" checked={prefs.showBalances} onChange={e => updateCurrentPrefs({ showBalances: e.target.checked })} /><span>Mostra i saldi delle paghette</span></label>
@@ -540,7 +550,7 @@ export default function SettingsPage() {
         <CardHeader title="Copia manuale" subtitle="Una copia JSON resta utile anche fuori dal cloud." />
         <div className="backup-actions"><Button variant="soft" icon={<ClipboardCopy size={17} />} onClick={copyBackup}>Copia backup</Button><Button variant="soft" icon={<Download size={17} />} onClick={downloadBackup}>Scarica JSON</Button></div>
         <Field label="Importa backup" hint="Incolla qui un backup JSON creato da VerdoFamily."><textarea rows={5} value={importText} onChange={e => setImportText(e.target.value)} /></Field>
-        <div className="backup-footer"><Button variant="ghost" icon={<Upload size={17} />} onClick={doImport}>Importa</Button><Button variant="danger" icon={<RotateCcw size={17} />} onClick={() => { if (confirm('Ripristinare i dati demo? Questa operazione cancella i dati locali.')) resetData() }}>Ripristina dati demo</Button></div>
+        <div className="backup-footer"><Button variant="ghost" icon={<Upload size={17} />} onClick={() => { if (confirm('Importare questo backup? I dati presenti verranno sostituiti da quelli contenuti nel file.')) doImport() }}>Importa</Button><Button variant="danger" icon={<RotateCcw size={17} />} onClick={resetData}>Ripristina dati demo</Button></div>
         {message ? <div className="callout callout--success">{message}</div> : null}
       </Card>
       </section>

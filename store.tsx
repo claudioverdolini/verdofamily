@@ -116,6 +116,7 @@ type StoreValue = {
   syncNow: () => Promise<void>
   updateCurrentPrefs: (patch: Partial<UserPrefs>) => void
   updateCurrentProfile: (patch: Partial<FamilyUser>) => void
+  setAssistantName: (name: string) => void
   addUser: (user: Omit<FamilyUser, 'id' | 'balance' | 'prefs'> & { prefs?: Partial<UserPrefs> }) => void
   updateUser: (id: number, patch: Partial<FamilyUser>) => void
   deleteUser: (id: number) => void
@@ -178,6 +179,12 @@ const StoreContext = createContext<StoreValue | null>(null)
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value))
+}
+
+function confirmDeletion(target: string, detail?: string) {
+  if (typeof window === 'undefined') return true
+  const extra = detail ? '\n\n' + detail : ''
+  return window.confirm('Confermi di voler eliminare ' + target + '?' + extra)
 }
 
 function loadCachedData(): FamilyData {
@@ -830,6 +837,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  function setAssistantName(name: string) {
+    if (!authUser || authUser.role === 'bimbo') return
+    const clean = name.trim().replace(/\s+/g, ' ').slice(0, 24) || 'Verdo'
+    setData(prev => ({ ...prev, assistantName: clean }))
+  }
+
   function addUser(input: Omit<FamilyUser, 'id' | 'balance' | 'prefs'> & { prefs?: Partial<UserPrefs> }) {
     setData(prev => {
       if (prev.users.some(u => normalize(u.name) === normalize(input.name))) return prev
@@ -843,6 +856,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteUser(id: number) {
     if (authUser?.id === id) return
+    const user = data.users.find(item => item.id === id)
+    if (!confirmDeletion('il profilo “' + (user?.name || 'selezionato') + '”')) return
     setData(prev => prev.users.length <= 1 ? prev : ({ ...prev, users: prev.users.filter(u => u.id !== id) }))
   }
 
@@ -853,7 +868,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       return { ...prev, calendarEvents: exists ? prev.calendarEvents.map(e => e.id === event.id ? { ...e, ...event, id: e.id } : e) : [...prev.calendarEvents, { ...event, id: event.id }] }
     })
   }
-  function deleteCalendarEvent(id: number) { setData(prev => ({ ...prev, calendarEvents: prev.calendarEvents.filter(e => e.id !== id) })) }
+  function deleteCalendarEvent(id: number) {
+    const event = data.calendarEvents.find(item => item.id === id)
+    if (!confirmDeletion('l’impegno “' + (event?.title || 'selezionato') + '”')) return
+    setData(prev => ({ ...prev, calendarEvents: prev.calendarEvents.filter(e => e.id !== id) }))
+  }
 
   function upsertDeadline(deadline: Omit<Deadline, 'id' | 'done'> & { id?: number; done?: boolean }) {
     if (authUser?.role === 'bimbo' && isHealthDeadline(deadline)) return
@@ -884,6 +903,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
   function deleteDeadline(id: number) {
     if (authUser?.role === 'bimbo' && isHealthDeadline(data.deadlines.find(item => item.id === id) || {})) return
+    const deadline = data.deadlines.find(item => item.id === id)
+    if (!confirmDeletion('la scadenza “' + (deadline?.title || 'selezionata') + '”')) return
     setData(prev => ({ ...prev, deadlines: prev.deadlines.filter(d => d.id !== id) }))
   }
 
@@ -913,6 +934,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteCategory(name: string) {
     if (name === 'Generico') return false
+    if (!confirmDeletion('la categoria “' + name + '”', 'I prodotti associati verranno spostati nella categoria Generico.')) return false
     setData(prev => ({ ...prev, categories: prev.categories.filter(c => c !== name), pantry: prev.pantry.map(p => p.category === name ? { ...p, category: 'Generico' } : p) }))
     return true
   }
@@ -972,6 +994,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function deletePantryItem(id: number) {
+    const item = data.pantry.find(entry => entry.id === id)
+    if (!confirmDeletion('“' + (item?.name || 'questo prodotto') + '” dalla dispensa', 'Verrà eliminata anche la cronologia dei movimenti associati.')) return
     setData(prev => ({
       ...prev,
       pantry: prev.pantry.filter(p => p.id !== id),
@@ -997,7 +1021,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function addShoppingItem(item: Omit<ShoppingItem, 'id' | 'taken'>) { setData(prev => ({ ...prev, shopping: [...prev.shopping, { ...item, id: nextId(prev.shopping), taken: false }] })) }
   function toggleShoppingItem(id: number) { setData(prev => ({ ...prev, shopping: prev.shopping.map(s => s.id === id ? { ...s, taken: !s.taken } : s) })) }
-  function deleteShoppingItem(id: number) { setData(prev => ({ ...prev, shopping: prev.shopping.filter(s => s.id !== id) })) }
+  function deleteShoppingItem(id: number) {
+    const item = data.shopping.find(entry => entry.id === id)
+    if (!confirmDeletion('“' + (item?.name || 'questo articolo') + '” dalla lista della spesa')) return
+    setData(prev => ({ ...prev, shopping: prev.shopping.filter(s => s.id !== id) }))
+  }
 
   function mergeIntoPantry(
     pantry: PantryItem[],
@@ -1042,6 +1070,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function moveTakenShoppingToPantry(location: PantryLocation = 'pantry') {
+    const count = data.shopping.filter(item => item.taken).length
+    if (!count) return
+    const target = count === 1 ? 'l’articolo acquistato dalla lista della spesa' : 'i ' + count + ' articoli acquistati dalla lista della spesa'
+    if (!confirmDeletion(target, 'Gli articoli verranno prima aggiunti alla dispensa.')) return
     setData(prev => {
       const taken = prev.shopping.filter(s => s.taken)
       if (!taken.length) return prev
@@ -1061,6 +1093,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     removeFromShopping: boolean,
     defaultLocation: PantryLocation = 'pantry'
   ) {
+    if (removeFromShopping) {
+      const matching = data.shopping.filter(s => items.some(i => normalize(i.name) === normalize(s.name))).length
+      if (matching) {
+        const target = matching === 1 ? 'l’articolo corrispondente dalla lista della spesa' : 'i ' + matching + ' articoli corrispondenti dalla lista della spesa'
+        if (!confirmDeletion(target, 'I prodotti riconosciuti resteranno caricati in dispensa.')) return
+      }
+    }
     setData(prev => {
       const merged = mergeIntoPantry(prev.pantry, prev.pantryMovements, items, 'import', defaultLocation)
       return {
@@ -1098,7 +1137,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function upsertDish(dish: Omit<Dish, 'id'> & { id?: number }) { setData(prev => ({ ...prev, dishes: dish.id ? prev.dishes.map(d => d.id === dish.id ? { ...d, ...dish, id: d.id } : d) : [...prev.dishes, { ...dish, id: nextId(prev.dishes) }] })) }
-  function deleteDish(id: number) { setData(prev => ({ ...prev, dishes: prev.dishes.filter(d => d.id !== id), mealPlans: prev.mealPlans.filter(p => p.dishId !== id) })) }
+  function deleteDish(id: number) {
+    const dish = data.dishes.find(item => item.id === id)
+    if (!confirmDeletion('il piatto “' + (dish?.name || 'selezionato') + '”', 'Verranno eliminate anche le pianificazioni pasto collegate.')) return
+    setData(prev => ({ ...prev, dishes: prev.dishes.filter(d => d.id !== id), mealPlans: prev.mealPlans.filter(p => p.dishId !== id) }))
+  }
 
   function upsertMealPlan(plan: Omit<MealPlan, 'id'> & { id?: number }) {
     setData(prev => {
@@ -1119,6 +1162,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function deleteMealPlan(id: number) {
+    if (!confirmDeletion('questa pianificazione del pasto')) return
     setData(prev => {
       const plan = prev.mealPlans.find(p => p.id === id)
       const restored = plan ? adjustIngredients(prev, plan.dishId, +1) : { pantry: prev.pantry, pantryMovements: prev.pantryMovements }
@@ -1184,6 +1228,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteRecurringChore(id: number) {
     if (authUser?.role === 'bimbo') return
+    const chore = data.recurringChores.find(item => item.id === id)
+    if (!confirmDeletion('il compito ricorrente “' + (chore?.title || 'selezionato') + '”')) return
     setData(prev => ({ ...prev, recurringChores: prev.recurringChores.filter(item => item.id !== id) }))
   }
 
@@ -1302,6 +1348,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteChore(id: number) {
     if (authUser?.role === 'bimbo') return
+    const chore = data.chores.find(item => item.id === id)
+    if (!confirmDeletion('il compito “' + (chore?.title || 'selezionato') + '”')) return
     setData(prev => ({ ...prev, chores: prev.chores.filter(c => c.id !== id) }))
   }
 
@@ -1338,6 +1386,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function deleteTodo(id: number) {
+    const todo = data.todos.find(item => item.id === id)
+    if (!confirmDeletion('“' + (todo?.title || 'questa attività') + '” dai Da fare')) return
     setData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== id) }))
   }
 
@@ -1374,6 +1424,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteRoutine(id: number) {
     if (authUser?.role === 'bimbo') return
+    const routine = data.routines.find(item => item.id === id)
+    if (!confirmDeletion('la routine “' + (routine?.title || 'selezionata') + '”', 'Verranno eliminati anche i completamenti registrati.')) return
     setData(prev => ({
       ...prev,
       routines: prev.routines.filter(item => item.id !== id),
@@ -1404,6 +1456,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function undoRoutineCompletion(routineId: number, date: string) {
     if (!authUser) return
+    const routine = data.routines.find(item => item.id === routineId)
+    if (!confirmDeletion('il completamento di “' + (routine?.title || 'questa routine') + '” del ' + date)) return
     setData(prev => {
       const routine = prev.routines.find(item => item.id === routineId)
       if (!routine) return prev
@@ -1435,6 +1489,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteSchoolSubject(id: number) {
     if (authUser?.role === 'bimbo') return
+    const subject = data.schoolSubjects.find(item => item.id === id)
+    if (!confirmDeletion('la materia “' + (subject?.name || 'selezionata') + '”', 'Verranno rimossi anche gli orari collegati; gli impegni resteranno senza materia associata.')) return
     setData(prev => ({
       ...prev,
       schoolSubjects: prev.schoolSubjects.filter(item => item.id !== id),
@@ -1468,6 +1524,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteSchoolTimetableEntry(id: number) {
     if (authUser?.role === 'bimbo') return
+    if (!confirmDeletion('questa lezione dall’orario scolastico')) return
     setData(prev => ({ ...prev, schoolTimetable: prev.schoolTimetable.filter(item => item.id !== id) }))
   }
 
@@ -1508,12 +1565,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function deleteSchoolItem(id: number) {
     if (!authUser) return
-    setData(prev => {
-      const target = prev.schoolItems.find(item => item.id === id)
-      if (!target) return prev
-      if (authUser.role === 'bimbo' && target.userId !== authUser.id) return prev
-      return { ...prev, schoolItems: prev.schoolItems.filter(item => item.id !== id) }
-    })
+    const target = data.schoolItems.find(item => item.id === id)
+    if (!target) return
+    if (authUser.role === 'bimbo' && target.userId !== authUser.id) return
+    if (!confirmDeletion('l’impegno scolastico “' + target.title + '”')) return
+    setData(prev => ({ ...prev, schoolItems: prev.schoolItems.filter(item => item.id !== id) }))
   }
 
   function upsertBoardPost(post: Omit<BoardPost, 'id' | 'createdAt' | 'updatedAt' | 'attachments' | 'authorUserId'> & { id?: string; attachments?: BoardAttachment[] }) {
@@ -1607,6 +1663,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function resetData() {
+    if (!confirmDeletion('tutti i dati locali e ripristinare i dati demo', 'Questa operazione sostituisce completamente i dati presenti sul dispositivo.')) return
     setData(deepClone(initialData))
     setSessionUserId(null)
     setActivePage('home')
@@ -1619,7 +1676,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     cloudAuthenticated: Boolean(cloudUserId),
     cloudLoading, cloudStatus, cloudEmail, familyId, familyName, needsFamilySetup,
     createCloudFamily, joinCloudFamily, createFamilyInvite, syncNow,
-    updateCurrentPrefs, updateCurrentProfile,
+    updateCurrentPrefs, updateCurrentProfile, setAssistantName,
     addUser, updateUser, deleteUser,
     upsertCalendarEvent, deleteCalendarEvent,
     upsertDeadline, toggleDeadline, deleteDeadline,
