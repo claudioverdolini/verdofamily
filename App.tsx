@@ -402,18 +402,31 @@ function NotificationCenter() {
     }
 
     for (const deadline of data.deadlines) {
-      if (deadline.done || !deadline.date || deadline.date > today || !belongsToUser(deadline.userId)) continue
+      if (deadline.done || !deadline.date || !belongsToUser(deadline.userId)) continue
       if (deadline.kind === 'medicine' || deadline.kind === 'therapy') continue
-      const daysLate = Math.max(0, Math.floor((new Date(`${today}T12:00:00`).getTime() - new Date(`${deadline.date}T12:00:00`).getTime()) / 86400000))
+
+      const diffDays = Math.round((new Date(`${deadline.date}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000)
+      const reminders = Array.isArray(deadline.reminderDays) ? deadline.reminderDays.map(Number) : [90, 30, 7]
+      const isHealth = deadline.kind === 'visit' || deadline.kind === 'health-record'
+
+      if (diffDays > 0 && !reminders.includes(diffDays)) continue
+
+      const daysLate = Math.max(0, -diffDays)
+      const detail = daysLate
+        ? `Scadenza superata da ${daysLate} ${daysLate === 1 ? 'giorno' : 'giorni'}`
+        : diffDays === 0
+          ? 'Scade oggi'
+          : `Scade tra ${diffDays} ${diffDays === 1 ? 'giorno' : 'giorni'}`
+
       items.push({
-        id: `deadline-${deadline.id}-${today}`,
+        id: `deadline-${deadline.id}-${today}-${diffDays}`,
         title: deadline.title,
-        detail: daysLate ? `Scadenza superata da ${daysLate} ${daysLate === 1 ? 'giorno' : 'giorni'}` : 'Scade oggi',
-        page: deadline.kind === 'visit' || deadline.kind === 'health-record' ? 'health' : 'deadlines',
+        detail,
+        page: isHealth ? 'health' : 'deadlines',
         createdAt: `${today}T07:00:00`,
-        priority: daysLate ? 92 : 86,
+        priority: daysLate ? 92 : diffDays === 0 ? 86 : diffDays <= 7 ? 78 : diffDays <= 30 ? 68 : 60,
         kind: 'deadline',
-        label: daysLate ? 'Scaduta' : 'Oggi'
+        label: daysLate ? 'Scaduta' : diffDays === 0 ? 'Oggi' : `Tra ${diffDays}g`
       })
     }
 
