@@ -19,18 +19,37 @@ Future refinements:
 - optional clock/weather/ambient display;
 - richer drag/drop weekly planning if useful.
 
-## Next features to develop
+## Current status
 
 ### 2. Recurring routines
+Status: **implemented — first version**
+
+Implemented:
 - Daily, weekly, fortnightly, monthly, six-monthly and yearly routines.
 - Assignment to family members.
 - Completion history without recreating tasks.
-- Examples: bins, sheets, school bags, filters, medicines, dentist checks.
+- Integration in Da fare, Home / Command Center, notifications and Telegram reports.
+- Examples supported: bins, sheets, school bags, filters, household checks and recurring family tasks.
+
+Future refinements:
+- optional categories / icons;
+- richer history analytics if useful.
 
 ### 3. Smart annual deadline center
-- Documents, insurance, cars, subscriptions, school, holidays, birthdays, home maintenance.
-- Reminder windows such as 90 / 30 / 7 days.
+Status: **implemented — first version**
+
+Implemented:
+- Categories for documents, insurance, cars, subscriptions, school, holidays, birthdays, home maintenance and other items.
+- Configurable reminder windows including 90 / 30 / 7 / 1 days and due-day reminders.
 - Year-at-a-glance family timeline.
+- Yearly recurrence with automatic advance to the following year after completion.
+- Integration with the in-app notification center.
+
+Future refinements:
+- link deadlines directly to documents when the document center is implemented;
+- richer completion history for recurring annual deadlines.
+
+## Next features to develop
 
 ### 4. Children / school center
 - School timetable and subjects.
@@ -67,10 +86,17 @@ Future refinements:
 - Secure organization rather than password storage.
 
 ### 10. Automatic weekly/monthly reports
+Status: **partially implemented**
+
+Already implemented:
+- Telegram report engine and account linking.
+- Automatic daily reports.
+- Family agenda, meals, deadlines, shopping / low-stock and routines in reports.
+
+Still to implement:
 - Sunday family-week preview.
-- Upcoming commitments, meals, deadlines, shopping, school and activities.
 - Monthly preview of the following month.
-- Delivery through the existing Telegram report engine.
+- School section after the school center is available.
 
 ## Product principles
 
