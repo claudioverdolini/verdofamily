@@ -371,10 +371,11 @@ export default function ShoppingPantryPage() {
       name: x.name.trim(),
       qty: Math.max(0, Number(x.qty) || 1),
       unit: x.unit || 'pz',
-      category: x.category || 'Generico'
+      category: x.category || 'Generico',
+      location: inventoryDestination
     }))
     if (!selected.length) return
-    importReceiptItems(selected, removeFromShopping)
+    importReceiptItems(selected, removeFromShopping, inventoryDestination)
     setReceiptRows([])
     setReceiptText('')
     setTab('pantry')
@@ -465,7 +466,7 @@ export default function ShoppingPantryPage() {
             <button className={locationFilter === 'freezer' ? 'is-active' : ''} onClick={() => setLocationFilter('freezer')}><Snowflake size={18} /><span><strong>{locations.freezer}</strong><small>Freezer</small></span></button>
           </div>
           <div className="pantry-toolbar">
-            <div className="search-box"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca in dispensa…" /></div>
+            <div className="search-box"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca nell’inventario…" /></div>
             <div className="chip-scroll">
               {['Tutte', ...data.categories].map(cat => <button key={cat} className={`chip ${categoryFilter === cat ? 'is-active' : ''}`} onClick={() => setCategoryFilter(cat)}>{cat}</button>)}
             </div>
