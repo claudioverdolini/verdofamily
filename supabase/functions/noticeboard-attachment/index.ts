@@ -16,6 +16,24 @@ const BUCKET = "noticeboard-attachments";
 const MAX_BYTES = 12 * 1024 * 1024;
 const ALLOWED = new Set(["image/jpeg","image/png","image/webp","image/heic","image/heif"]);
 
+function appUserId(documentData: any, cloudUserId: string) {
+  const users = Array.isArray(documentData?.users) ? documentData.users : [];
+  const user = users.find((item: any) => String(item?.cloudUserId || "") === cloudUserId);
+  return user ? Number(user.id || 0) : 0;
+}
+
+function boardPost(documentData: any, postId: string) {
+  const posts = Array.isArray(documentData?.boardPosts) ? documentData.boardPosts : [];
+  return posts.find((item: any) => String(item?.id || "") === postId) || null;
+}
+
+function childCanViewPost(post: any, childId: number) {
+  if (!post || !childId) return false;
+  if (Number(post?.authorUserId || 0) === childId) return true;
+  if (post?.audience === "family") return true;
+  return Array.isArray(post?.userIds) && post.userIds.map(Number).includes(childId);
+}
+
 function safeName(name: string) {
   return (name || "foto")
     .normalize("NFD")
@@ -75,6 +93,21 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (memberError || !membership) return json({ ok: false, error: "forbidden" }, 403);
+    const memberRole = String(membership.role || "adult");
+    let childId = 0;
+    let documentData: any = null;
+
+    if (memberRole === "child") {
+      const { data: document, error: documentError } = await admin
+        .from("family_documents")
+        .select("data")
+        .eq("family_id", familyId)
+        .single();
+      if (documentError || !document) return json({ ok: false, error: "family_document_not_found" }, 404);
+      documentData = document.data || {};
+      childId = appUserId(documentData, user.id);
+      if (!childId) return json({ ok: false, error: "child_identity_not_linked" }, 403);
+    }
 
     if (action === "upload") {
       if (!postId) return json({ ok: false, error: "post_id_required" }, 400);
@@ -103,6 +136,19 @@ Deno.serve(async (req) => {
     }
 
     if (!path || !path.startsWith(`${familyId}/`)) return json({ ok: false, error: "invalid_path" }, 400);
+    const pathPostId = path.split("/")[1] || "";
+    if (postId && postId !== pathPostId) return json({ ok: false, error: "post_path_mismatch" }, 400);
+    postId = postId || pathPostId;
+
+    if (memberRole === "child") {
+      const post = boardPost(documentData, postId);
+      if (action === "signed-url" && !childCanViewPost(post, childId)) {
+        return json({ ok: false, error: "forbidden_board_post" }, 403);
+      }
+      if ((action === "delete" || req.method === "DELETE") && Number(post?.authorUserId || 0) !== childId) {
+        return json({ ok: false, error: "forbidden_board_post" }, 403);
+      }
+    }
 
     if (action === "signed-url") {
       const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(path, 3600);
