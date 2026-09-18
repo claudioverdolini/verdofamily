@@ -177,6 +177,8 @@ export type Dish = {
   type: string
   variant: string
   ingredients: Ingredient[]
+  prepMinutes?: number
+  preferredByUserIds?: number[]
 }
 
 export type MealPlan = {
