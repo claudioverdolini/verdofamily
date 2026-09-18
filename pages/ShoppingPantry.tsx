@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Camera, Check, ChevronRight, PackageOpen, Plus, ScanLine, Search, ShoppingBasket, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, Camera, Check, ChevronRight, PackageOpen, Plus, Refrigerator, ScanLine, Search, ShoppingBasket, Snowflake, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
-import { normalize, parseReceiptLines, similarity } from '../utils'
+import { localDateISO, normalize, pantryAverageDailyUse, pantryDaysRemaining, pantryExpiryDays, pantryNeedsRestock, parseReceiptLines, similarity } from '../utils'
+import type { PantryLocation } from '../types'
 import { supabase } from '../supabaseClient'
 
 export default function ShoppingPantryPage() {
@@ -23,12 +24,14 @@ export default function ShoppingPantryPage() {
     familyId
   } = useFamily()
 
-  const [tab, setTab] = useState<'shopping' | 'pantry' | 'scan'>('shopping')
+  const [tab, setTab] = useState<'shopping' | 'pantry' | 'insights' | 'scan'>('shopping')
   const [shopName, setShopName] = useState('')
   const [shopQty, setShopQty] = useState(1)
   const [shopUnit, setShopUnit] = useState('pz')
   const [query, setQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('Tutte')
+  const [locationFilter, setLocationFilter] = useState<'all' | PantryLocation>('all')
+  const [inventoryDestination, setInventoryDestination] = useState<PantryLocation>('pantry')
   const [editingPantry, setEditingPantry] = useState<any>(null)
   const [categoryModal, setCategoryModal] = useState(false)
   const [newCategory, setNewCategory] = useState('')
@@ -195,10 +198,12 @@ export default function ShoppingPantryPage() {
       name: x.name.trim(),
       qty: Math.max(1, Number(x.qty) || 1),
       unit: x.unit || 'pz',
-      category: x.category || 'Generico'
+      category: x.category || 'Generico',
+      location: inventoryDestination,
+      expiryDate: x.expiryDate || undefined
     }))
     if (!selected.length) return
-    importReceiptItems(selected, removeFromShopping)
+    importReceiptItems(selected, removeFromShopping, inventoryDestination)
     setPhotoRows([])
     setPhotoPreview('')
     setPhotoPayload(null)
@@ -212,10 +217,33 @@ export default function ShoppingPantryPage() {
     const q = normalize(query)
     return data.pantry.filter(item => {
       if (categoryFilter !== 'Tutte' && item.category !== categoryFilter) return false
+      if (locationFilter !== 'all' && (item.location || 'pantry') !== locationFilter) return false
       if (q && !normalize(item.name).includes(q)) return false
       return true
-    }).sort((a, b) => `${a.category}${a.name}`.localeCompare(`${b.category}${b.name}`))
-  }, [data.pantry, query, categoryFilter])
+    }).sort((a, b) => `${a.location || 'pantry'}${a.category}${a.name}`.localeCompare(`${b.location || 'pantry'}${b.category}${b.name}`))
+  }, [data.pantry, query, categoryFilter, locationFilter])
+
+  const inventoryStatus = useMemo(() => data.pantry.map(item => {
+    const averageDailyUse = pantryAverageDailyUse(item.id, data.pantryMovements)
+    const daysRemaining = pantryDaysRemaining(item, data.pantryMovements)
+    const expiryDays = pantryExpiryDays(item)
+    const needsRestock = pantryNeedsRestock(item, data.pantryMovements)
+    return { item, averageDailyUse, daysRemaining, expiryDays, needsRestock }
+  }), [data.pantry, data.pantryMovements])
+
+  const restockSuggestions = inventoryStatus
+    .filter(entry => entry.needsRestock)
+    .sort((a, b) => (a.daysRemaining ?? 9999) - (b.daysRemaining ?? 9999))
+
+  const expiringSoon = inventoryStatus
+    .filter(entry => entry.expiryDays !== null && entry.expiryDays <= 7)
+    .sort((a, b) => Number(a.expiryDays) - Number(b.expiryDays))
+
+  const locations = {
+    pantry: data.pantry.filter(item => (item.location || 'pantry') === 'pantry').length,
+    fridge: data.pantry.filter(item => item.location === 'fridge').length,
+    freezer: data.pantry.filter(item => item.location === 'freezer').length
+  }
 
   function addQuickShopping() {
     const name = shopName.trim()
@@ -226,13 +254,37 @@ export default function ShoppingPantryPage() {
   }
 
   function openNewPantry() {
-    setEditingPantry({ id: undefined, name: '', qty: 1, unit: 'pz', category: data.categories[0] || 'Generico', minQty: 0 })
+    setEditingPantry({ id: undefined, name: '', qty: 1, unit: 'pz', category: data.categories[0] || 'Generico', minQty: 0, location: locationFilter === 'all' ? 'pantry' : locationFilter, expiryDate: '', autoRestock: true })
   }
 
   function savePantry() {
     if (!editingPantry?.name?.trim()) return
-    upsertPantryItem({ ...editingPantry, name: editingPantry.name.trim(), qty: Number(editingPantry.qty) || 0, minQty: Number(editingPantry.minQty) || 0 })
+    upsertPantryItem({ ...editingPantry, name: editingPantry.name.trim(), qty: Number(editingPantry.qty) || 0, minQty: Number(editingPantry.minQty) || 0, location: editingPantry.location || 'pantry', expiryDate: editingPantry.expiryDate || undefined, autoRestock: editingPantry.autoRestock !== false })
     setEditingPantry(null)
+  }
+
+  function locationLabel(location?: PantryLocation) {
+    if (location === 'fridge') return 'Frigo'
+    if (location === 'freezer') return 'Freezer'
+    return 'Dispensa'
+  }
+
+  function suggestedBuyQty(item: any, daysRemaining: number | null) {
+    const minGap = Math.max(0, Number(item.minQty || 0) - Number(item.qty || 0))
+    const average = pantryAverageDailyUse(item.id, data.pantryMovements)
+    const weekGap = average > 0 ? Math.max(0, Math.ceil((average * 7) - Number(item.qty || 0))) : 0
+    return Math.max(1, minGap, weekGap)
+  }
+
+  function addRestockSuggestion(item: any, daysRemaining: number | null) {
+    const exists = data.shopping.some(row => !row.taken && normalize(row.name) === normalize(item.name))
+    if (exists) return
+    addShoppingItem({
+      name: item.name,
+      qty: suggestedBuyQty(item, daysRemaining),
+      unit: item.unit || 'pz',
+      category: item.category || 'Generico'
+    })
   }
 
   function looksLikeReceiptText(text: string) {
