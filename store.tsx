@@ -9,6 +9,7 @@ import type {
   MealPlan,
   PageKey,
   RecurringChore,
+  Routine,
   PantryItem,
   ShoppingItem,
   Todo,
@@ -83,6 +84,11 @@ type StoreValue = {
   addTodo: (todo: Omit<Todo, 'id' | 'done' | 'createdAt'>) => void
   toggleTodo: (id: number) => void
   deleteTodo: (id: number) => void
+  upsertRoutine: (routine: Omit<Routine, 'id'> & { id?: number }) => void
+  toggleRoutineActive: (id: number) => void
+  deleteRoutine: (id: number) => void
+  completeRoutine: (id: number, date?: string) => void
+  undoRoutineCompletion: (routineId: number, date: string) => void
   exportData: () => string
   importData: (raw: string) => boolean
   resetData: () => void
@@ -839,9 +845,91 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return ok
   }
 
-  function addTodo(todo: Omit<Todo, 'id' | 'done' | 'createdAt'>) { setData(prev => ({ ...prev, todos: [...prev.todos, { ...todo, id: nextId(prev.todos), done: false, createdAt: localDateISO() }] })) }
-  function toggleTodo(id: number) { setData(prev => ({ ...prev, todos: prev.todos.map(t => t.id === id ? { ...t, done: !t.done } : t) })) }
-  function deleteTodo(id: number) { setData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== id) })) }
+  function addTodo(todo: Omit<Todo, 'id' | 'done' | 'createdAt'>) {
+    setData(prev => ({ ...prev, todos: [...prev.todos, { ...todo, id: nextId(prev.todos), done: false, createdAt: localDateISO() }] }))
+  }
+
+  function toggleTodo(id: number) {
+    setData(prev => ({ ...prev, todos: prev.todos.map(t => t.id === id ? { ...t, done: !t.done } : t) }))
+  }
+
+  function deleteTodo(id: number) {
+    setData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== id) }))
+  }
+
+  function upsertRoutine(routine: Omit<Routine, 'id'> & { id?: number }) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => {
+      const clean: Routine = {
+        id: routine.id || nextId(prev.routines),
+        title: routine.title.trim(),
+        userId: Number(routine.userId),
+        frequency: routine.frequency,
+        startDate: routine.startDate || localDateISO(),
+        endDate: routine.endDate || undefined,
+        active: routine.active !== false,
+        notes: routine.notes?.trim() || ''
+      }
+      if (!clean.title) return prev
+      return {
+        ...prev,
+        routines: routine.id
+          ? prev.routines.map(item => item.id === routine.id ? clean : item)
+          : [...prev.routines, clean]
+      }
+    })
+  }
+
+  function toggleRoutineActive(id: number) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => ({
+      ...prev,
+      routines: prev.routines.map(item => item.id === id ? { ...item, active: !item.active } : item)
+    }))
+  }
+
+  function deleteRoutine(id: number) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => ({
+      ...prev,
+      routines: prev.routines.filter(item => item.id !== id),
+      routineCompletions: prev.routineCompletions.filter(item => item.routineId !== id)
+    }))
+  }
+
+  function completeRoutine(id: number, date = localDateISO()) {
+    if (!authUser) return
+    setData(prev => {
+      const routine = prev.routines.find(item => item.id === id)
+      if (!routine) return prev
+      if (authUser.role === 'bimbo' && routine.userId !== authUser.id) return prev
+      if (prev.routineCompletions.some(item => item.routineId === id && item.date === date)) return prev
+      return {
+        ...prev,
+        routineCompletions: [...prev.routineCompletions, {
+          id: nextId(prev.routineCompletions),
+          routineId: id,
+          userId: routine.userId,
+          date,
+          completedAt: new Date().toISOString(),
+          completedByUserId: authUser.id
+        }]
+      }
+    })
+  }
+
+  function undoRoutineCompletion(routineId: number, date: string) {
+    if (!authUser) return
+    setData(prev => {
+      const routine = prev.routines.find(item => item.id === routineId)
+      if (!routine) return prev
+      if (authUser.role === 'bimbo' && routine.userId !== authUser.id) return prev
+      return {
+        ...prev,
+        routineCompletions: prev.routineCompletions.filter(item => !(item.routineId === routineId && item.date === date))
+      }
+    })
+  }
 
   function exportData() { return JSON.stringify(data, null, 2) }
   function importData(raw: string) {
@@ -876,6 +964,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertDish, deleteDish, upsertMealPlan, deleteMealPlan,
     addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
     addTodo, toggleTodo, deleteTodo,
+    upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
     exportData, importData, resetData
   }
 
