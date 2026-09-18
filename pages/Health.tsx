@@ -193,6 +193,7 @@ export default function HealthPage() {
   const [personFilter, setPersonFilter] = useState<number | 'all'>('all')
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentMessage, setAttachmentMessage] = useState('')
+  const readOnlyHealth = authUser?.role === 'bimbo'
 
   const medicines = useMemo(
     () => data.deadlines.filter(item => item.kind === 'medicine').slice().sort((a, b) => Number(a.done) - Number(b.done) || a.title.localeCompare(b.title)),
@@ -216,9 +217,10 @@ export default function HealthPage() {
     [data.deadlines]
   )
 
-  const visibleVisits = personFilter === 'all' ? visits : visits.filter(item => item.userId === personFilter)
-  const visibleTherapies = personFilter === 'all' ? therapies : therapies.filter(item => item.userId === personFilter)
-  const visibleRecords = personFilter === 'all' ? records : records.filter(item => item.userId === personFilter)
+  const effectivePersonFilter: number | 'all' = readOnlyHealth && authUser ? authUser.id : personFilter
+  const visibleVisits = effectivePersonFilter === 'all' ? visits : visits.filter(item => item.userId === effectivePersonFilter)
+  const visibleTherapies = effectivePersonFilter === 'all' ? therapies : therapies.filter(item => item.userId === effectivePersonFilter)
+  const visibleRecords = effectivePersonFilter === 'all' ? records : records.filter(item => item.userId === effectivePersonFilter)
   const today = localDateISO()
   const upcomingVisits = visibleVisits.filter(item => (item.healthStatus || 'scheduled') === 'scheduled' && item.date >= today)
   const activeTherapies = visibleTherapies.filter(item => !item.done && (item.therapyStartDate || item.date) <= today && (!item.therapyEndDate || item.therapyEndDate >= today))
@@ -238,6 +240,7 @@ export default function HealthPage() {
   }
 
   function openNew(kind: 'visit' | 'inventory' | 'therapy' | 'record') {
+    if (readOnlyHealth) return
     setAttachmentMessage('')
     if (kind === 'visit') {
       setEditing({
@@ -451,7 +454,7 @@ export default function HealthPage() {
   }
 
   function save() {
-    if (!editing) return
+    if (!editing || readOnlyHealth) return
 
     if (editing.kind === 'visit') {
       saveVisit()
@@ -505,7 +508,7 @@ export default function HealthPage() {
   }
 
   async function deleteEditing() {
-    if (!editing?.id) return
+    if (!editing?.id || readOnlyHealth) return
     if (editing.kind === 'medicine') {
       const linked = therapies.filter(therapy => (therapy.therapyMedicines || []).some(line => Number(line.medicineId) === Number(editing.id)))
       if (linked.length) return alert(`Questo medicinale è collegato a ${linked.length} ${linked.length === 1 ? 'terapia' : 'terapie'}. Rimuovilo prima dalle terapie oppure archivialo.`)
@@ -532,6 +535,7 @@ export default function HealthPage() {
   }
 
   async function uploadAttachment(event: React.ChangeEvent<HTMLInputElement>) {
+    if (readOnlyHealth) return
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file || !editing?.id) return
@@ -610,15 +614,15 @@ export default function HealthPage() {
     return <Card className="field--wide">
       <CardHeader title={`Allegati · ${editing.kind === 'visit' ? 'Visita' : editing.kind === 'therapy' ? 'Terapia' : 'Esame/referto'}: ${editing.title || 'senza titolo'}`} subtitle="PDF, foto e documenti sono conservati in Supabase privato e copiati su Google Drive." />
       {!editing.id ? <div className="callout"><strong>Salva prima la scheda.</strong> Dopo il primo salvataggio riaprila per allegare referti, ricette, impegnative o foto.</div> : !cloudAuthenticated ? <div className="callout">Accedi al cloud per gestire gli allegati.</div> : <>
-        <div className="backup-actions" style={{ marginBottom: attachments.length ? 12 : 0 }}>
+        {!readOnlyHealth ? <div className="backup-actions" style={{ marginBottom: attachments.length ? 12 : 0 }}>
           <label className="btn btn--soft" style={{ cursor: attachmentBusy ? 'wait' : 'pointer' }}>
             <Upload size={16} /> {attachmentBusy ? 'Attendi…' : 'Carica allegato'}
             <input hidden disabled={attachmentBusy} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.tif,.tiff,.doc,.docx,application/pdf,image/*" onChange={uploadAttachment} />
           </label>
-        </div>
+        </div> : null}
         {attachments.length ? <div className="sortable-list">{attachments.map((attachment: any) => <div key={attachment.id}>
           <span><strong>{attachment.name}</strong>{attachment.size ? ` · ${formatFileSize(attachment.size)}` : ''}</span>
-          <div><button disabled={attachmentBusy} onClick={() => openAttachment(attachment)} title="Apri"><ExternalLink size={15} /></button><button disabled={attachmentBusy} onClick={() => deleteAttachment(attachment)} title="Elimina"><Trash2 size={15} /></button></div>
+          <div><button disabled={attachmentBusy} onClick={() => openAttachment(attachment)} title="Apri"><ExternalLink size={15} /></button>{!readOnlyHealth ? <button disabled={attachmentBusy} onClick={() => deleteAttachment(attachment)} title="Elimina"><Trash2 size={15} /></button> : null}</div>
         </div>)}</div> : <div className="muted">Nessun allegato.</div>}
       </>}
       {attachmentMessage ? <div className="callout" style={{ marginTop: 10 }}>{attachmentMessage}</div> : null}
@@ -643,18 +647,21 @@ export default function HealthPage() {
   const editingBookingTargetDate = editing?.kind === 'visit' ? (editing?.healthStatus === 'completed' ? editingFollowUpDate : (editing?.date || '')) : ''
   const editingBookingReminderDate = editing?.kind === 'visit' ? calculatedBookingReminderDate(editing, editingBookingTargetDate) : ''
 
-  const pageAction = section === 'visits'
-    ? <Button icon={<Plus size={18} />} onClick={() => openNew('visit')}>Nuova visita</Button>
-    : section === 'inventory'
-      ? <Button icon={<Package size={18} />} onClick={() => openNew('inventory')}>Aggiungi medicinale</Button>
-      : section === 'therapy'
-        ? <Button icon={<Stethoscope size={18} />} onClick={() => openNew('therapy')} disabled={!medicines.length}>Nuova terapia</Button>
-        : section === 'records'
-          ? <Button icon={<Plus size={18} />} onClick={() => openNew('record')}>Nuovo documento</Button>
-          : <Button icon={<Plus size={18} />} onClick={() => openNew('visit')}>Aggiungi visita</Button>
+  const pageAction = readOnlyHealth
+    ? null
+    : section === 'visits'
+      ? <Button icon={<Plus size={18} />} onClick={() => openNew('visit')}>Nuova visita</Button>
+      : section === 'inventory'
+        ? <Button icon={<Package size={18} />} onClick={() => openNew('inventory')}>Aggiungi medicinale</Button>
+        : section === 'therapy'
+          ? <Button icon={<Stethoscope size={18} />} onClick={() => openNew('therapy')} disabled={!medicines.length}>Nuova terapia</Button>
+          : section === 'records'
+            ? <Button icon={<Plus size={18} />} onClick={() => openNew('record')}>Nuovo documento</Button>
+            : <Button icon={<Plus size={18} />} onClick={() => openNew('visit')}>Aggiungi visita</Button>
 
   return <div className="page">
     <PageIntro eyebrow="Cartella sanitaria familiare" title="Salute" description="Visite, terapie, medicinali, esami e documenti sanitari raccolti in un unico posto, con promemoria automatici e allegati protetti." actions={pageAction} />
+    {readOnlyHealth ? <div className="callout"><strong>Cartella personale in sola lettura.</strong> Puoi consultare le tue informazioni e aprire i tuoi allegati; le modifiche restano riservate agli adulti della famiglia.</div> : null}
 
     <div className="page-tabs-wrap">
       <Segmented value={section} onChange={setSection} options={[
@@ -666,7 +673,7 @@ export default function HealthPage() {
       ]} />
     </div>
 
-    {(section === 'overview' || section === 'visits' || section === 'therapy' || section === 'records') ? <div style={{ marginBottom: 14, maxWidth: 320 }}><Field label="Persona"><select value={personFilter} onChange={e => setPersonFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}><option value="all">Tutta la famiglia</option>{data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field></div> : null}
+    {!readOnlyHealth && (section === 'overview' || section === 'visits' || section === 'therapy' || section === 'records') ? <div style={{ marginBottom: 14, maxWidth: 320 }}><Field label="Persona"><select value={personFilter} onChange={e => setPersonFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))}><option value="all">Tutta la famiglia</option>{data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field></div> : null}
 
     {section === 'overview' ? <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12, marginBottom: 14 }}>
@@ -742,7 +749,9 @@ export default function HealthPage() {
       onClose={() => setEditing(null)}
       title={editing?.kind === 'visit' ? (editing?.id ? 'Modifica visita' : 'Nuova visita') : editing?.kind === 'health-record' ? (editing?.id ? 'Modifica documento sanitario' : 'Nuovo documento sanitario') : editing?.kind === 'medicine' ? (editing?.id ? 'Modifica medicinale' : 'Nuovo medicinale') : (editing?.id ? 'Modifica terapia' : 'Nuova terapia')}
       size={editing?.kind === 'visit' || editing?.kind === 'health-record' ? 'md' : 'lg'}
-      footer={<div className="modal-actions"><div>{editing?.id ? <Button variant="danger" disabled={attachmentBusy} onClick={deleteEditing}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button onClick={save}>Salva</Button></div></div>}
+      footer={readOnlyHealth
+        ? <div className="modal-actions"><div /><div className="modal-actions__right"><Button onClick={() => setEditing(null)}>Chiudi</Button></div></div>
+        : <div className="modal-actions"><div>{editing?.id ? <Button variant="danger" disabled={attachmentBusy} onClick={deleteEditing}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button onClick={save}>Salva</Button></div></div>}
     >
       {editing?.kind === 'visit' ? <div className="form-grid form-grid--2">
         <Field label="Visita / controllo" className="field--wide"><input autoFocus value={editing.title || ''} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="Es. Visita cardiologica" /></Field>
