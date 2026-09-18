@@ -45,6 +45,34 @@ function mergeHealthDeadlines(base: FamilyData, healthItems: Deadline[]) {
   }
 }
 
+function mergeFinanceData(base: FamilyData, finance: any): FamilyData {
+  if (!finance) return base
+  const wallets = Array.isArray(finance.wallets) ? finance.wallets : []
+  const balances = new Map(wallets.map((wallet: any) => [Number(wallet.userId), Number(wallet.balance || 0)]))
+  return {
+    ...base,
+    users: base.users.map(user => balances.has(user.id) ? { ...user, balance: Number(balances.get(user.id) || 0) } : user),
+    chores: Array.isArray(finance.chores) ? finance.chores : base.chores,
+    recurringChores: Array.isArray(finance.recurringChores) ? finance.recurringChores : base.recurringChores,
+    transactions: Array.isArray(finance.transactions) ? finance.transactions : base.transactions
+  }
+}
+
+function financeHash(value: FamilyData) {
+  return JSON.stringify({
+    users: value.users.map(user => ({
+      id: user.id,
+      cloudUserId: user.cloudUserId || '',
+      name: user.name,
+      role: user.role,
+      balance: Number(user.balance || 0)
+    })),
+    chores: value.chores,
+    recurringChores: value.recurringChores,
+    transactions: value.transactions
+  })
+}
+
 type CloudStatus = 'offline' | 'connecting' | 'synced' | 'saving' | 'conflict' | 'error'
 type AuthResult = { ok: boolean; error?: string; needsEmailConfirmation?: boolean }
 
@@ -162,8 +190,11 @@ function dbRoleToApp(role?: string): FamilyUser['role'] {
 function cloudSafeData(value: FamilyData): FamilyData {
   return {
     ...value,
-    users: value.users.map(user => ({ ...user, password: '' })),
-    deadlines: value.deadlines.filter(item => !isHealthDeadline(item))
+    users: value.users.map(user => ({ ...user, password: '', balance: 0 })),
+    deadlines: value.deadlines.filter(item => !isHealthDeadline(item)),
+    chores: [],
+    recurringChores: [],
+    transactions: []
   }
 }
 
@@ -206,6 +237,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const currentCloudUserRef = useRef<any>(null)
   const calendarSyncHashRef = useRef('')
   const healthSyncHashRef = useRef('')
+  const financeSyncHashRef = useRef('')
+  const familySyncHashRef = useRef('')
 
   familyIdRef.current = familyId
 
@@ -221,11 +254,17 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }, [data])
 
   useEffect(() => {
-    const ensureToday = () => setData(prev => materializeRecurringChores(prev, localDateISO()))
+    const ensureToday = () => setData(prev => {
+      const current = cloudUserId
+        ? prev.users.find(user => user.cloudUserId === cloudUserId)
+        : prev.users.find(user => user.id === sessionUserId)
+      if (isSupabaseConfigured && current?.role === 'bimbo') return prev
+      return materializeRecurringChores(prev, localDateISO())
+    })
     ensureToday()
     const timer = window.setInterval(ensureToday, 60_000)
     return () => window.clearInterval(timer)
-  }, [data.recurringChores])
+  }, [data.recurringChores, cloudUserId, sessionUserId])
 
   useEffect(() => {
     if (sessionUserId) sessionStorage.setItem(SESSION_KEY, String(sessionUserId))
@@ -281,12 +320,26 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return result
   }
 
+  async function callFinanceGateway(action: 'read' | 'sync', targetFamilyId: string, extra: Record<string, any> = {}) {
+    if (!supabase) throw new Error('Cloud non disponibile.')
+    const { data: result, error } = await supabase.functions.invoke('finance-data-gateway', {
+      body: { action, familyId: targetFamilyId, ...extra }
+    })
+    if (error) throw new Error(error.message || 'Archivio paghette non disponibile.')
+    if (!result?.ok) throw new Error(result?.error || 'Operazione paghette non autorizzata.')
+    return result
+  }
+
   async function readFamilyDocument(targetFamilyId: string, profile: any, role: string) {
     if (!supabase) return
-    const [result, healthResult] = await Promise.all([
+    const [result, healthResult, financeResult] = await Promise.all([
       callFamilyGateway('read', targetFamilyId),
       callHealthGateway('read', targetFamilyId).catch(error => {
         console.warn('health-data-gateway read fallback', error)
+        return null
+      }),
+      callFinanceGateway('read', targetFamilyId).catch(error => {
+        console.warn('finance-data-gateway read fallback', error)
         return null
       })
     ])
@@ -296,7 +349,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       migrated = mergeHealthDeadlines(migrated, healthResult.items)
       healthSyncHashRef.current = JSON.stringify(healthResult.items)
     }
+    if (financeResult) migrated = mergeFinanceData(migrated, financeResult)
     const linked = linkCloudIdentity(migrated, profile, result?.role || role)
+    financeSyncHashRef.current = financeHash(linked)
+    familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
     calendarSyncHashRef.current = JSON.stringify(linked.calendarEvents || [])
     suppressNextPushRef.current = true
     revisionRef.current = Number(result?.revision || 0)
@@ -321,20 +377,26 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   async function refreshChildSnapshot(targetFamilyId: string) {
     if (!supabase) return
     try {
-      const result = await callFamilyGateway('read', targetFamilyId)
-      if (!result?.ok || Number(result.revision || 0) <= revisionRef.current) return
+      const [result, healthResult, financeResult] = await Promise.all([
+        callFamilyGateway('read', targetFamilyId),
+        callHealthGateway('read', targetFamilyId).catch(() => null),
+        callFinanceGateway('read', targetFamilyId).catch(() => null)
+      ])
+      if (!result?.ok) return
       const user = currentCloudUserRef.current
       const profile = user ? await fetchProfile(user.id) : null
       let remote = migrateData(result.data, deepClone(initialData))
-      const healthResult = await callHealthGateway('read', targetFamilyId).catch(() => null)
       if (healthResult?.items) {
         remote = mergeHealthDeadlines(remote, healthResult.items)
         healthSyncHashRef.current = JSON.stringify(healthResult.items)
       }
+      if (financeResult) remote = mergeFinanceData(remote, financeResult)
       const linked = user
         ? linkCloudIdentity(remote, profile || { id: user.id, display_name: user.email?.split('@')[0] }, result.role || 'child')
         : remote
-      revisionRef.current = Number(result.revision || 0)
+      revisionRef.current = Number(result.revision || revisionRef.current)
+      financeSyncHashRef.current = financeHash(linked)
+      familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
       suppressNextPushRef.current = true
       setData(linked)
       setCloudStatus('synced')
@@ -346,10 +408,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function startRealtime(targetFamilyId: string, role = 'adult') {
     if (!supabase) return
     stopRealtime()
-    if (role === 'child') {
-      childSyncTimerRef.current = window.setInterval(() => void refreshChildSnapshot(targetFamilyId), 15_000)
-      return
-    }
+    childSyncTimerRef.current = window.setInterval(() => void refreshChildSnapshot(targetFamilyId), 15_000)
+    if (role === 'child') return
     realtimeChannelRef.current = supabase
       .channel(`family-document-${targetFamilyId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'family_documents', filter: `family_id=eq.${targetFamilyId}` }, async (payload: any) => {
@@ -360,12 +420,18 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         const profile = user ? await fetchProfile(user.id) : null
         const { data: membership } = user ? await supabase.from('family_members').select('role').eq('family_id', targetFamilyId).eq('user_id', user.id).maybeSingle() : { data: null }
         let remote = migrateData(row.data, deepClone(initialData))
-        const healthResult = await callHealthGateway('read', targetFamilyId).catch(() => null)
+        const [healthResult, financeResult] = await Promise.all([
+          callHealthGateway('read', targetFamilyId).catch(() => null),
+          callFinanceGateway('read', targetFamilyId).catch(() => null)
+        ])
         if (healthResult?.items) {
           remote = mergeHealthDeadlines(remote, healthResult.items)
           healthSyncHashRef.current = JSON.stringify(healthResult.items)
         }
+        if (financeResult) remote = mergeFinanceData(remote, financeResult)
         const linked = user ? linkCloudIdentity(remote, profile || { id: user.id, display_name: user.email?.split('@')[0] }, membership?.role || 'adult') : remote
+        financeSyncHashRef.current = financeHash(linked)
+        familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
         suppressNextPushRef.current = true
         setData(linked)
         setCloudStatus('synced')
@@ -452,7 +518,14 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!supabase || !familyIdRef.current || !cloudUserId) return
     setCloudStatus('saving')
     const expected = revisionRef.current
+    let financeResult: any = null
     try {
+      const nextFinanceHash = financeHash(snapshot)
+      if (nextFinanceHash !== financeSyncHashRef.current) {
+        financeResult = await callFinanceGateway('sync', familyIdRef.current, { data: snapshot })
+        const normalizedFinance = mergeFinanceData(snapshot, financeResult)
+        financeSyncHashRef.current = financeHash(normalizedFinance)
+      }
       if (authUser?.role !== 'bimbo') {
         const healthItems = snapshot.deadlines.filter(item => isHealthDeadline(item))
         const healthHash = JSON.stringify(healthItems)
@@ -462,17 +535,32 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      const familyPayload = cloudSafeData(snapshot)
+      const nextFamilyHash = JSON.stringify(familyPayload)
+      if (nextFamilyHash === familySyncHashRef.current) {
+        setCloudStatus('synced')
+        return
+      }
+
       const result = await callFamilyGateway('save', familyIdRef.current, {
-        data: cloudSafeData(snapshot),
+        data: familyPayload,
         expectedRevision: expected
       })
 
       if (result?.ok) {
+        familySyncHashRef.current = nextFamilyHash
         revisionRef.current = Number(result.revision || expected + 1)
         if (result.normalized && result.data) {
           suppressNextPushRef.current = true
-          const familyOnly = migrateData(result.data, deepClone(initialData))
-          setData(mergeHealthDeadlines(familyOnly, snapshot.deadlines.filter(item => isHealthDeadline(item))))
+          let familyOnly = migrateData(result.data, deepClone(initialData))
+          familyOnly = mergeHealthDeadlines(familyOnly, snapshot.deadlines.filter(item => isHealthDeadline(item)))
+          familyOnly = mergeFinanceData(familyOnly, financeResult || {
+            wallets: snapshot.users.map(user => ({ userId: user.id, balance: user.balance })),
+            chores: snapshot.chores,
+            recurringChores: snapshot.recurringChores,
+            transactions: snapshot.transactions
+          })
+          setData(familyOnly)
         }
         setCloudStatus('synced')
         const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
@@ -491,11 +579,17 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         if (result.data) {
           suppressNextPushRef.current = true
           let remote = migrateData(result.data, deepClone(initialData))
-          const healthResult = await callHealthGateway('read', familyIdRef.current).catch(() => null)
+          const [healthResult, financeRemote] = await Promise.all([
+            callHealthGateway('read', familyIdRef.current).catch(() => null),
+            callFinanceGateway('read', familyIdRef.current).catch(() => null)
+          ])
           if (healthResult?.items) {
             remote = mergeHealthDeadlines(remote, healthResult.items)
             healthSyncHashRef.current = JSON.stringify(healthResult.items)
           }
+          if (financeRemote) remote = mergeFinanceData(remote, financeRemote)
+          financeSyncHashRef.current = financeHash(remote)
+          familySyncHashRef.current = JSON.stringify(cloudSafeData(remote))
           setData(remote)
         }
         return
@@ -588,6 +682,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       if (!useLocalData) seed = { ...seed, users: seed.users.filter(u => u.cloudUserId === user.id) }
       const { data: revision, error: bootstrapError } = await supabase.rpc('bootstrap_family_document', { p_family_id: createdId, p_data: cloudSafeData(seed) })
       if (bootstrapError) throw bootstrapError
+      const financeResult = await callFinanceGateway('sync', createdId, { data: seed })
+      seed = mergeFinanceData(seed, financeResult)
+      financeSyncHashRef.current = financeHash(seed)
+      familySyncHashRef.current = JSON.stringify(cloudSafeData(seed))
       revisionRef.current = Number(revision || 1)
       suppressNextPushRef.current = true
       setData(seed)
