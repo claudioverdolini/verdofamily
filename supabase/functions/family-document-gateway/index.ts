@@ -41,6 +41,19 @@ function stripHealthData(value: any) {
   return data;
 }
 
+function stripFinanceData(value: any) {
+  const data = stripPasswords(value);
+  data.users = array(data.users).map((user: any) => ({ ...user, balance: 0, password: "" }));
+  data.chores = [];
+  data.recurringChores = [];
+  data.transactions = [];
+  return data;
+}
+
+function stripSensitiveData(value: any) {
+  return stripFinanceData(stripHealthData(value));
+}
+
 function participants(event: any) {
   const ids = array(event?.userIds).map(n).filter(Boolean);
   if (ids.length) return ids;
@@ -275,7 +288,7 @@ Deno.serve(async (req) => {
 
     if (familyError || documentError || !document) return json({ ok: false, error: "family_document_not_found" }, 404);
 
-    const fullData = stripHealthData(document.data || {});
+    const fullData = stripSensitiveData(document.data || {});
     const childId = role === "child" ? appUserId(fullData, user.id) : 0;
     if (role === "child" && !childId) return json({ ok: false, error: "child_identity_not_linked" }, 403);
 
@@ -314,7 +327,7 @@ Deno.serve(async (req) => {
 
     let nextData: any;
     try {
-      nextData = stripHealthData(role === "child" ? mergeChildChanges(fullData, incoming, childId) : incoming);
+      nextData = stripSensitiveData(role === "child" ? mergeChildChanges(fullData, incoming, childId) : incoming);
     } catch (validationError) {
       const message = validationError instanceof Error ? validationError.message : "forbidden_change";
       console.warn("family_document_save_denied", { familyId, userId: user.id, role, reason: message });
