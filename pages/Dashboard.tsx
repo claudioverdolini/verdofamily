@@ -7,6 +7,7 @@ import {
   Clock3,
   GraduationCap,
   ListTodo,
+  Pin,
   Plus,
   ReceiptText,
   ShoppingCart,
@@ -52,6 +53,12 @@ export default function Dashboard() {
   const schoolTomorrowLessons = data.schoolTimetable
     .filter(entry => entry.weekday === (() => { const day = new Date(`${tomorrow}T12:00:00`).getDay(); return day === 0 ? 7 : day })())
     .filter(entry => authUser?.role !== 'bimbo' || entry.userId === authUser.id)
+
+  const boardVisible = data.boardPosts
+    .filter(post => post.authorUserId === authUser?.id || post.audience === 'family' || (post.userIds || []).includes(authUser?.id || 0))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const pinnedBoard = boardVisible.filter(post => post.pinned)
+  const boardDueSoon = boardVisible.filter(post => post.type === 'reminder' && post.dueDate && post.dueDate >= today && post.dueDate <= tomorrow)
 
   const pendingShopping = data.shopping.filter(x => !x.taken)
   const pendingChores = data.chores.filter(x => !x.done)
@@ -159,6 +166,7 @@ export default function Dashboard() {
     pendingTodos.length ? { label: `${pendingTodos.length} promemoria aperti`, page: 'todos' as const } : null,
     dueRoutinesToday.length ? { label: `${dueRoutinesToday.length} routine da fare oggi`, page: 'todos' as const } : null,
     schoolTomorrow.length ? { label: `${schoolTomorrow.length} cose di scuola da preparare per domani`, page: 'school' as const } : null,
+    boardDueSoon.length ? { label: `${boardDueSoon.length} promemoria in bacheca tra oggi e domani`, page: 'board' as const } : null,
     authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? { label: `${choresAwaitingApproval.length} compiti da confermare`, page: 'chores' as const } : null
   ].filter(Boolean) as Array<{ label: string; page: any }>
 
@@ -183,6 +191,7 @@ export default function Dashboard() {
         <button onClick={() => setActivePage('meals')}><Utensils size={18} /><span>Pianifica pasto</span><Plus size={16} /></button>
         <button onClick={() => setActivePage('todos')}><ListTodo size={18} /><span>Da fare</span><Plus size={16} /></button>
         <button onClick={() => setActivePage('school')}><GraduationCap size={18} /><span>Scuola</span><ChevronRight size={16} /></button>
+        <button onClick={() => setActivePage('board')}><Pin size={18} /><span>Bacheca</span><ChevronRight size={16} /></button>
       </div>
 
       {homeView === 'today' ? <>
@@ -212,6 +221,23 @@ export default function Dashboard() {
               {schoolTomorrow.slice(0, 4).map(item => <button key={`school-${item.id}`} onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Scuola'}</small></span></button>)}
               {schoolTomorrow.length === 0 && schoolTomorrowLessons.length ? <button onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{schoolTomorrowLessons.length} lezioni previste</strong><small>Controlla orario e zaino</small></span></button> : null}
             </div> : <EmptyState icon={<GraduationCap size={28} />} title="Niente da preparare" text="Nessun impegno scolastico registrato per domani." />}
+          </Card>
+
+          <Card className="command-panel command-panel--board">
+            <CardHeader title="Bacheca" subtitle="Messaggi fissati per la famiglia" action={<button className="text-link" onClick={() => setActivePage('board')}>Apri <ChevronRight size={16} /></button>} />
+            {pinnedBoard.length ? <div className="home-board-list">
+              {pinnedBoard.slice(0, 3).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
+                <Pin size={16} />
+                <span><strong>{post.title || post.body.slice(0, 55) || 'Contenuto fissato'}</strong><small>{post.body && post.title ? post.body.slice(0, 80) : post.type === 'reminder' && post.dueDate ? `Promemoria · ${shortDate(post.dueDate)}` : 'Bacheca familiare'}</small></span>
+                <ChevronRight size={15} />
+              </button>)}
+            </div> : boardDueSoon.length ? <div className="home-board-list">
+              {boardDueSoon.slice(0, 3).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
+                <Pin size={16} />
+                <span><strong>{post.title || post.body.slice(0, 55) || 'Promemoria'}</strong><small>{post.dueDate ? `Per ${shortDate(post.dueDate)}` : 'Bacheca familiare'}</small></span>
+                <ChevronRight size={15} />
+              </button>)}
+            </div> : <EmptyState icon={<Pin size={28} />} title="Niente in evidenza" text="Fissa un messaggio o un promemoria per averlo sempre qui sul tablet." />}
           </Card>
 
           <Card className="command-panel">
