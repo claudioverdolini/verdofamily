@@ -46,6 +46,8 @@ export default function Dashboard() {
 
   const pendingShopping = data.shopping.filter(x => !x.taken)
   const pendingChores = data.chores.filter(x => !x.done)
+  const choresAwaitingApproval = data.chores.filter(x => !x.done && x.completionStatus === 'pending')
+  const choresStillToDo = pendingChores.filter(x => x.completionStatus !== 'pending')
   const pendingTodos = data.todos.filter(x => !x.done)
   const lowStock = data.pantry.filter(x => Number(x.minQty || 0) > 0 && Number(x.qty || 0) <= Number(x.minQty || 0))
 
@@ -126,7 +128,8 @@ export default function Dashboard() {
     pendingShopping.length ? { label: `${pendingShopping.length} articoli da comprare`, page: 'shopping' as const } : null,
     lowStock.length ? { label: `${lowStock.length} prodotti sotto scorta`, page: 'shopping' as const } : null,
     nextDeadlines.length ? { label: `${nextDeadlines.length} scadenze nei prossimi 15 giorni`, page: 'deadlines' as const } : null,
-    pendingTodos.length ? { label: `${pendingTodos.length} cose da fare aperte`, page: 'todos' as const } : null
+    pendingTodos.length ? { label: `${pendingTodos.length} cose da fare aperte`, page: 'todos' as const } : null,
+    authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? { label: `${choresAwaitingApproval.length} compiti da confermare`, page: 'chores' as const } : null
   ].filter(Boolean) as Array<{ label: string; page: any }>
 
   return (
@@ -156,7 +159,7 @@ export default function Dashboard() {
           <StatCard icon={<Clock3 size={20} />} label="Impegni oggi" value={eventsToday.length} note={eventsToday[0] ? `${eventsToday[0].time || 'Tutto il giorno'} · ${eventsToday[0].title}` : 'Nessun impegno'} onClick={() => setActivePage('calendar')} />
           <StatCard icon={<ShoppingCart size={20} />} label="Da comprare" value={pendingShopping.length} note={pendingShopping[0]?.name || 'Lista vuota'} onClick={() => setActivePage('shopping')} tone="mint" />
           <StatCard icon={<ReceiptText size={20} />} label="Scadenze" value={nextDeadlines.length} note={nextDeadlines[0] ? `${shortDate(nextDeadlines[0].date)} · ${nextDeadlines[0].title}` : 'Tutto in ordine'} onClick={() => setActivePage('deadlines')} tone="amber" />
-          <StatCard icon={<WalletCards size={20} />} label="Paghette" value={showBalances ? money(totalBalance) : '••••'} note={`${pendingChores.length} compiti da completare`} onClick={() => setActivePage('chores')} tone="violet" />
+          <StatCard icon={<WalletCards size={20} />} label="Paghette" value={showBalances ? money(totalBalance) : '••••'} note={authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? `${choresAwaitingApproval.length} da confermare · ${choresStillToDo.length} da fare` : `${choresStillToDo.length} compiti da completare`} onClick={() => setActivePage('chores')} tone="violet" />
         </div>
 
         <div className="command-grid command-grid--today">
