@@ -256,22 +256,40 @@ async function syncChildFinance(admin: any, familyId: string, userId: string, sn
   const incomingChores = arr(snapshot?.chores);
   if (incomingChores.length > 5000) throw new Error("finance_payload_limit");
 
-  const { data: currentRows, error: currentError } = await admin
-    .from("finance_chores")
-    .select("*, finance_transactions!finance_chores_credited_transaction_id_fkey(legacy_id), finance_recurring_chores!finance_chores_recurring_chore_id_fkey(legacy_id)")
-    .eq("family_id", familyId)
-    .eq("person_id", person.id);
+  const [
+    { data: currentRows, error: currentError },
+    { data: txRows, error: txError },
+    { data: recurringRows, error: recurringError }
+  ] = await Promise.all([
+    admin
+      .from("finance_chores")
+      .select("*")
+      .eq("family_id", familyId)
+      .eq("person_id", person.id),
+    admin
+      .from("finance_transactions")
+      .select("id,legacy_id")
+      .eq("family_id", familyId),
+    admin
+      .from("finance_recurring_chores")
+      .select("id,legacy_id")
+      .eq("family_id", familyId)
+  ]);
   dbError(currentError, "read child chores");
+  dbError(txError, "read child transactions");
+  dbError(recurringError, "read child recurring chores");
 
   const currentByLegacy = new Map((currentRows || []).map((row: any) => [Number(row.legacy_id), row]));
+  const txLegacyById = new Map((txRows || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
+  const recurringLegacyById = new Map((recurringRows || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
 
   for (const proposed of incomingChores) {
     if (n(proposed?.userId) !== childId) throw new Error("forbidden_chore_change");
     const current = currentByLegacy.get(n(proposed?.id));
     if (!current) throw new Error("forbidden_chore_create");
 
-    const currentRecurring = current.finance_recurring_chores?.legacy_id || undefined;
-    const currentTx = current.finance_transactions?.legacy_id || undefined;
+    const currentRecurring = current.recurring_chore_id ? recurringLegacyById.get(String(current.recurring_chore_id)) : undefined;
+    const currentTx = current.credited_transaction_id ? txLegacyById.get(String(current.credited_transaction_id)) : undefined;
     const immutablePairs = [
       [current.title, proposed?.title],
       [String(current.deadline), proposed?.deadline],
