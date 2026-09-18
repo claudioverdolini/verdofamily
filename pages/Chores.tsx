@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { CheckCircle2, Pencil, Plus, Repeat2, RotateCcw, Trash2, WalletCards } from 'lucide-react'
+import { CheckCircle2, Clock3, Pencil, Plus, Repeat2, RotateCcw, Trash2, WalletCards, XCircle } from 'lucide-react'
 import { useFamily } from '../store'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { localDateISO, money } from '../utils'
@@ -22,12 +22,19 @@ function recurringLabel(days: number[]) {
   return WEEKDAYS.filter(day => sorted.includes(day.id)).map(day => day.label).join(', ')
 }
 
+function choreStatus(chore: any): 'open' | 'pending' | 'approved' {
+  if (chore.done) return 'approved'
+  return chore.completionStatus === 'pending' ? 'pending' : 'open'
+}
+
 export default function ChoresPage() {
   const {
     data,
     authUser,
     addChore,
     toggleChore,
+    approveChore,
+    rejectChore,
     deleteChore,
     upsertRecurringChore,
     toggleRecurringChore,
@@ -35,17 +42,27 @@ export default function ChoresPage() {
     payUser,
     undoTransaction
   } = useFamily()
+
+  const isChild = authUser?.role === 'bimbo'
   const [tab, setTab] = useState<'chores' | 'recurring' | 'wallets'>('chores')
   const [editing, setEditing] = useState<any>(null)
   const [recurringEditing, setRecurringEditing] = useState<any>(null)
   const [payment, setPayment] = useState<any>(null)
   const showBalances = authUser?.prefs?.showBalances !== false
 
+  const visibleUsers = isChild && authUser
+    ? data.users.filter(user => user.id === authUser.id)
+    : data.users
+  const walletUsers = visibleUsers
+  const pendingApprovalCount = data.chores.filter(chore => !chore.done && chore.completionStatus === 'pending').length
+
   function openNew() {
+    if (isChild) return
     setEditing({ title: '', deadline: localDateISO(), userId: data.users[0]?.id || 1, amount: 1 })
   }
 
   function openRecurring(item?: any) {
+    if (isChild) return
     setRecurringEditing(item
       ? { ...item, weekdays: [...(item.weekdays || [])] }
       : {
@@ -60,7 +77,7 @@ export default function ChoresPage() {
   }
 
   function saveChore() {
-    if (!editing?.title?.trim()) return
+    if (!editing?.title?.trim() || isChild) return
     addChore({
       title: editing.title.trim(),
       deadline: editing.deadline,
@@ -71,7 +88,7 @@ export default function ChoresPage() {
   }
 
   function saveRecurring() {
-    if (!recurringEditing?.title?.trim() || !recurringEditing?.weekdays?.length) return
+    if (isChild || !recurringEditing?.title?.trim() || !recurringEditing?.weekdays?.length) return
     upsertRecurringChore({
       id: recurringEditing.id,
       title: recurringEditing.title.trim(),
@@ -86,7 +103,7 @@ export default function ChoresPage() {
   }
 
   function toggleRecurringDay(day: number) {
-    if (!recurringEditing) return
+    if (!recurringEditing || isChild) return
     const days = recurringEditing.weekdays || []
     setRecurringEditing({
       ...recurringEditing,
@@ -95,61 +112,139 @@ export default function ChoresPage() {
   }
 
   function submitPayment() {
+    if (isChild) return
     const amount = Number(payment?.amount) || 0
     if (!payment || amount <= 0) return
     if (payUser(payment.userId, amount, payment.note || 'Pagamento paghetta')) setPayment(null)
   }
 
-  const introAction = tab === 'recurring'
-    ? <Button icon={<Repeat2 size={18} />} onClick={() => openRecurring()}>Nuovo ricorrente</Button>
-    : <Button icon={<Plus size={18} />} onClick={openNew}>Nuovo compito</Button>
+  const introAction = isChild
+    ? null
+    : tab === 'recurring'
+      ? <Button icon={<Repeat2 size={18} />} onClick={() => openRecurring()}>Nuovo ricorrente</Button>
+      : tab === 'chores'
+        ? <Button icon={<Plus size={18} />} onClick={openNew}>Nuovo compito</Button>
+        : null
+
+  const tabs = isChild
+    ? [
+        { value: 'chores', label: `I miei compiti · ${data.chores.filter(c => c.userId === authUser?.id && !c.done).length}` },
+        { value: 'wallets', label: 'La mia paghetta' }
+      ]
+    : [
+        { value: 'chores', label: `Compiti · ${data.chores.filter(c => !c.done).length}${pendingApprovalCount ? ` · ${pendingApprovalCount} da confermare` : ''}` },
+        { value: 'recurring', label: `Ricorrenti · ${data.recurringChores.filter(c => c.active).length}` },
+        { value: 'wallets', label: 'Paghette & movimenti' }
+      ]
 
   return <div className="page">
     <PageIntro
       eyebrow="Responsabilità"
       title="Compiti & paghette"
-      description="Compiti singoli o ricorrenti, accrediti automatici e pagamenti sempre reversibili."
+      description={isChild
+        ? 'Segna i tuoi compiti come fatti. La paghetta viene accreditata dopo la conferma di un genitore.'
+        : 'I ragazzi segnalano i compiti completati; un adulto li verifica e approva prima dell’accredito.'}
       actions={introAction}
     />
 
+    {!isChild && pendingApprovalCount > 0 ? <div className="approval-banner">
+      <Clock3 size={18} />
+      <div>
+        <strong>{pendingApprovalCount} {pendingApprovalCount === 1 ? 'compito aspetta' : 'compiti aspettano'} la tua conferma</strong>
+        <span>La paghetta non è ancora stata accreditata.</span>
+      </div>
+    </div> : null}
+
     <div className="page-tabs-wrap">
       <Segmented
-        value={tab}
+        value={isChild && tab === 'recurring' ? 'chores' : tab}
         onChange={setTab}
-        options={[
-          { value: 'chores', label: `Compiti · ${data.chores.filter(c => !c.done).length}` },
-          { value: 'recurring', label: `Ricorrenti · ${data.recurringChores.filter(c => c.active).length}` },
-          { value: 'wallets', label: 'Paghette & movimenti' }
-        ]}
+        options={tabs}
       />
     </div>
 
-    {tab === 'chores' ? <div className="chores-grid">{data.users.map(user => {
+    {(tab === 'chores' || (isChild && tab === 'recurring')) ? <div className="chores-grid">{visibleUsers.map(user => {
       const chores = data.chores.filter(c => c.userId === user.id)
+      const openCount = chores.filter(c => !c.done && c.completionStatus !== 'pending').length
+      const waitingCount = chores.filter(c => !c.done && c.completionStatus === 'pending').length
+      const subtitle = isChild
+        ? `${openCount} da fare${waitingCount ? ` · ${waitingCount} in attesa` : ''}`
+        : `${openCount} da fare${waitingCount ? ` · ${waitingCount} da confermare` : ''}`
+
       return <Card key={user.id}>
         <CardHeader
           title={<span className="user-heading"><Avatar user={user} size="sm" />{user.name}</span>}
-          subtitle={`${chores.filter(c => !c.done).length} da fare`}
+          subtitle={subtitle}
         />
         {chores.length ? <div className="check-list">
           {chores
             .slice()
-            .sort((a, b) => Number(a.done) - Number(b.done) || a.deadline.localeCompare(b.deadline))
-            .map(chore => <div key={chore.id} className={`check-item chore-item ${chore.done ? 'is-done' : ''}`}>
-              <button className="check-item__check" onClick={() => toggleChore(chore.id)}>
-                {chore.done ? <CheckCircle2 size={16} /> : null}
-              </button>
-              <button className="check-item__copy" onClick={() => toggleChore(chore.id)}>
-                <strong>{chore.title}</strong>
-                <span>{chore.deadline} · {money(chore.amount)}{chore.recurringChoreId ? ' · Ricorrente' : ''}</span>
-              </button>
-              <IconButton label="Elimina" onClick={() => deleteChore(chore.id)}><Trash2 size={17} /></IconButton>
-            </div>)}
-        </div> : <EmptyState icon={<CheckCircle2 size={28} />} title="Tutto fatto" text="Nessun compito assegnato." />}
+            .sort((a, b) => {
+              const order = { pending: 0, open: 1, approved: 2 }
+              const byStatus = order[choreStatus(a)] - order[choreStatus(b)]
+              return byStatus || a.deadline.localeCompare(b.deadline)
+            })
+            .map(chore => {
+              const status = choreStatus(chore)
+              const isPending = status === 'pending'
+              const isApproved = status === 'approved'
+              const canChildToggle = isChild && chore.userId === authUser?.id && !isApproved
+              const childActionText = isPending ? 'Tocca per annullare la richiesta' : 'Tocca quando hai finito'
+
+              return <div key={chore.id} className={`check-item chore-item chore-item--${status} ${isApproved ? 'is-done' : ''}`}>
+                <button
+                  className="check-item__check"
+                  onClick={() => {
+                    if (isChild) {
+                      if (canChildToggle) toggleChore(chore.id)
+                    } else if (!isPending) {
+                      toggleChore(chore.id)
+                    }
+                  }}
+                  disabled={isChild ? !canChildToggle : isPending}
+                  title={isChild ? childActionText : isPending ? 'Usa Conferma o Rifiuta' : isApproved ? 'Riapri compito' : 'Segna e approva'}
+                >
+                  {isApproved ? <CheckCircle2 size={16} /> : isPending ? <Clock3 size={15} /> : null}
+                </button>
+
+                <button
+                  className="check-item__copy"
+                  onClick={() => {
+                    if (isChild && canChildToggle) toggleChore(chore.id)
+                  }}
+                  disabled={!isChild || !canChildToggle}
+                >
+                  <strong>{chore.title}</strong>
+                  <span>
+                    {chore.deadline} · {money(chore.amount)}
+                    {chore.recurringChoreId ? ' · Ricorrente' : ''}
+                  </span>
+                  <small className={`chore-status chore-status--${status}`}>
+                    {isPending
+                      ? (isChild ? '✓ Segnalato come fatto · attende un genitore' : 'Da verificare e confermare')
+                      : isApproved
+                        ? '✓ Approvato · paghetta accreditata'
+                        : (isChild ? 'Da fare · segnalo io quando ho finito' : 'Da fare')}
+                  </small>
+                </button>
+
+                {!isChild && isPending ? <div className="chore-approval-actions">
+                  <Button size="sm" variant="soft" onClick={() => approveChore(chore.id)}>Conferma</Button>
+                  <IconButton label="Rifiuta e riapri" onClick={() => rejectChore(chore.id)}><XCircle size={17} /></IconButton>
+                </div> : null}
+
+                {!isChild && !isPending ? <IconButton label="Elimina" onClick={() => deleteChore(chore.id)}><Trash2 size={17} /></IconButton> : null}
+              </div>
+            })}
+        </div> : <EmptyState
+          icon={<CheckCircle2 size={28} />}
+          title="Tutto fatto"
+          text={isChild ? 'Non hai compiti assegnati.' : 'Nessun compito assegnato.'}
+        />}
       </Card>
     })}</div> : null}
 
-    {tab === 'recurring' ? <div className="recurring-grid">
+    {!isChild && tab === 'recurring' ? <div className="recurring-grid">
       {data.users.map(user => {
         const recurring = data.recurringChores.filter(item => item.userId === user.id)
         return <Card key={user.id}>
@@ -184,41 +279,52 @@ export default function ChoresPage() {
     </div> : null}
 
     {tab === 'wallets' ? <div className="wallet-layout">
-      <div className="wallet-grid">{data.users.map(user => <Card key={user.id} className="wallet-card">
+      <div className="wallet-grid">{walletUsers.map(user => <Card key={user.id} className="wallet-card">
         <div className="wallet-card__head">
           <Avatar user={user} size="lg" />
-          <div><span>{user.name}</span><strong>{showBalances ? money(user.balance) : '••••'}</strong></div>
+          <div>
+            <span>{user.name}</span>
+            <strong>{showBalances ? money(user.balance) : '••••'}</strong>
+            {isChild ? <small>Disponibile dopo l’approvazione dei compiti</small> : null}
+          </div>
         </div>
-        <Button
+        {!isChild ? <Button
           variant="soft"
           onClick={() => setPayment({ userId: user.id, amount: user.balance, note: 'Pagamento paghetta' })}
           disabled={user.balance <= 0}
         >
           Registra pagamento
-        </Button>
+        </Button> : null}
       </Card>)}</div>
 
       <Card>
-        <CardHeader title="Movimenti" subtitle="I pagamenti errati possono essere annullati." />
-        {data.transactions.length ? <div className="transaction-list">
-          {data.transactions.slice().sort((a, b) => b.id - a.id).map(tx => {
-            const user = data.users.find(u => u.id === tx.userId)
-            return <div key={tx.id} className={`transaction-row ${tx.reversed ? 'is-reversed' : ''}`}>
-              <Avatar user={user} size="xs" />
-              <div><strong>{tx.note}</strong><span>{tx.date} · {user?.name}</span></div>
-              <Badge tone={tx.type === 'credit' ? 'success' : tx.type === 'payment' ? 'warning' : 'neutral'}>
-                {tx.type === 'credit' ? '+' : '-'}{money(tx.amount)}
-              </Badge>
-              {tx.type === 'payment' && !tx.reversed
-                ? <IconButton label="Annulla pagamento" onClick={() => undoTransaction(tx.id)}><RotateCcw size={17} /></IconButton>
-                : tx.reversed ? <Badge>Annullato</Badge> : null}
-            </div>
-          })}
+        <CardHeader
+          title={isChild ? 'I miei movimenti' : 'Movimenti'}
+          subtitle={isChild ? 'Accrediti approvati e pagamenti registrati.' : 'I pagamenti errati possono essere annullati.'}
+        />
+        {data.transactions.filter(tx => !isChild || tx.userId === authUser?.id).length ? <div className="transaction-list">
+          {data.transactions
+            .filter(tx => !isChild || tx.userId === authUser?.id)
+            .slice()
+            .sort((a, b) => b.id - a.id)
+            .map(tx => {
+              const user = data.users.find(u => u.id === tx.userId)
+              return <div key={tx.id} className={`transaction-row ${tx.reversed ? 'is-reversed' : ''}`}>
+                <Avatar user={user} size="xs" />
+                <div><strong>{tx.note}</strong><span>{tx.date} · {user?.name}</span></div>
+                <Badge tone={tx.type === 'credit' ? 'success' : tx.type === 'payment' ? 'warning' : 'neutral'}>
+                  {tx.type === 'credit' ? '+' : '-'}{money(tx.amount)}
+                </Badge>
+                {!isChild && tx.type === 'payment' && !tx.reversed
+                  ? <IconButton label="Annulla pagamento" onClick={() => undoTransaction(tx.id)}><RotateCcw size={17} /></IconButton>
+                  : tx.reversed ? <Badge>Annullato</Badge> : null}
+              </div>
+            })}
         </div> : <EmptyState icon={<WalletCards size={28} />} title="Nessun movimento" text="Qui appariranno accrediti e pagamenti." />}
       </Card>
     </div> : null}
 
-    <Modal
+    {!isChild ? <Modal
       open={!!editing}
       onClose={() => setEditing(null)}
       title="Nuovo compito"
@@ -243,13 +349,13 @@ export default function ChoresPage() {
           <input type="number" min="0" step="0.1" value={editing.amount} onChange={e => setEditing({ ...editing, amount: Number(e.target.value) })} />
         </Field>
       </div> : null}
-    </Modal>
+    </Modal> : null}
 
-    <Modal
+    {!isChild ? <Modal
       open={!!recurringEditing}
       onClose={() => setRecurringEditing(null)}
       title={recurringEditing?.id ? 'Modifica compito ricorrente' : 'Nuovo compito ricorrente'}
-      subtitle="La cifra viene accreditata ogni volta che il compito del giorno viene completato."
+      subtitle="L’importo viene accreditato solo dopo la conferma di un adulto."
       footer={<div className="modal-actions"><span /><div className="modal-actions__right">
         <Button variant="ghost" onClick={() => setRecurringEditing(null)}>Annulla</Button>
         <Button onClick={saveRecurring} disabled={!recurringEditing?.weekdays?.length}>Salva</Button>
@@ -269,7 +375,7 @@ export default function ChoresPage() {
             {data.users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </Field>
-        <Field label="Paghetta per completamento">
+        <Field label="Paghetta dopo approvazione">
           <input
             type="number"
             min="0"
@@ -310,9 +416,9 @@ export default function ChoresPage() {
           Attivo: genera automaticamente il compito nei giorni selezionati
         </label>
       </div> : null}
-    </Modal>
+    </Modal> : null}
 
-    <Modal
+    {!isChild ? <Modal
       open={!!payment}
       onClose={() => setPayment(null)}
       title="Registra pagamento"
@@ -326,6 +432,6 @@ export default function ChoresPage() {
         <Field label="Importo"><input type="number" min="0" step="0.1" value={payment.amount} onChange={e => setPayment({ ...payment, amount: Number(e.target.value) })} /></Field>
         <Field label="Nota"><input value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} /></Field>
       </div> : null}
-    </Modal>
+    </Modal> : null}
   </div>
 }
