@@ -178,6 +178,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const suppressNextPushRef = useRef(false)
   const saveTimerRef = useRef<number | null>(null)
   const realtimeChannelRef = useRef<any>(null)
+  const childSyncTimerRef = useRef<number | null>(null)
   const currentCloudUserRef = useRef<any>(null)
   const calendarSyncHashRef = useRef('')
 
@@ -228,20 +229,26 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return { ...safe, users: [...safe.users, linked] }
   }
 
+  async function callFamilyGateway(action: 'read' | 'save', targetFamilyId: string, extra: Record<string, any> = {}) {
+    if (!supabase) throw new Error('Cloud non disponibile.')
+    const { data: result, error } = await supabase.functions.invoke('family-document-gateway', {
+      body: { action, familyId: targetFamilyId, ...extra }
+    })
+    if (error) throw new Error(error.message || 'Gateway famiglia non disponibile.')
+    if (!result?.ok && result?.error !== 'revision_conflict') throw new Error(result?.error || 'Operazione famiglia non autorizzata.')
+    return result
+  }
+
   async function readFamilyDocument(targetFamilyId: string, profile: any, role: string) {
     if (!supabase) return
-    const [{ data: family }, { data: document, error }] = await Promise.all([
-      supabase.from('families').select('id,name').eq('id', targetFamilyId).single(),
-      supabase.from('family_documents').select('family_id,data,revision,updated_at,updated_by').eq('family_id', targetFamilyId).single()
-    ])
-    if (error) throw error
-    const raw = document?.data && Object.keys(document.data).length ? document.data : deepClone(initialData)
-    const linked = linkCloudIdentity(migrateData(raw, deepClone(initialData)), profile, role)
+    const result = await callFamilyGateway('read', targetFamilyId)
+    const raw = result?.data && Object.keys(result.data).length ? result.data : deepClone(initialData)
+    const linked = linkCloudIdentity(migrateData(raw, deepClone(initialData)), profile, result?.role || role)
     calendarSyncHashRef.current = JSON.stringify(linked.calendarEvents || [])
     suppressNextPushRef.current = true
-    revisionRef.current = Number(document?.revision || 0)
+    revisionRef.current = Number(result?.revision || 0)
     setFamilyId(targetFamilyId)
-    setFamilyName(family?.name || 'Famiglia')
+    setFamilyName(result?.family?.name || 'Famiglia')
     setNeedsFamilySetup(false)
     setData(linked)
     setCloudStatus('synced')
@@ -252,11 +259,39 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       supabase.removeChannel(realtimeChannelRef.current)
       realtimeChannelRef.current = null
     }
+    if (childSyncTimerRef.current) {
+      window.clearInterval(childSyncTimerRef.current)
+      childSyncTimerRef.current = null
+    }
   }
 
-  function startRealtime(targetFamilyId: string) {
+  async function refreshChildSnapshot(targetFamilyId: string) {
+    if (!supabase) return
+    try {
+      const result = await callFamilyGateway('read', targetFamilyId)
+      if (!result?.ok || Number(result.revision || 0) <= revisionRef.current) return
+      const user = currentCloudUserRef.current
+      const profile = user ? await fetchProfile(user.id) : null
+      const remote = migrateData(result.data, deepClone(initialData))
+      const linked = user
+        ? linkCloudIdentity(remote, profile || { id: user.id, display_name: user.email?.split('@')[0] }, result.role || 'child')
+        : remote
+      revisionRef.current = Number(result.revision || 0)
+      suppressNextPushRef.current = true
+      setData(linked)
+      setCloudStatus('synced')
+    } catch (error) {
+      console.warn('refreshChildSnapshot', error)
+    }
+  }
+
+  function startRealtime(targetFamilyId: string, role = 'adult') {
     if (!supabase) return
     stopRealtime()
+    if (role === 'child') {
+      childSyncTimerRef.current = window.setInterval(() => void refreshChildSnapshot(targetFamilyId), 15_000)
+      return
+    }
     realtimeChannelRef.current = supabase
       .channel(`family-document-${targetFamilyId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'family_documents', filter: `family_id=eq.${targetFamilyId}` }, async (payload: any) => {
@@ -300,7 +335,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         return
       }
       await readFamilyDocument(membership.family_id, profile, membership.role)
-      startRealtime(membership.family_id)
+      startRealtime(membership.family_id, membership.role)
     } catch (error) {
       console.error('loadCloudContext', error)
       setCloudStatus('error')
@@ -351,35 +386,44 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!supabase || !familyIdRef.current || !cloudUserId) return
     setCloudStatus('saving')
     const expected = revisionRef.current
-    const { data: newRevision, error } = await supabase.rpc('save_family_document', {
-      p_family_id: familyIdRef.current,
-      p_data: cloudSafeData(snapshot),
-      p_expected_revision: expected
-    })
-    if (!error) {
-      revisionRef.current = Number(newRevision || expected + 1)
-      setCloudStatus('synced')
-      const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
-      if (calendarHash !== calendarSyncHashRef.current) {
-        calendarSyncHashRef.current = calendarHash
-        void supabase.functions.invoke('google-calendar-sync', { body: { action: 'sync-all', familyId: familyIdRef.current } }).then(({ error }) => {
-          if (error) console.warn('Google Calendar sync deferred:', error.message)
-        })
+    try {
+      const result = await callFamilyGateway('save', familyIdRef.current, {
+        data: cloudSafeData(snapshot),
+        expectedRevision: expected
+      })
+
+      if (result?.ok) {
+        revisionRef.current = Number(result.revision || expected + 1)
+        if (result.normalized && result.data) {
+          suppressNextPushRef.current = true
+          setData(migrateData(result.data, deepClone(initialData)))
+        }
+        setCloudStatus('synced')
+        const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
+        if (calendarHash !== calendarSyncHashRef.current) {
+          calendarSyncHashRef.current = calendarHash
+          void supabase.functions.invoke('google-calendar-sync', { body: { action: 'sync-all', familyId: familyIdRef.current } }).then(({ error }) => {
+            if (error) console.warn('Google Calendar sync deferred:', error.message)
+          })
+        }
+        return
       }
-      return
-    }
-    if (String(error.message || '').includes('revision_conflict')) {
-      setCloudStatus('conflict')
-      const { data: remote } = await supabase.from('family_documents').select('data,revision').eq('family_id', familyIdRef.current).single()
-      if (remote) {
-        revisionRef.current = Number(remote.revision || 0)
-        suppressNextPushRef.current = true
-        setData(migrateData(remote.data, deepClone(initialData)))
+
+      if (result?.error === 'revision_conflict') {
+        setCloudStatus('conflict')
+        revisionRef.current = Number(result.revision || expected)
+        if (result.data) {
+          suppressNextPushRef.current = true
+          setData(migrateData(result.data, deepClone(initialData)))
+        }
+        return
       }
-      return
+
+      throw new Error(result?.error || 'Salvataggio non autorizzato.')
+    } catch (error) {
+      console.error('family-document-gateway save', error)
+      setCloudStatus('error')
     }
-    console.error('save_family_document', error)
-    setCloudStatus('error')
   }
 
   useEffect(() => {
@@ -461,7 +505,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       setFamilyId(createdId)
       setFamilyName(name.trim())
       setNeedsFamilySetup(false)
-      startRealtime(createdId)
+      startRealtime(createdId, 'admin')
       setCloudStatus('synced')
       return { ok: true }
     } catch (error: any) {
@@ -484,7 +528,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const profile = await fetchProfile(user.id) || { id: user.id, display_name: user.user_metadata?.display_name || user.email?.split('@')[0] }
       const { data: membership } = await supabase.from('family_members').select('role').eq('family_id', joinedId).eq('user_id', user.id).single()
       await readFamilyDocument(joinedId, profile, membership?.role || 'adult')
-      startRealtime(joinedId)
+      startRealtime(joinedId, membership?.role || 'adult')
       setNeedsFamilySetup(false)
       return { ok: true }
     } catch (error: any) {
