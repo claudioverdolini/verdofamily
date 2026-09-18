@@ -418,7 +418,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   showBalances: true,
   bottomTabs: ['home', 'calendar', 'shopping', 'meals'],
   homeCards: ['today', 'shopping', 'deadlines', 'wallets'],
-  notifications: { calendar: true, deadlines: true, chores: true, shopping: false, whatsapp: false }
+  notifications: { calendar: true, deadlines: true, chores: true, school: true, shopping: false, whatsapp: false }
 }
 
 export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
