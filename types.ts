@@ -26,6 +26,7 @@ export type UserPrefs = {
     calendar: boolean
     deadlines: boolean
     chores: boolean
+    school: boolean
     shopping: boolean
     whatsapp: boolean
   }
