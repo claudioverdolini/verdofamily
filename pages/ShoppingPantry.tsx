@@ -152,7 +152,7 @@ export default function ShoppingPantryPage() {
     setPhotoBusy(true)
     setPhotoError('')
     try {
-      const result = await callPantryVision('analyze', photoPayload)
+      const result = await callPantryVision('analyze', { ...photoPayload, locationHint: inventoryDestination })
       const catalog = catalogNames()
       const rows = (result?.items || []).map((item: any, index: number) => {
         const exact = item.matchName && catalog.some(name => normalize(name) === normalize(item.matchName))
@@ -180,6 +180,7 @@ export default function ShoppingPantryPage() {
           qty: Math.max(1, Number(item.qty) || 1),
           unit: item.unit || 'pz',
           category,
+          expiryDate: String(item.expiryDate || ''),
           suggestions
         }
       }).filter((row: any) => row.raw)
@@ -670,6 +671,7 @@ export default function ShoppingPantryPage() {
                     <Field label="Quantità"><input type="number" min="1" value={row.qty} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value) } : x))} /></Field>
                     <Field label="Unità"><select value={row.unit} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
                     {row.mode === 'new' ? <Field label="Categoria"><select value={row.category} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, category: e.target.value } : x))}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field> : null}
+                    <Field label="Scadenza" hint="Solo se visibile/certa"><input type="date" value={row.expiryDate || ''} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, expiryDate: e.target.value } : x))} /></Field>
                   </div> : null}
                 </div>)}
                 <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se un prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
