@@ -1,4 +1,4 @@
-import type { Deadline, FamilyData, FamilyUser, MedicinePackage, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
+import type { Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -24,6 +24,37 @@ export function addDays(dateStr: string, days: number) {
 export function daysInclusive(startDate: string, endDate: string) {
   if (!startDate || !endDate || endDate < startDate) return 0
   return Math.round((parseISODate(endDate).getTime() - parseISODate(startDate).getTime()) / 86400000) + 1
+}
+
+
+export function pantryAverageDailyUse(itemId: number, movements: PantryMovement[], asOfDate = localDateISO(), lookbackDays = 30) {
+  const fromDate = addDays(asOfDate, -Math.max(1, lookbackDays) + 1)
+  const relevant = (movements || []).filter(movement =>
+    Number(movement.pantryItemId) === Number(itemId) &&
+    movement.date >= fromDate &&
+    movement.date <= asOfDate &&
+    Number(movement.delta || 0) < 0
+  )
+  const consumed = relevant.reduce((sum, movement) => sum + Math.abs(Number(movement.delta || 0)), 0)
+  return consumed > 0 ? consumed / Math.max(1, lookbackDays) : 0
+}
+
+export function pantryDaysRemaining(item: PantryItem, movements: PantryMovement[], asOfDate = localDateISO()) {
+  const daily = pantryAverageDailyUse(item.id, movements, asOfDate)
+  if (daily <= 0) return null
+  return Math.max(0, Number(item.qty || 0) / daily)
+}
+
+export function pantryExpiryDays(item: PantryItem, asOfDate = localDateISO()) {
+  if (!item.expiryDate) return null
+  return Math.round((parseISODate(item.expiryDate).getTime() - parseISODate(asOfDate).getTime()) / 86400000)
+}
+
+export function pantryNeedsRestock(item: PantryItem, movements: PantryMovement[], asOfDate = localDateISO()) {
+  const low = Number(item.minQty || 0) > 0 && Number(item.qty || 0) <= Number(item.minQty || 0)
+  const daysRemaining = pantryDaysRemaining(item, movements, asOfDate)
+  const projected = item.autoRestock !== false && daysRemaining !== null && daysRemaining <= 7
+  return low || projected
 }
 
 export function medicineDepletionDate(startDate: string, tabletCount: number, tabletsPerDose: number, dosesPerDay: number) {
@@ -543,7 +574,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 10,
+    version: 11,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -565,7 +596,25 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
     }) : [],
     deadlines: migrateDeadlines(source.deadlines),
     categories: Array.isArray(source.categories) && source.categories.length ? source.categories : fallback.categories,
-    pantry: Array.isArray(source.pantry) ? source.pantry : [],
+    pantry: Array.isArray(source.pantry) ? source.pantry.map((item: any): PantryItem => ({
+      id: Number(item.id),
+      name: String(item.name || 'Prodotto'),
+      qty: Math.max(0, Number(item.qty || 0)),
+      unit: item.unit || 'pz',
+      category: item.category || 'Generico',
+      minQty: item.minQty === undefined || item.minQty === null ? 0 : Math.max(0, Number(item.minQty) || 0),
+      location: ['pantry','fridge','freezer'].includes(String(item.location)) ? item.location : 'pantry',
+      expiryDate: item.expiryDate || undefined,
+      autoRestock: item.autoRestock !== false
+    })) : [],
+    pantryMovements: Array.isArray(source.pantryMovements) ? source.pantryMovements.map((movement: any): PantryMovement => ({
+      id: Number(movement.id),
+      pantryItemId: Number(movement.pantryItemId || 0),
+      delta: Number(movement.delta || 0),
+      date: movement.date || localDateISO(),
+      createdAt: movement.createdAt || new Date().toISOString(),
+      reason: ['manual','purchase','meal','import','adjustment'].includes(String(movement.reason)) ? movement.reason : 'manual'
+    })) : [],
     shopping: Array.isArray(source.shopping) ? source.shopping : [],
     dishes: Array.isArray(source.dishes) ? source.dishes : (Array.isArray(source.meals) ? source.meals : fallback.dishes),
     mealPlans: Array.isArray(source.mealPlans) ? source.mealPlans.map((p: any) => ({ ...p, dishId: Number(p.dishId ?? p.mealId) })) : [],
