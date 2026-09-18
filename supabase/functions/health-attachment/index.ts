@@ -44,6 +44,25 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
+function appUserId(documentData: any, cloudUserId: string) {
+  const users = Array.isArray(documentData?.users) ? documentData.users : [];
+  const user = users.find((item: any) => String(item?.cloudUserId || "") === cloudUserId);
+  return user ? Number(user.id || 0) : 0;
+}
+
+function healthRecord(recordId: string, documentData: any) {
+  const match = recordId.match(/-(\d+)$/);
+  const id = match ? Number(match[1]) : 0;
+  const deadlines = Array.isArray(documentData?.deadlines) ? documentData.deadlines : [];
+  return deadlines.find((item: any) => Number(item?.id) === id) || null;
+}
+
+function childCanAccessRecord(recordId: string, documentData: any, childId: number) {
+  if (!recordId || !childId) return false;
+  const record = healthRecord(recordId, documentData);
+  return !!record && Number(record?.userId || 0) === childId;
+}
+
 function recordInfo(recordId: string, documentData: any) {
   const match = recordId.match(/-(\d+)$/);
   const id = match ? Number(match[1]) : 0;
@@ -119,6 +138,9 @@ Deno.serve(async (req) => {
     const providedCronSecret = req.headers.get("x-cron-secret") || "";
     let serverMode = false;
     let user: any = null;
+    let membershipRole = "";
+    let childAppId = 0;
+    let childDocumentData: any = null;
 
     if (providedCronSecret) {
       const { data: secretRow, error: secretError } = await admin
@@ -171,11 +193,27 @@ Deno.serve(async (req) => {
         .eq("user_id", user.id)
         .maybeSingle();
       if (memberError || !membership) return json({ ok: false, error: "forbidden" }, 403);
+      membershipRole = String(membership.role || "adult");
+
+      if (membershipRole === "child") {
+        const { data: document, error: documentError } = await admin
+          .from("family_documents")
+          .select("data")
+          .eq("family_id", familyId)
+          .single();
+        if (documentError || !document) return json({ ok: false, error: "family_document_not_found" }, 404);
+        childDocumentData = document.data || {};
+        childAppId = appUserId(childDocumentData, user.id);
+        if (!childAppId) return json({ ok: false, error: "child_identity_not_linked" }, 403);
+      }
     }
 
     if (action === "upload") {
       if (serverMode) return json({ ok: false, error: "upload_requires_user" }, 403);
       if (!recordId) return json({ ok: false, error: "record_id_required" }, 400);
+      if (membershipRole === "child" && !childCanAccessRecord(recordId, childDocumentData, childAppId)) {
+        return json({ ok: false, error: "forbidden_health_record" }, 403);
+      }
       if (!file) return json({ ok: false, error: "file_required" }, 400);
       if (file.size <= 0 || file.size > MAX_BYTES) return json({ ok: false, error: "file_too_large" }, 413);
       if (!ALLOWED.has(file.type)) return json({ ok: false, error: "file_type_not_allowed" }, 415);
@@ -210,6 +248,12 @@ Deno.serve(async (req) => {
     }
 
     if (!path || !path.startsWith(`${familyId}/`)) return json({ ok: false, error: "invalid_path" }, 400);
+    const pathRecordId = path.split("/")[1] || "";
+    if (!recordId) recordId = pathRecordId;
+    if (recordId !== pathRecordId) return json({ ok: false, error: "record_path_mismatch" }, 400);
+    if (!serverMode && membershipRole === "child" && !childCanAccessRecord(recordId, childDocumentData, childAppId)) {
+      return json({ ok: false, error: "forbidden_health_record" }, 403);
+    }
 
     if (action === "backup-existing") {
       if (!recordId) return json({ ok: false, error: "record_id_required" }, 400);
