@@ -152,3 +152,20 @@ Dal 18 settembre 2026 i backup famiglia usano il formato v2:
 - Il backup Google Drive usa `schemaVersion: 2` e include sia `data` sia `healthData`.
 
 La separazione è applicata anche dal `family-document-gateway`: un client obsoleto non può reintrodurre dati Salute nel documento famiglia.
+
+
+## Backup v3 — Paghette e movimenti normalizzati
+
+Dal 18 settembre 2026 i backup famiglia usano il formato v3:
+
+- `family_backups.data` contiene il documento famiglia senza Salute e senza dati economici.
+- `family_backups.health_data` contiene la cartella sanitaria normalizzata.
+- `family_backups.finance_data` contiene wallet/saldi, movimenti, compiti remunerati e ricorrenze.
+- `backup_format_version = 3` identifica il formato corrente.
+- I backup storici sono stati convertiti estraendo saldi, `chores`, `recurringChores` e `transactions` dal vecchio JSON.
+- `restore_family_backup` ricostruisce documento famiglia, Salute e Paghette in un'unica operazione protetta.
+- Prima di ogni restore viene creato un backup `pre_restore` v3.
+- Il `family-document-gateway` azzera i saldi e rimuove compiti/movimenti dal documento JSON, quindi un client vecchio non può reintrodurre la vecchia struttura.
+- Il backup Google Drive usa `schemaVersion: 3` e include `data`, `healthData` e `financeData`.
+- Il cron dei compiti ricorrenti scrive direttamente su `finance_chores`, non più nel documento famiglia.
+- I profili child possono leggere soltanto il proprio wallet, i propri movimenti e i propri compiti. Le scritture economiche dirette sulle tabelle sono negate; l'unica modifica child consentita passa dal gateway e riguarda lo stato open/pending dei propri compiti.
