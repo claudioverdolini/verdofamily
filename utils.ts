@@ -1,4 +1,4 @@
-import type { Deadline, FamilyData, FamilyUser, MedicinePackage, TherapyMedicine, UserPrefs } from './types'
+import type { Deadline, FamilyData, FamilyUser, MedicinePackage, RecurringChore, TherapyMedicine, UserPrefs } from './types'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -201,6 +201,47 @@ export function medicineInventorySummary(medicine: Deadline, therapies: Deadline
     shortageDate,
     coverageUntil
   }
+}
+
+
+export function isoWeekday(dateStr: string) {
+  const day = parseISODate(dateStr).getDay()
+  return day === 0 ? 7 : day
+}
+
+export function recurringChoreDueOn(chore: RecurringChore, dateStr: string) {
+  if (!chore.active) return false
+  if (chore.startDate && dateStr < chore.startDate) return false
+  if (chore.endDate && dateStr > chore.endDate) return false
+  const weekdays = Array.isArray(chore.weekdays) ? chore.weekdays.map(Number) : []
+  return weekdays.includes(isoWeekday(dateStr))
+}
+
+export function materializeRecurringChores(data: FamilyData, dateStr = localDateISO()): FamilyData {
+  const templates = Array.isArray(data.recurringChores) ? data.recurringChores : []
+  if (!templates.length) return data
+
+  let chores = data.chores
+  let changed = false
+
+  for (const template of templates) {
+    if (!recurringChoreDueOn(template, dateStr)) continue
+    const alreadyExists = chores.some(chore => Number(chore.recurringChoreId || 0) === Number(template.id) && chore.deadline === dateStr)
+    if (alreadyExists) continue
+
+    chores = [...chores, {
+      id: nextId(chores),
+      title: template.title,
+      deadline: dateStr,
+      userId: Number(template.userId),
+      amount: Math.max(0, Number(template.amount) || 0),
+      done: false,
+      recurringChoreId: Number(template.id)
+    }]
+    changed = true
+  }
+
+  return changed ? { ...data, chores } : data
 }
 
 export function weekDates(dateStr: string) {
@@ -416,7 +457,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 5,
+    version: 6,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -442,7 +483,24 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
     shopping: Array.isArray(source.shopping) ? source.shopping : [],
     dishes: Array.isArray(source.dishes) ? source.dishes : (Array.isArray(source.meals) ? source.meals : fallback.dishes),
     mealPlans: Array.isArray(source.mealPlans) ? source.mealPlans.map((p: any) => ({ ...p, dishId: Number(p.dishId ?? p.mealId) })) : [],
-    chores: Array.isArray(source.chores) ? source.chores : [],
+    chores: Array.isArray(source.chores) ? source.chores.map((chore: any) => ({
+      ...chore,
+      id: Number(chore.id),
+      userId: Number(chore.userId),
+      amount: Math.max(0, Number(chore.amount) || 0),
+      done: !!chore.done,
+      recurringChoreId: chore.recurringChoreId ? Number(chore.recurringChoreId) : undefined
+    })) : [],
+    recurringChores: Array.isArray(source.recurringChores) ? source.recurringChores.map((chore: any): RecurringChore => ({
+      id: Number(chore.id),
+      title: String(chore.title || 'Compito ricorrente'),
+      userId: Number(chore.userId || 0),
+      amount: Math.max(0, Number(chore.amount) || 0),
+      weekdays: Array.from(new Set((Array.isArray(chore.weekdays) ? chore.weekdays : [1, 2, 3, 4, 5, 6, 7]).map(Number).filter((day: number) => day >= 1 && day <= 7))).sort(),
+      active: chore.active !== false,
+      startDate: chore.startDate || localDateISO(),
+      endDate: chore.endDate || undefined
+    })) : [],
     transactions: Array.isArray(source.transactions) ? source.transactions : [],
     todos: Array.isArray(source.todos) ? source.todos.map((t: any) => ({ ...t, createdAt: t.createdAt || localDateISO() })) : []
   }
