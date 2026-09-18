@@ -136,3 +136,19 @@ Every production integration must be represented in GitHub in the same change th
 - frontend changes -> normal application source.
 
 A change is not considered fully backed up until its source/recovery configuration is committed. The source snapshot workflow then archives the updated repository automatically.
+
+
+## Backup v2 — Salute normalizzata
+
+Dal 18 settembre 2026 i backup famiglia usano il formato v2:
+
+- `family_backups.data` contiene il documento famiglia senza visite, terapie, medicinali o referti.
+- `family_backups.health_data` contiene lo snapshot sanitario separato e ripristinabile.
+- `backup_format_version = 2` identifica il nuovo formato.
+- I backup storici precedenti alla migrazione sono stati convertiti estraendo la Salute dal vecchio JSON.
+- `restore_family_backup` ripristina in un'unica transazione sia il documento famiglia sia le tabelle Salute normalizzate.
+- Prima di ogni restore viene creato automaticamente un backup `pre_restore`.
+- I file binari sanitari nel bucket privato non vengono più eliminati fisicamente quando l'utente rimuove l'allegato: viene rimossa l'autorizzazione/metadato applicativo, mentre il file resta privato per consentire un eventuale ripristino storico.
+- Il backup Google Drive usa `schemaVersion: 2` e include sia `data` sia `healthData`.
+
+La separazione è applicata anche dal `family-document-gateway`: un client obsoleto non può reintrodurre dati Salute nel documento famiglia.
