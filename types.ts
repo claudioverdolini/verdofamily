@@ -20,6 +20,7 @@ export type UserPrefs = {
   showBalances: boolean
   bottomTabs: PageKey[]
   homeCards: Array<'today' | 'shopping' | 'deadlines' | 'wallets'>
+  notificationCenterReadIds?: string[]
   notifications: {
     calendar: boolean
     deadlines: boolean
