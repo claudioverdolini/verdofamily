@@ -12,6 +12,7 @@ import {
   LogOut,
   Menu,
   MoreHorizontal,
+  Pin,
   ReceiptText,
   RefreshCw,
   Settings,
@@ -32,6 +33,7 @@ import ShoppingPantryPage from './pages/ShoppingPantry'
 import MealsPage from './pages/Meals'
 import ChoresPage from './pages/Chores'
 import SchoolPage from './pages/School'
+import BoardPage from './pages/Board'
 import HealthPage from './pages/Health'
 import DeadlinesPage from './pages/Deadlines'
 import TodosPage from './pages/Todos'
@@ -45,6 +47,7 @@ const NAV: Array<{ key: PageKey; label: string; icon: React.ReactNode; group?: s
   { key: 'meals', label: 'Pasti', icon: <Utensils size={20} />, group: 'Casa' },
   { key: 'chores', label: 'Compiti & Paghette', icon: <WalletCards size={20} />, group: 'Famiglia' },
   { key: 'school', label: 'Scuola', icon: <GraduationCap size={20} />, group: 'Famiglia' },
+  { key: 'board', label: 'Bacheca', icon: <Pin size={20} />, group: 'Famiglia' },
   { key: 'health', label: 'Salute', icon: <HeartPulse size={20} />, group: 'Famiglia' },
   { key: 'deadlines', label: 'Scadenze', icon: <ReceiptText size={20} />, group: 'Famiglia' },
   { key: 'todos', label: 'Da fare', icon: <CheckSquare2 size={20} />, group: 'Famiglia' },
@@ -60,6 +63,7 @@ function PageRenderer() {
     case 'meals': return <MealsPage />
     case 'chores': return <ChoresPage />
     case 'school': return <SchoolPage />
+    case 'board': return <BoardPage />
     case 'health': return <HealthPage />
     case 'deadlines': return <DeadlinesPage />
     case 'todos': return <TodosPage />
@@ -244,7 +248,7 @@ type AppNotification = {
   page: PageKey
   createdAt: string
   priority: number
-  kind: 'event' | 'deadline' | 'chore' | 'school' | 'stock' | 'system' | 'update'
+  kind: 'event' | 'deadline' | 'chore' | 'school' | 'board' | 'stock' | 'system' | 'update'
   label?: string
 }
 
@@ -307,8 +311,9 @@ function NotificationCenter() {
     todos: JSON.stringify(data.todos),
     routines: JSON.stringify([data.routines, data.routineCompletions]),
     school: JSON.stringify([data.schoolSubjects, data.schoolTimetable, data.schoolItems]),
+    board: JSON.stringify(data.boardPosts),
     inventory: JSON.stringify([data.pantry, data.pantryMovements])
-  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos, data.routines, data.routineCompletions, data.schoolSubjects, data.schoolTimetable, data.schoolItems, data.pantry, data.pantryMovements])
+  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos, data.routines, data.routineCompletions, data.schoolSubjects, data.schoolTimetable, data.schoolItems, data.boardPosts, data.pantry, data.pantryMovements])
 
   useEffect(() => {
     if (!previousHashes.current) {
@@ -325,6 +330,7 @@ function NotificationCenter() {
       { key: 'todos', title: 'Da fare aggiornati', detail: 'La lista delle attività è stata modificata.', page: 'todos' },
       { key: 'routines', title: 'Routine aggiornate', detail: 'Sono cambiate le attività ricorrenti della famiglia.', page: 'todos' },
       { key: 'school', title: 'Scuola aggiornata', detail: 'Ci sono novità su compiti, verifiche, materiale o orario.', page: 'school' },
+      { key: 'board', title: 'Bacheca aggiornata', detail: 'È stato pubblicato o modificato un contenuto per la famiglia.', page: 'board' },
       { key: 'inventory', title: 'Inventario aggiornato', detail: 'Sono cambiate scorte, quantità o scadenze.', page: 'shopping' }
     ]
 
@@ -353,6 +359,40 @@ function NotificationCenter() {
     const today = localDateISO(now)
     const items: AppNotification[] = [...liveUpdates]
     const belongsToUser = (userId?: number) => !userId || userId === authUser.id
+
+    if (authUser.prefs?.notifications?.board !== false) {
+      for (const post of data.boardPosts) {
+        const visibleToUser = post.authorUserId === authUser.id || post.audience === 'family' || (post.userIds || []).includes(authUser.id)
+        if (!visibleToUser || post.authorUserId === authUser.id) continue
+        if (post.type === 'reminder' && post.dueDate) {
+          const diffDays = Math.round((new Date(`${post.dueDate}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000)
+          if (diffDays < 0 || diffDays > 1) continue
+          items.push({
+            id: `board-reminder-${post.id}-${today}`,
+            title: post.title || post.body.slice(0, 70) || 'Promemoria bacheca',
+            detail: diffDays === 0 ? 'Promemoria della bacheca per oggi' : 'Promemoria della bacheca per domani',
+            page: 'board',
+            createdAt: `${today}T07:05:00`,
+            priority: diffDays === 0 ? 83 : 70,
+            kind: 'board',
+            label: diffDays === 0 ? 'Oggi' : 'Domani'
+          })
+          continue
+        }
+        if (post.pinned && post.updatedAt.slice(0, 10) === today) {
+          items.push({
+            id: `board-pinned-${post.id}-${post.updatedAt}`,
+            title: post.title || post.body.slice(0, 70) || 'Nuovo contenuto fissato',
+            detail: 'Nuovo contenuto fissato sulla bacheca familiare',
+            page: 'board',
+            createdAt: post.updatedAt,
+            priority: 62,
+            kind: 'board',
+            label: 'Bacheca'
+          })
+        }
+      }
+    }
 
     for (const event of data.calendarEvents) {
       if (event.date !== today) continue
@@ -586,6 +626,7 @@ function NotificationCenter() {
     if (item.kind === 'deadline') return <ReceiptText size={17} />
     if (item.kind === 'chore') return <CheckSquare2 size={17} />
     if (item.kind === 'school') return <GraduationCap size={17} />
+    if (item.kind === 'board') return <Pin size={17} />
     if (item.kind === 'stock') return <ShoppingBasket size={17} />
     if (item.kind === 'system') return <CloudOff size={17} />
     return <RefreshCw size={17} />
