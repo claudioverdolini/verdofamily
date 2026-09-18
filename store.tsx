@@ -120,6 +120,11 @@ function deepClone<T>(value: T): T {
 }
 
 function loadCachedData(): FamilyData {
+  // In cloud/production mode the family document must never be persisted
+  // as a browser-local authentication fallback. The authoritative copy is
+  // loaded only after Supabase Auth succeeds.
+  if (isSupabaseConfigured) return deepClone(initialData)
+
   try {
     const current = localStorage.getItem(STORAGE_KEY)
     if (current) return migrateData(JSON.parse(current), deepClone(initialData))
@@ -185,6 +190,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   familyIdRef.current = familyId
 
   useEffect(() => {
+    if (isSupabaseConfigured) {
+      // Remove legacy full-family browser caches. Cloud mode keeps the live
+      // document in memory and reloads it after authenticated startup.
+      localStorage.removeItem(STORAGE_KEY)
+      for (const key of LEGACY_KEYS) localStorage.removeItem(key)
+      return
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   }, [data])
 
@@ -366,11 +378,14 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       else {
         stopRealtime()
         currentCloudUserRef.current = null
+        revisionRef.current = 0
+        suppressNextPushRef.current = true
         setCloudUserId(null)
         setCloudEmail('')
         setFamilyId(null)
         setFamilyName('')
         setNeedsFamilySetup(false)
+        setData(deepClone(initialData))
         setCloudLoading(false)
         setCloudStatus('offline')
       }
@@ -441,7 +456,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   async function login(identifier: string, password: string): Promise<AuthResult> {
     const clean = identifier.trim()
-    if (supabase && clean.includes('@')) {
+    if (supabase) {
+      if (!clean.includes('@')) return { ok: false, error: 'Inserisci l’email del tuo account VerdoFamily.' }
       setCloudLoading(true)
       const { error } = await supabase.auth.signInWithPassword({ email: clean, password })
       if (error) {
@@ -451,8 +467,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       setActivePage('home')
       return { ok: true }
     }
+
+    // Local profiles are available only in explicitly offline/dev builds.
     const local = data.users.find(u => normalize(u.name) === normalize(clean) && u.password === password)
-    if (!local) return { ok: false, error: clean.includes('@') ? 'Email o password non corretti.' : 'Nome utente o password non corretti.' }
+    if (!local) return { ok: false, error: 'Nome utente o password non corretti.' }
     setCloudUserId(null)
     setSessionUserId(local.id)
     setActivePage('home')
@@ -462,7 +480,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   async function signUp(email: string, password: string, displayName: string): Promise<AuthResult> {
     if (!supabase) return { ok: false, error: 'Connessione cloud non configurata.' }
     if (!displayName.trim()) return { ok: false, error: 'Inserisci il tuo nome.' }
-    if (password.length < 6) return { ok: false, error: 'La password deve avere almeno 6 caratteri.' }
+    if (password.length < 10) return { ok: false, error: 'La password deve avere almeno 10 caratteri.' }
     setCloudLoading(true)
     const { data: result, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -477,11 +495,15 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   async function logout() {
     if (supabase && cloudUserId) await supabase.auth.signOut()
+    stopRealtime()
+    revisionRef.current = 0
+    suppressNextPushRef.current = true
     setCloudUserId(null)
     setSessionUserId(null)
     setFamilyId(null)
     setFamilyName('')
     setNeedsFamilySetup(false)
+    if (isSupabaseConfigured) setData(deepClone(initialData))
     setActivePage('home')
   }
 
