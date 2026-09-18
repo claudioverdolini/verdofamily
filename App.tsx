@@ -244,7 +244,7 @@ type AppNotification = {
   page: PageKey
   createdAt: string
   priority: number
-  kind: 'event' | 'deadline' | 'chore' | 'stock' | 'system' | 'update'
+  kind: 'event' | 'deadline' | 'chore' | 'school' | 'stock' | 'system' | 'update'
   label?: string
 }
 
@@ -305,8 +305,9 @@ function NotificationCenter() {
     chores: JSON.stringify(data.chores),
     deadlines: JSON.stringify(data.deadlines),
     todos: JSON.stringify(data.todos),
-    routines: JSON.stringify([data.routines, data.routineCompletions])
-  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos, data.routines, data.routineCompletions])
+    routines: JSON.stringify([data.routines, data.routineCompletions]),
+    school: JSON.stringify([data.schoolSubjects, data.schoolTimetable, data.schoolItems])
+  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos, data.routines, data.routineCompletions, data.schoolSubjects, data.schoolTimetable, data.schoolItems])
 
   useEffect(() => {
     if (!previousHashes.current) {
@@ -321,7 +322,8 @@ function NotificationCenter() {
       { key: 'chores', title: 'Compiti aggiornati', detail: 'Sono cambiati compiti o paghette.', page: 'chores' },
       { key: 'deadlines', title: 'Scadenze aggiornate', detail: 'Lo scadenziario familiare è stato modificato.', page: 'deadlines' },
       { key: 'todos', title: 'Da fare aggiornati', detail: 'La lista delle attività è stata modificata.', page: 'todos' },
-      { key: 'routines', title: 'Routine aggiornate', detail: 'Sono cambiate le attività ricorrenti della famiglia.', page: 'todos' }
+      { key: 'routines', title: 'Routine aggiornate', detail: 'Sono cambiate le attività ricorrenti della famiglia.', page: 'todos' },
+      { key: 'school', title: 'Scuola aggiornata', detail: 'Ci sono novità su compiti, verifiche, materiale o orario.', page: 'school' }
     ]
 
     const createdAt = new Date().toISOString()
@@ -435,7 +437,25 @@ function NotificationCenter() {
     }
 
     if (authUser.role !== 'bimbo') {
-      for (const routine of data.routines) {
+      const tomorrow = localDateISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12))
+    for (const schoolItem of data.schoolItems) {
+      if (schoolItem.done || (schoolItem.date !== today && schoolItem.date !== tomorrow)) continue
+      if (authUser.role === 'bimbo' && schoolItem.userId !== authUser.id) continue
+      const student = data.users.find(user => user.id === schoolItem.userId)
+      const isTomorrow = schoolItem.date === tomorrow
+      items.push({
+        id: `school-${schoolItem.id}-${schoolItem.date}`,
+        title: schoolItem.title,
+        detail: `${student?.name || 'Scuola'} · ${isTomorrow ? 'da preparare per domani' : 'previsto per oggi'}`,
+        page: 'school',
+        createdAt: `${today}T07:10:00`,
+        priority: isTomorrow ? 69 : 81,
+        kind: 'school',
+        label: isTomorrow ? 'Domani' : 'Oggi'
+      })
+    }
+
+    for (const routine of data.routines) {
       if (!routineDueOn(routine, today) || routineCompletedOn(data.routineCompletions, routine.id, today)) continue
       if (routine.userId !== authUser.id) continue
       items.push({
@@ -546,6 +566,7 @@ function NotificationCenter() {
     if (item.kind === 'event') return <CalendarDays size={17} />
     if (item.kind === 'deadline') return <ReceiptText size={17} />
     if (item.kind === 'chore') return <CheckSquare2 size={17} />
+    if (item.kind === 'school') return <GraduationCap size={17} />
     if (item.kind === 'stock') return <ShoppingBasket size={17} />
     if (item.kind === 'system') return <CloudOff size={17} />
     return <RefreshCw size={17} />
