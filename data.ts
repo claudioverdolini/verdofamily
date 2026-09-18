@@ -2,7 +2,7 @@ import type { FamilyData } from './types'
 import { DEFAULT_PREFS } from './utils'
 
 export const initialData: FamilyData = {
-  version: 6,
+  version: 8,
   users: [
     {
       id: 1,
@@ -46,5 +46,7 @@ export const initialData: FamilyData = {
   chores: [],
   recurringChores: [],
   transactions: [],
-  todos: []
+  todos: [],
+  routines: [],
+  routineCompletions: []
 }
