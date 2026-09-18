@@ -8,13 +8,14 @@ import type {
   FamilyUser,
   MealPlan,
   PageKey,
+  RecurringChore,
   PantryItem,
   ShoppingItem,
   Todo,
   UserPrefs
 } from './types'
 import { initialData } from './data'
-import { localDateISO, mergePrefs, migrateData, nextId, normalize } from './utils'
+import { localDateISO, materializeRecurringChores, mergePrefs, migrateData, nextId, normalize } from './utils'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
 
 const STORAGE_KEY = 'verdofamily_v3'
@@ -72,6 +73,9 @@ type StoreValue = {
   addChore: (chore: Omit<Chore, 'id' | 'done'>) => void
   toggleChore: (id: number) => void
   deleteChore: (id: number) => void
+  upsertRecurringChore: (chore: Omit<RecurringChore, 'id'> & { id?: number }) => void
+  toggleRecurringChore: (id: number) => void
+  deleteRecurringChore: (id: number) => void
   payUser: (userId: number, amount: number, note?: string) => boolean
   undoTransaction: (id: number) => boolean
   addTodo: (todo: Omit<Todo, 'id' | 'done' | 'createdAt'>) => void
@@ -155,6 +159,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   }, [data])
+
+  useEffect(() => {
+    const ensureToday = () => setData(prev => materializeRecurringChores(prev, localDateISO()))
+    ensureToday()
+    const timer = window.setInterval(ensureToday, 60_000)
+    return () => window.clearInterval(timer)
+  }, [data.recurringChores])
 
   useEffect(() => {
     if (sessionUserId) sessionStorage.setItem(SESSION_KEY, String(sessionUserId))
@@ -625,6 +636,51 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
   function addChore(chore: Omit<Chore, 'id' | 'done'>) { setData(prev => ({ ...prev, chores: [...prev.chores, { ...chore, id: nextId(prev.chores), done: false }] })) }
 
+  function upsertRecurringChore(chore: Omit<RecurringChore, 'id'> & { id?: number }) {
+    setData(prev => {
+      const clean: RecurringChore = {
+        id: chore.id || nextId(prev.recurringChores),
+        title: chore.title.trim(),
+        userId: Number(chore.userId),
+        amount: Math.max(0, Number(chore.amount) || 0),
+        weekdays: Array.from(new Set((chore.weekdays || []).map(Number).filter(day => day >= 1 && day <= 7))).sort(),
+        active: chore.active !== false,
+        startDate: chore.startDate || localDateISO(),
+        endDate: chore.endDate || undefined
+      }
+      if (!clean.title || !clean.weekdays.length) return prev
+
+      let next: FamilyData = {
+        ...prev,
+        recurringChores: chore.id
+          ? prev.recurringChores.map(item => item.id === chore.id ? clean : item)
+          : [...prev.recurringChores, clean]
+      }
+
+      const today = localDateISO()
+      next = {
+        ...next,
+        chores: next.chores.map(item =>
+          item.recurringChoreId === clean.id && item.deadline === today && !item.done
+            ? { ...item, title: clean.title, userId: clean.userId, amount: clean.amount }
+            : item
+        )
+      }
+      return materializeRecurringChores(next, today)
+    })
+  }
+
+  function toggleRecurringChore(id: number) {
+    setData(prev => ({
+      ...prev,
+      recurringChores: prev.recurringChores.map(item => item.id === id ? { ...item, active: !item.active } : item)
+    }))
+  }
+
+  function deleteRecurringChore(id: number) {
+    setData(prev => ({ ...prev, recurringChores: prev.recurringChores.filter(item => item.id !== id) }))
+  }
+
   function toggleChore(id: number) {
     setData(prev => {
       const chore = prev.chores.find(c => c.id === id)
@@ -697,7 +753,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertPantryItem, deletePantryItem, changePantryQty,
     addShoppingItem, toggleShoppingItem, deleteShoppingItem, moveTakenShoppingToPantry, importReceiptItems,
     upsertDish, deleteDish, upsertMealPlan, deleteMealPlan,
-    addChore, toggleChore, deleteChore, payUser, undoTransaction,
+    addChore, toggleChore, deleteChore, upsertRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
     addTodo, toggleTodo, deleteTodo,
     exportData, importData, resetData
   }
