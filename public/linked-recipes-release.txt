@@ -1,0 +1,3 @@
+VerdoFamily linked recipes module
+Release: 2026-09-18
+Features: recipe links, planner integration, pantry comparison, shopping generation
