@@ -112,12 +112,28 @@ Future refinements:
 - Dietary rules/allergens if the family wants to maintain them.
 - AI-generated new recipe ideas in addition to the existing family recipe catalog.
 
-## Next features to develop
+## Current priority completed
 
 ### 7. Family notice board
-- Pinned notes, reminders, photos and quick family messages.
-- Prominent visibility on the household tablet Home screen.
-- Examples: items to bring, pickups, quick household notices.
+Status: **implemented — first version**
+
+Implemented:
+- Family notice board with notes, quick messages, reminders and photo posts.
+- Pinned content that stays prominent on the household tablet.
+- Quick family-message composer directly in the board.
+- Family-wide or selected-member visibility.
+- Per-user permissions: children can manage their own posts; adults can manage and pin all family content.
+- Reminder dates with in-app alerts for today / tomorrow.
+- Private cloud photo storage with temporary signed URLs rather than permanent public links.
+- Home / Command Center integration showing pinned content and near-term board reminders.
+- Configurable mobile shortcut and notification preference.
+
+Future refinements:
+- Optional reactions / acknowledgements (“seen”, “done”).
+- Automatic archive rules for old notices if the board becomes crowded.
+- Telegram inclusion if useful for selected pinned notices.
+
+## Next features to develop
 
 ### 8. Holidays and travel organizer
 - Trips, reservations, documents, itinerary and activities.
