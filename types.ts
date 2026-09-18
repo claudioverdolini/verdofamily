@@ -164,6 +164,8 @@ export type MealPlan = {
   dishId: number
 }
 
+export type ChoreStatus = 'open' | 'pending' | 'approved'
+
 export type Chore = {
   id: number
   title: string
@@ -171,6 +173,11 @@ export type Chore = {
   userId: number
   amount: number
   done: boolean
+  completionStatus?: ChoreStatus
+  completedAt?: string
+  completedByUserId?: number
+  approvedAt?: string
+  approvedByUserId?: number
   creditedTransactionId?: number
   recurringChoreId?: number
 }
