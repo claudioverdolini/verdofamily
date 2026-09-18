@@ -72,6 +72,8 @@ type StoreValue = {
   deleteMealPlan: (id: number) => void
   addChore: (chore: Omit<Chore, 'id' | 'done'>) => void
   toggleChore: (id: number) => void
+  approveChore: (id: number) => void
+  rejectChore: (id: number) => void
   deleteChore: (id: number) => void
   upsertRecurringChore: (chore: Omit<RecurringChore, 'id'> & { id?: number }) => void
   toggleRecurringChore: (id: number) => void
@@ -634,9 +636,21 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     })
   }
 
-  function addChore(chore: Omit<Chore, 'id' | 'done'>) { setData(prev => ({ ...prev, chores: [...prev.chores, { ...chore, id: nextId(prev.chores), done: false }] })) }
+  function addChore(chore: Omit<Chore, 'id' | 'done'>) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => ({
+      ...prev,
+      chores: [...prev.chores, {
+        ...chore,
+        id: nextId(prev.chores),
+        done: false,
+        completionStatus: 'open'
+      }]
+    }))
+  }
 
   function upsertRecurringChore(chore: Omit<RecurringChore, 'id'> & { id?: number }) {
+    if (authUser?.role === 'bimbo') return
     setData(prev => {
       const clean: RecurringChore = {
         id: chore.id || nextId(prev.recurringChores),
@@ -671,6 +685,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function toggleRecurringChore(id: number) {
+    if (authUser?.role === 'bimbo') return
     setData(prev => ({
       ...prev,
       recurringChores: prev.recurringChores.map(item => item.id === id ? { ...item, active: !item.active } : item)
@@ -678,25 +693,130 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function deleteRecurringChore(id: number) {
+    if (authUser?.role === 'bimbo') return
     setData(prev => ({ ...prev, recurringChores: prev.recurringChores.filter(item => item.id !== id) }))
   }
 
+  function approveChoreState(prev: FamilyData, chore: Chore, approverId: number) {
+    if (chore.done) return prev
+    const txId = nextId(prev.transactions)
+    const now = new Date().toISOString()
+    return {
+      ...prev,
+      chores: prev.chores.map(c => c.id === chore.id ? {
+        ...c,
+        done: true,
+        completionStatus: 'approved',
+        completedAt: c.completedAt || now,
+        completedByUserId: c.completedByUserId || chore.userId,
+        approvedAt: now,
+        approvedByUserId: approverId,
+        creditedTransactionId: txId
+      } : c),
+      users: prev.users.map(u => u.id === chore.userId
+        ? { ...u, balance: Number(u.balance || 0) + Number(chore.amount || 0) }
+        : u),
+      transactions: [...prev.transactions, {
+        id: txId,
+        userId: chore.userId,
+        type: 'credit' as const,
+        amount: Number(chore.amount || 0),
+        date: localDateISO(),
+        note: `Compito approvato: ${chore.title}`
+      }]
+    }
+  }
+
   function toggleChore(id: number) {
+    if (!authUser) return
     setData(prev => {
       const chore = prev.chores.find(c => c.id === id)
       if (!chore) return prev
-      if (!chore.done) {
-        const txId = nextId(prev.transactions)
-        return { ...prev, chores: prev.chores.map(c => c.id === id ? { ...c, done: true, creditedTransactionId: txId } : c), users: prev.users.map(u => u.id === chore.userId ? { ...u, balance: Number(u.balance || 0) + Number(chore.amount || 0) } : u), transactions: [...prev.transactions, { id: txId, userId: chore.userId, type: 'credit', amount: Number(chore.amount || 0), date: localDateISO(), note: `Compito: ${chore.title}` }] }
+      const status = chore.done ? 'approved' : (chore.completionStatus || 'open')
+
+      if (authUser.role === 'bimbo') {
+        if (chore.userId !== authUser.id || chore.done) return prev
+        if (status === 'pending') {
+          if (chore.completedByUserId && chore.completedByUserId !== authUser.id) return prev
+          return {
+            ...prev,
+            chores: prev.chores.map(c => c.id === id ? {
+              ...c,
+              completionStatus: 'open',
+              completedAt: undefined,
+              completedByUserId: undefined
+            } : c)
+          }
+        }
+        return {
+          ...prev,
+          chores: prev.chores.map(c => c.id === id ? {
+            ...c,
+            completionStatus: 'pending',
+            completedAt: new Date().toISOString(),
+            completedByUserId: authUser.id
+          } : c)
+        }
       }
+
+      if (!chore.done) return approveChoreState(prev, chore, authUser.id)
+
       const txId = chore.creditedTransactionId
-      return { ...prev, chores: prev.chores.map(c => c.id === id ? { ...c, done: false, creditedTransactionId: undefined } : c), users: prev.users.map(u => u.id === chore.userId ? { ...u, balance: Math.max(0, Number(u.balance || 0) - Number(chore.amount || 0)) } : u), transactions: txId ? prev.transactions.map(t => t.id === txId ? { ...t, reversed: true } : t) : prev.transactions }
+      return {
+        ...prev,
+        chores: prev.chores.map(c => c.id === id ? {
+          ...c,
+          done: false,
+          completionStatus: 'open',
+          completedAt: undefined,
+          completedByUserId: undefined,
+          approvedAt: undefined,
+          approvedByUserId: undefined,
+          creditedTransactionId: undefined
+        } : c),
+        users: prev.users.map(u => u.id === chore.userId
+          ? { ...u, balance: Math.max(0, Number(u.balance || 0) - Number(chore.amount || 0)) }
+          : u),
+        transactions: txId
+          ? prev.transactions.map(t => t.id === txId ? { ...t, reversed: true } : t)
+          : prev.transactions
+      }
     })
   }
 
-  function deleteChore(id: number) { setData(prev => ({ ...prev, chores: prev.chores.filter(c => c.id !== id) })) }
+  function approveChore(id: number) {
+    if (!authUser || authUser.role === 'bimbo') return
+    setData(prev => {
+      const chore = prev.chores.find(c => c.id === id)
+      if (!chore || chore.done) return prev
+      return approveChoreState(prev, chore, authUser.id)
+    })
+  }
+
+  function rejectChore(id: number) {
+    if (!authUser || authUser.role === 'bimbo') return
+    setData(prev => {
+      const chore = prev.chores.find(c => c.id === id)
+      if (!chore || chore.done || chore.completionStatus !== 'pending') return prev
+      return {
+        ...prev,
+        chores: prev.chores.map(c => c.id === id ? {
+          ...c,
+          completionStatus: 'open',
+          completedAt: undefined,
+          completedByUserId: undefined
+        } : c)
+      }
+    })
+  }
+
+  function deleteChore(id: number) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => ({ ...prev, chores: prev.chores.filter(c => c.id !== id) }))
+  }
 
   function payUser(userId: number, amount: number, note = 'Pagamento paghetta') {
+    if (authUser?.role === 'bimbo') return false
     let ok = false
     setData(prev => {
       const user = prev.users.find(u => u.id === userId)
@@ -708,6 +828,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function undoTransaction(id: number) {
+    if (authUser?.role === 'bimbo') return false
     let ok = false
     setData(prev => {
       const tx = prev.transactions.find(t => t.id === id)
@@ -753,7 +874,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertPantryItem, deletePantryItem, changePantryQty,
     addShoppingItem, toggleShoppingItem, deleteShoppingItem, moveTakenShoppingToPantry, importReceiptItems,
     upsertDish, deleteDish, upsertMealPlan, deleteMealPlan,
-    addChore, toggleChore, deleteChore, upsertRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
+    addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
     addTodo, toggleTodo, deleteTodo,
     exportData, importData, resetData
   }
