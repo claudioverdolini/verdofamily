@@ -7,6 +7,7 @@ export type PageKey =
   | 'shopping'
   | 'meals'
   | 'chores'
+  | 'school'
   | 'health'
   | 'deadlines'
   | 'todos'
@@ -240,6 +241,39 @@ export type RoutineCompletion = {
   completedByUserId: number
 }
 
+export type SchoolSubject = {
+  id: number
+  name: string
+  shortName?: string
+}
+
+export type SchoolTimetableEntry = {
+  id: number
+  userId: number
+  weekday: number
+  order: number
+  subjectId: number
+  startTime?: string
+  endTime?: string
+  room?: string
+  notes?: string
+}
+
+export type SchoolItemType = 'homework' | 'test' | 'oral' | 'material' | 'circular' | 'permission' | 'trip' | 'payment'
+
+export type SchoolItem = {
+  id: number
+  userId: number
+  type: SchoolItemType
+  title: string
+  date: string
+  subjectId?: number
+  notes?: string
+  amount?: number
+  done: boolean
+  createdAt: string
+}
+
 export type FamilyData = {
   version: number
   users: FamilyUser[]
@@ -256,4 +290,7 @@ export type FamilyData = {
   todos: Todo[]
   routines: Routine[]
   routineCompletions: RoutineCompletion[]
+  schoolSubjects: SchoolSubject[]
+  schoolTimetable: SchoolTimetableEntry[]
+  schoolItems: SchoolItem[]
 }
