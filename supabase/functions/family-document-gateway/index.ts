@@ -54,6 +54,48 @@ function stripSensitiveData(value: any) {
   return stripFinanceData(stripHealthData(value));
 }
 
+function mergeFinanceSnapshot(base: any, finance: any) {
+  const data = stripPasswords(base);
+  if (!finance || typeof finance !== "object") return data;
+  const wallets = array(finance.wallets);
+  const balances = new Map(wallets.map((wallet: any) => [n(wallet?.userId), Number(wallet?.balance || 0)]));
+  data.users = array(data.users).map((user: any) =>
+    balances.has(n(user?.id)) ? { ...user, balance: Number(balances.get(n(user?.id)) || 0), password: "" } : user
+  );
+  data.chores = array(finance.chores);
+  data.recurringChores = array(finance.recurringChores);
+  data.transactions = array(finance.transactions);
+  return data;
+}
+
+async function callFinanceGateway(
+  supabaseUrl: string,
+  anonKey: string,
+  authHeader: string,
+  action: "read" | "sync",
+  familyId: string,
+  payload?: any
+) {
+  const response = await fetch(`${supabaseUrl}/functions/v1/finance-data-gateway`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": authHeader,
+      "apikey": anonKey
+    },
+    body: JSON.stringify({
+      action,
+      familyId,
+      ...(action === "sync" ? { data: payload || {} } : {})
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result?.ok !== true) {
+    throw new Error(String(result?.error || `finance_gateway_http_${response.status}`));
+  }
+  return result;
+}
+
 function participants(event: any) {
   const ids = array(event?.userIds).map(n).filter(Boolean);
   if (ids.length) return ids;
@@ -256,6 +298,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const admin = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
 
     const authHeader = req.headers.get("authorization") || "";
@@ -293,7 +336,17 @@ Deno.serve(async (req) => {
     if (role === "child" && !childId) return json({ ok: false, error: "child_identity_not_linked" }, 403);
 
     if (action === "read") {
-      const output = role === "child" ? redactForChild(fullData, childId) : fullData;
+      let output = role === "child" ? redactForChild(fullData, childId) : fullData;
+      try {
+        const finance = await callFinanceGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        output = mergeFinanceSnapshot(output, finance);
+      } catch (financeError) {
+        console.warn("family_gateway_finance_read_fallback", {
+          familyId,
+          userId: user.id,
+          reason: financeError instanceof Error ? financeError.message : String(financeError)
+        });
+      }
       return json({
         ok: true,
         family: { id: family.id, name: family.name },
@@ -316,7 +369,13 @@ Deno.serve(async (req) => {
     if (encoded.byteLength > MAX_DOCUMENT_BYTES) return json({ ok: false, error: "document_too_large" }, 413);
 
     if (Number(document.revision || 0) !== expectedRevision) {
-      const latest = role === "child" ? redactForChild(fullData, childId) : fullData;
+      let latest = role === "child" ? redactForChild(fullData, childId) : fullData;
+      try {
+        const finance = await callFinanceGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        latest = mergeFinanceSnapshot(latest, finance);
+      } catch {
+        // Family revision conflict remains actionable even if finance refresh is temporarily unavailable.
+      }
       return json({
         ok: false,
         error: "revision_conflict",
@@ -325,9 +384,21 @@ Deno.serve(async (req) => {
       });
     }
 
+    const normalizedClient = incoming?.storageModel === "normalized-v1";
+    if (!normalizedClient) {
+      try {
+        await callFinanceGateway(supabaseUrl, anonKey, authHeader, "sync", familyId, incoming);
+      } catch (financeError) {
+        const message = financeError instanceof Error ? financeError.message : "finance_sync_failed";
+        console.warn("legacy_finance_sync_denied", { familyId, userId: user.id, role, reason: message });
+        return json({ ok: false, error: message }, 403);
+      }
+    }
+
     let nextData: any;
     try {
-      nextData = stripSensitiveData(role === "child" ? mergeChildChanges(fullData, incoming, childId) : incoming);
+      const familyIncoming = stripFinanceData(incoming);
+      nextData = stripSensitiveData(role === "child" ? mergeChildChanges(fullData, familyIncoming, childId) : familyIncoming);
     } catch (validationError) {
       const message = validationError instanceof Error ? validationError.message : "forbidden_change";
       console.warn("family_document_save_denied", { familyId, userId: user.id, role, reason: message });
@@ -355,18 +426,38 @@ Deno.serve(async (req) => {
         .select("data,revision")
         .eq("family_id", familyId)
         .single();
+      let latestOutput = role === "child"
+        ? redactForChild(stripSensitiveData(latest?.data || {}), childId)
+        : stripSensitiveData(latest?.data || {});
+      try {
+        const finance = await callFinanceGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        latestOutput = mergeFinanceSnapshot(latestOutput, finance);
+      } catch {
+        // Keep the family conflict response usable even during a temporary finance outage.
+      }
       return json({
         ok: false,
         error: "revision_conflict",
         revision: Number(latest?.revision || expectedRevision),
-        data: role === "child" ? redactForChild(latest?.data || {}, childId) : stripPasswords(latest?.data || {})
+        data: latestOutput
       });
+    }
+
+    let normalizedData: any = undefined;
+    if (role === "child") {
+      normalizedData = redactForChild(nextData, childId);
+      try {
+        const finance = await callFinanceGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        normalizedData = mergeFinanceSnapshot(normalizedData, finance);
+      } catch {
+        // The child save itself succeeded; polling will refresh finance if needed.
+      }
     }
 
     return json({
       ok: true,
       revision: Number(updated.revision || nextRevision),
-      data: role === "child" ? redactForChild(nextData, childId) : undefined,
+      data: normalizedData,
       normalized: role === "child"
     });
   } catch (error) {
