@@ -10,6 +10,9 @@ import type {
   PageKey,
   RecurringChore,
   Routine,
+  SchoolItem,
+  SchoolSubject,
+  SchoolTimetableEntry,
   PantryItem,
   ShoppingItem,
   Todo,
@@ -89,6 +92,13 @@ type StoreValue = {
   deleteRoutine: (id: number) => void
   completeRoutine: (id: number, date?: string) => void
   undoRoutineCompletion: (routineId: number, date: string) => void
+  upsertSchoolSubject: (subject: Omit<SchoolSubject, 'id'> & { id?: number }) => void
+  deleteSchoolSubject: (id: number) => void
+  upsertSchoolTimetableEntry: (entry: Omit<SchoolTimetableEntry, 'id'> & { id?: number }) => void
+  deleteSchoolTimetableEntry: (id: number) => void
+  upsertSchoolItem: (item: Omit<SchoolItem, 'id' | 'done' | 'createdAt'> & { id?: number; done?: boolean; createdAt?: string }) => void
+  toggleSchoolItem: (id: number) => void
+  deleteSchoolItem: (id: number) => void
   exportData: () => string
   importData: (raw: string) => boolean
   resetData: () => void
@@ -952,6 +962,107 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     })
   }
 
+  function upsertSchoolSubject(subject: Omit<SchoolSubject, 'id'> & { id?: number }) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => {
+      const clean: SchoolSubject = {
+        id: subject.id || nextId(prev.schoolSubjects),
+        name: subject.name.trim(),
+        shortName: subject.shortName?.trim() || undefined
+      }
+      if (!clean.name) return prev
+      return {
+        ...prev,
+        schoolSubjects: subject.id
+          ? prev.schoolSubjects.map(item => item.id === subject.id ? clean : item)
+          : [...prev.schoolSubjects, clean]
+      }
+    })
+  }
+
+  function deleteSchoolSubject(id: number) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => ({
+      ...prev,
+      schoolSubjects: prev.schoolSubjects.filter(item => item.id !== id),
+      schoolTimetable: prev.schoolTimetable.filter(item => item.subjectId !== id),
+      schoolItems: prev.schoolItems.map(item => item.subjectId === id ? { ...item, subjectId: undefined } : item)
+    }))
+  }
+
+  function upsertSchoolTimetableEntry(entry: Omit<SchoolTimetableEntry, 'id'> & { id?: number }) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => {
+      const clean: SchoolTimetableEntry = {
+        id: entry.id || nextId(prev.schoolTimetable),
+        userId: Number(entry.userId),
+        weekday: Math.min(7, Math.max(1, Number(entry.weekday || 1))),
+        order: Math.max(1, Number(entry.order || 1)),
+        subjectId: Number(entry.subjectId),
+        startTime: entry.startTime || undefined,
+        endTime: entry.endTime || undefined,
+        room: entry.room?.trim() || undefined,
+        notes: entry.notes?.trim() || undefined
+      }
+      return {
+        ...prev,
+        schoolTimetable: entry.id
+          ? prev.schoolTimetable.map(item => item.id === entry.id ? clean : item)
+          : [...prev.schoolTimetable, clean]
+      }
+    })
+  }
+
+  function deleteSchoolTimetableEntry(id: number) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => ({ ...prev, schoolTimetable: prev.schoolTimetable.filter(item => item.id !== id) }))
+  }
+
+  function upsertSchoolItem(item: Omit<SchoolItem, 'id' | 'done' | 'createdAt'> & { id?: number; done?: boolean; createdAt?: string }) {
+    if (authUser?.role === 'bimbo' && Number(item.userId) !== authUser.id) return
+    setData(prev => {
+      const clean: SchoolItem = {
+        id: item.id || nextId(prev.schoolItems),
+        userId: Number(item.userId),
+        type: item.type,
+        title: item.title.trim(),
+        date: item.date || localDateISO(),
+        subjectId: item.subjectId ? Number(item.subjectId) : undefined,
+        notes: item.notes?.trim() || undefined,
+        amount: item.amount === undefined || item.amount === null ? undefined : Math.max(0, Number(item.amount) || 0),
+        done: !!item.done,
+        createdAt: item.createdAt || localDateISO()
+      }
+      if (!clean.title) return prev
+      return {
+        ...prev,
+        schoolItems: item.id
+          ? prev.schoolItems.map(existing => existing.id === item.id ? clean : existing)
+          : [...prev.schoolItems, clean]
+      }
+    })
+  }
+
+  function toggleSchoolItem(id: number) {
+    if (!authUser) return
+    setData(prev => {
+      const target = prev.schoolItems.find(item => item.id === id)
+      if (!target) return prev
+      if (authUser.role === 'bimbo' && target.userId !== authUser.id) return prev
+      return { ...prev, schoolItems: prev.schoolItems.map(item => item.id === id ? { ...item, done: !item.done } : item) }
+    })
+  }
+
+  function deleteSchoolItem(id: number) {
+    if (!authUser) return
+    setData(prev => {
+      const target = prev.schoolItems.find(item => item.id === id)
+      if (!target) return prev
+      if (authUser.role === 'bimbo' && target.userId !== authUser.id) return prev
+      return { ...prev, schoolItems: prev.schoolItems.filter(item => item.id !== id) }
+    })
+  }
+
   function exportData() { return JSON.stringify(data, null, 2) }
   function importData(raw: string) {
     try {
@@ -986,6 +1097,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
     addTodo, toggleTodo, deleteTodo,
     upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
+    upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
     exportData, importData, resetData
   }
 
