@@ -734,7 +734,69 @@ textarea,
 @media (min-width:821px) and (max-width:1180px){.settings-flow{gap:20px}.settings-section__head p{max-width:430px}.settings-unified-card{padding:15px}.settings-subsection{padding-left:14px;padding-right:14px}.settings-toggle-list--grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:820px){.settings-flow{gap:18px}.settings-section{gap:9px}.settings-section__head{display:block;padding:0 2px}.settings-section__head p{margin-top:4px;max-width:none;text-align:left}.settings-unified-grid--identity,.settings-unified-grid--daily{grid-template-columns:minmax(0,1fr)}.settings-subsection,.settings-subsection:first-child,.settings-subsection:nth-child(2){padding:6px 0 14px}.settings-subsection+.settings-subsection{border-left:0;border-top:1px solid var(--border);padding-top:16px}.settings-subsection--wide{margin-top:0}.settings-toggle-list--grid{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:520px){.settings-unified-card{padding:12px}.settings-check-grid--compact{grid-template-columns:minmax(0,1fr)}.settings-section__head h2{font-size:16px}}
-\n\n/* Pantry photo recognition */\n.scan-mode-switch {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 14px;\n  margin-bottom: 14px;\n  padding: 10px 12px;\n  border: 1px solid var(--border);\n  border-radius: 16px;\n  background: var(--surface);\n}\n.scan-mode-switch > span {\n  color: var(--muted);\n  font-size: 10px;\n  text-align: right;\n}\n.pantry-photo-drop {\n  min-height: 230px;\n  overflow: hidden;\n}\n.pantry-photo-drop img {\n  display: block;\n  width: min(100%, 520px);\n  max-height: 330px;\n  object-fit: contain;\n  border-radius: 14px;\n  margin-bottom: 8px;\n}\n.vision-loading {\n  min-height: 230px;\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  gap: 7px;\n  color: var(--muted);\n  text-align: center;\n}\n.vision-loading svg { color: var(--accent); }\n.vision-loading strong { color: var(--text); font-size: 13px; }\n.vision-loading span { font-size: 10px; }\n.vision-summary {\n  display: flex;\n  align-items: baseline;\n  justify-content: space-between;\n  gap: 10px;\n  padding: 3px 2px 8px;\n}\n.vision-summary strong { font-size: 12px; }\n.vision-summary span { color: var(--muted); font-size: 9px; }\n.receipt-match__head small { color: var(--muted); font-weight: 500; }\n\n@media (max-width: 820px) {\n  .scan-mode-switch { align-items: stretch; flex-direction: column; }\n  .scan-mode-switch .segmented { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }\n  .scan-mode-switch > span { text-align: left; }\n  .pantry-photo-drop { min-height: 190px; }\n  .vision-summary { align-items: flex-start; flex-direction: column; }\n}\n
+
+
+/* Pantry photo recognition */
+.scan-mode-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.scan-mode-switch > span {
+  color: var(--muted);
+  font-size: 10px;
+  text-align: right;
+}
+.pantry-photo-drop {
+  min-height: 230px;
+  overflow: hidden;
+}
+.pantry-photo-drop img {
+  display: block;
+  width: min(100%, 520px);
+  max-height: 330px;
+  object-fit: contain;
+  border-radius: 14px;
+  margin-bottom: 8px;
+}
+.vision-loading {
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--muted);
+  text-align: center;
+}
+.vision-loading svg { color: var(--accent); }
+.vision-loading strong { color: var(--text); font-size: 13px; }
+.vision-loading span { font-size: 10px; }
+.vision-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 2px 8px;
+}
+.vision-summary strong { font-size: 12px; }
+.vision-summary span { color: var(--muted); font-size: 9px; }
+.receipt-match__head small { color: var(--muted); font-weight: 500; }
+
+@media (max-width: 820px) {
+  .scan-mode-switch { align-items: stretch; flex-direction: column; }
+  .scan-mode-switch .segmented { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scan-mode-switch > span { text-align: left; }
+  .pantry-photo-drop { min-height: 190px; }
+  .vision-summary { align-items: flex-start; flex-direction: column; }
+}
+
 
 /* Camera + gallery chooser */
 .image-source-grid {
