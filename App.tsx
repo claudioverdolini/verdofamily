@@ -24,7 +24,7 @@ import { FamilyProvider, useFamily } from './store'
 import type { PageKey } from './types'
 import { Avatar, Button, IconButton } from './ui'
 import { supabase } from './supabaseClient'
-import { localDateISO } from './utils'
+import { localDateISO, routineCompletedOn, routineDueOn } from './utils'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/Calendar'
 import ShoppingPantryPage from './pages/ShoppingPantry'
@@ -300,8 +300,9 @@ function NotificationCenter() {
     meals: JSON.stringify(data.mealPlans),
     chores: JSON.stringify(data.chores),
     deadlines: JSON.stringify(data.deadlines),
-    todos: JSON.stringify(data.todos)
-  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos])
+    todos: JSON.stringify(data.todos),
+    routines: JSON.stringify([data.routines, data.routineCompletions])
+  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos, data.routines, data.routineCompletions])
 
   useEffect(() => {
     if (!previousHashes.current) {
@@ -315,7 +316,8 @@ function NotificationCenter() {
       { key: 'meals', title: 'Programma pasti aggiornato', detail: 'È cambiata la pianificazione dei pasti.', page: 'meals' },
       { key: 'chores', title: 'Compiti aggiornati', detail: 'Sono cambiati compiti o paghette.', page: 'chores' },
       { key: 'deadlines', title: 'Scadenze aggiornate', detail: 'Lo scadenziario familiare è stato modificato.', page: 'deadlines' },
-      { key: 'todos', title: 'Da fare aggiornati', detail: 'La lista delle attività è stata modificata.', page: 'todos' }
+      { key: 'todos', title: 'Da fare aggiornati', detail: 'La lista delle attività è stata modificata.', page: 'todos' },
+      { key: 'routines', title: 'Routine aggiornate', detail: 'Sono cambiate le attività ricorrenti della famiglia.', page: 'todos' }
     ]
 
     const createdAt = new Date().toISOString()
@@ -416,7 +418,22 @@ function NotificationCenter() {
     }
 
     if (authUser.role !== 'bimbo') {
-      for (const chore of data.chores) {
+      for (const routine of data.routines) {
+      if (!routineDueOn(routine, today) || routineCompletedOn(data.routineCompletions, routine.id, today)) continue
+      if (routine.userId !== authUser.id) continue
+      items.push({
+        id: `routine-${routine.id}-${today}`,
+        title: routine.title,
+        detail: 'Routine prevista per oggi',
+        page: 'todos',
+        createdAt: `${today}T07:15:00`,
+        priority: 72,
+        kind: 'chore',
+        label: 'Routine'
+      })
+    }
+
+    for (const chore of data.chores) {
         if (chore.done || chore.completionStatus !== 'pending') continue
         const child = data.users.find(user => user.id === chore.userId)
         items.push({
