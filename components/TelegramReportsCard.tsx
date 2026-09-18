@@ -42,7 +42,7 @@ const SECTION_OPTIONS: Array<{ key: SectionKey; label: string; hint: string }> =
   { key: 'agenda', label: 'Impegni', hint: 'Calendario del giorno' },
   { key: 'meals', label: 'Pasti', hint: 'Programma pranzo/cena' },
   { key: 'shopping', label: 'Lista spesa', hint: 'Articoli ancora da comprare' },
-  { key: 'lowStock', label: 'Sotto scorta', hint: 'Prodotti dispensa sotto il minimo' },
+  { key: 'lowStock', label: 'Scorte & scadenze', hint: 'Prodotti da reintegrare o consumare presto' },
   { key: 'deadlines', label: 'Scadenze', hint: 'Scadenze previste nel giorno' },
   { key: 'todos', label: 'ToDo', hint: 'Attività ancora aperte' },
   { key: 'chores', label: 'Compiti', hint: 'Compiti/paghette in scadenza' },
