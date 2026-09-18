@@ -181,6 +181,9 @@ export type Dish = {
   ingredients: Ingredient[]
   prepMinutes?: number
   preferredByUserIds?: number[]
+  sourceUrl?: string
+  sourceLabel?: string
+  notes?: string
 }
 
 export type MealPlan = {
