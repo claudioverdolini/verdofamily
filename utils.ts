@@ -580,6 +580,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
     version: 12,
+    storageModel: source.storageModel === 'normalized-v1' ? 'normalized-v1' : undefined,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
