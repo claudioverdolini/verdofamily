@@ -29,6 +29,21 @@ import { isSupabaseConfigured, supabase } from './supabaseClient'
 const STORAGE_KEY = 'verdofamily_v3'
 const LEGACY_KEYS = ['familyhub_v2', 'familyhub_v1']
 const SESSION_KEY = 'verdofamily_session_user'
+const HEALTH_KINDS = new Set(['medicine', 'therapy', 'visit', 'health-record'])
+
+function isHealthDeadline(item: Partial<Deadline>) {
+  return HEALTH_KINDS.has(String(item.kind || ''))
+}
+
+function mergeHealthDeadlines(base: FamilyData, healthItems: Deadline[]) {
+  return {
+    ...base,
+    deadlines: [
+      ...base.deadlines.filter(item => !isHealthDeadline(item)),
+      ...(Array.isArray(healthItems) ? healthItems : [])
+    ]
+  }
+}
 
 type CloudStatus = 'offline' | 'connecting' | 'synced' | 'saving' | 'conflict' | 'error'
 type AuthResult = { ok: boolean; error?: string; needsEmailConfirmation?: boolean }
@@ -145,7 +160,11 @@ function dbRoleToApp(role?: string): FamilyUser['role'] {
 }
 
 function cloudSafeData(value: FamilyData): FamilyData {
-  return { ...value, users: value.users.map(user => ({ ...user, password: '' })) }
+  return {
+    ...value,
+    users: value.users.map(user => ({ ...user, password: '' })),
+    deadlines: value.deadlines.filter(item => !isHealthDeadline(item))
+  }
 }
 
 function profileToUser(profile: any, memberRole: string, existing?: FamilyUser): FamilyUser {
@@ -186,6 +205,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const childSyncTimerRef = useRef<number | null>(null)
   const currentCloudUserRef = useRef<any>(null)
   const calendarSyncHashRef = useRef('')
+  const healthSyncHashRef = useRef('')
 
   familyIdRef.current = familyId
 
@@ -251,11 +271,32 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return result
   }
 
+  async function callHealthGateway(action: 'read' | 'sync', targetFamilyId: string, extra: Record<string, any> = {}) {
+    if (!supabase) throw new Error('Cloud non disponibile.')
+    const { data: result, error } = await supabase.functions.invoke('health-data-gateway', {
+      body: { action, familyId: targetFamilyId, ...extra }
+    })
+    if (error) throw new Error(error.message || 'Archivio salute non disponibile.')
+    if (!result?.ok) throw new Error(result?.error || 'Operazione salute non autorizzata.')
+    return result
+  }
+
   async function readFamilyDocument(targetFamilyId: string, profile: any, role: string) {
     if (!supabase) return
-    const result = await callFamilyGateway('read', targetFamilyId)
+    const [result, healthResult] = await Promise.all([
+      callFamilyGateway('read', targetFamilyId),
+      callHealthGateway('read', targetFamilyId).catch(error => {
+        console.warn('health-data-gateway read fallback', error)
+        return null
+      })
+    ])
     const raw = result?.data && Object.keys(result.data).length ? result.data : deepClone(initialData)
-    const linked = linkCloudIdentity(migrateData(raw, deepClone(initialData)), profile, result?.role || role)
+    let migrated = migrateData(raw, deepClone(initialData))
+    if (healthResult?.items) {
+      migrated = mergeHealthDeadlines(migrated, healthResult.items)
+      healthSyncHashRef.current = JSON.stringify(healthResult.items)
+    }
+    const linked = linkCloudIdentity(migrated, profile, result?.role || role)
     calendarSyncHashRef.current = JSON.stringify(linked.calendarEvents || [])
     suppressNextPushRef.current = true
     revisionRef.current = Number(result?.revision || 0)
@@ -284,7 +325,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       if (!result?.ok || Number(result.revision || 0) <= revisionRef.current) return
       const user = currentCloudUserRef.current
       const profile = user ? await fetchProfile(user.id) : null
-      const remote = migrateData(result.data, deepClone(initialData))
+      let remote = migrateData(result.data, deepClone(initialData))
+      const healthResult = await callHealthGateway('read', targetFamilyId).catch(() => null)
+      if (healthResult?.items) {
+        remote = mergeHealthDeadlines(remote, healthResult.items)
+        healthSyncHashRef.current = JSON.stringify(healthResult.items)
+      }
       const linked = user
         ? linkCloudIdentity(remote, profile || { id: user.id, display_name: user.email?.split('@')[0] }, result.role || 'child')
         : remote
@@ -313,7 +359,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         const user = currentCloudUserRef.current
         const profile = user ? await fetchProfile(user.id) : null
         const { data: membership } = user ? await supabase.from('family_members').select('role').eq('family_id', targetFamilyId).eq('user_id', user.id).maybeSingle() : { data: null }
-        const remote = migrateData(row.data, deepClone(initialData))
+        let remote = migrateData(row.data, deepClone(initialData))
+        const healthResult = await callHealthGateway('read', targetFamilyId).catch(() => null)
+        if (healthResult?.items) {
+          remote = mergeHealthDeadlines(remote, healthResult.items)
+          healthSyncHashRef.current = JSON.stringify(healthResult.items)
+        }
         const linked = user ? linkCloudIdentity(remote, profile || { id: user.id, display_name: user.email?.split('@')[0] }, membership?.role || 'adult') : remote
         suppressNextPushRef.current = true
         setData(linked)
@@ -402,6 +453,15 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     setCloudStatus('saving')
     const expected = revisionRef.current
     try {
+      if (authUser?.role !== 'bimbo') {
+        const healthItems = snapshot.deadlines.filter(item => isHealthDeadline(item))
+        const healthHash = JSON.stringify(healthItems)
+        if (healthHash !== healthSyncHashRef.current) {
+          const healthResult = await callHealthGateway('sync', familyIdRef.current, { data: snapshot })
+          healthSyncHashRef.current = JSON.stringify(healthResult?.items || healthItems)
+        }
+      }
+
       const result = await callFamilyGateway('save', familyIdRef.current, {
         data: cloudSafeData(snapshot),
         expectedRevision: expected
@@ -411,7 +471,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         revisionRef.current = Number(result.revision || expected + 1)
         if (result.normalized && result.data) {
           suppressNextPushRef.current = true
-          setData(migrateData(result.data, deepClone(initialData)))
+          const familyOnly = migrateData(result.data, deepClone(initialData))
+          setData(mergeHealthDeadlines(familyOnly, snapshot.deadlines.filter(item => isHealthDeadline(item))))
         }
         setCloudStatus('synced')
         const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
@@ -429,7 +490,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         revisionRef.current = Number(result.revision || expected)
         if (result.data) {
           suppressNextPushRef.current = true
-          setData(migrateData(result.data, deepClone(initialData)))
+          let remote = migrateData(result.data, deepClone(initialData))
+          const healthResult = await callHealthGateway('read', familyIdRef.current).catch(() => null)
+          if (healthResult?.items) {
+            remote = mergeHealthDeadlines(remote, healthResult.items)
+            healthSyncHashRef.current = JSON.stringify(healthResult.items)
+          }
+          setData(remote)
         }
         return
       }
@@ -624,9 +691,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function deleteCalendarEvent(id: number) { setData(prev => ({ ...prev, calendarEvents: prev.calendarEvents.filter(e => e.id !== id) })) }
 
   function upsertDeadline(deadline: Omit<Deadline, 'id' | 'done'> & { id?: number; done?: boolean }) {
+    if (authUser?.role === 'bimbo' && isHealthDeadline(deadline)) return
     setData(prev => ({ ...prev, deadlines: deadline.id ? prev.deadlines.map(d => d.id === deadline.id ? { ...d, ...deadline, id: d.id, done: !!deadline.done } : d) : [...prev.deadlines, { ...deadline, id: nextId(prev.deadlines), done: !!deadline.done }] }))
   }
   function toggleDeadline(id: number) {
+    if (authUser?.role === 'bimbo' && isHealthDeadline(data.deadlines.find(item => item.id === id) || {})) return
     setData(prev => ({
       ...prev,
       deadlines: prev.deadlines.map(d => {
@@ -648,7 +717,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       })
     }))
   }
-  function deleteDeadline(id: number) { setData(prev => ({ ...prev, deadlines: prev.deadlines.filter(d => d.id !== id) })) }
+  function deleteDeadline(id: number) {
+    if (authUser?.role === 'bimbo' && isHealthDeadline(data.deadlines.find(item => item.id === id) || {})) return
+    setData(prev => ({ ...prev, deadlines: prev.deadlines.filter(d => d.id !== id) }))
+  }
 
   function addCategory(name: string) {
     const clean = name.trim()
