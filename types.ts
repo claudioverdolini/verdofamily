@@ -137,6 +137,8 @@ export type Deadline = {
   dosesPerDay?: number
 }
 
+export type PantryLocation = 'pantry' | 'fridge' | 'freezer'
+
 export type PantryItem = {
   id: number
   name: string
@@ -144,6 +146,18 @@ export type PantryItem = {
   unit: string
   category: string
   minQty?: number
+  location?: PantryLocation
+  expiryDate?: string
+  autoRestock?: boolean
+}
+
+export type PantryMovement = {
+  id: number
+  pantryItemId: number
+  delta: number
+  date: string
+  createdAt: string
+  reason: 'manual' | 'purchase' | 'meal' | 'import' | 'adjustment'
 }
 
 export type ShoppingItem = {
@@ -282,6 +296,7 @@ export type FamilyData = {
   deadlines: Deadline[]
   categories: string[]
   pantry: PantryItem[]
+  pantryMovements: PantryMovement[]
   shopping: ShoppingItem[]
   dishes: Dish[]
   mealPlans: MealPlan[]
