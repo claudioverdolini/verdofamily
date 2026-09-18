@@ -93,7 +93,6 @@ function LoginScreen() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [showDemo, setShowDemo] = useState(false)
   const [needsVerification, setNeedsVerification] = useState(false)
 
   async function submit(e?: React.FormEvent) {
@@ -157,15 +156,6 @@ function LoginScreen() {
     }
   }
 
-  function useDemo(user: any) {
-    setMode('login')
-    setIdentifier(user.name)
-    setPassword(user.password || '')
-    setError('')
-    setMessage('')
-    setNeedsVerification(false)
-  }
-
   function switchMode(nextMode: 'login' | 'signup') {
     setMode(nextMode)
     setError('')
@@ -185,13 +175,13 @@ function LoginScreen() {
         <div className="auth-tabs"><button type="button" className={mode === 'login' ? 'is-active' : ''} onClick={() => switchMode('login')}>Accedi</button><button type="button" className={mode === 'signup' ? 'is-active' : ''} onClick={() => switchMode('signup')}>Registrati</button></div>
         <div className="login-copy"><h2>{mode === 'login' ? 'Bentornato' : 'Crea il tuo account'}</h2><p>{mode === 'login' ? 'Usa email e password per ritrovare la tua famiglia su ogni dispositivo.' : 'Ti servirà un’email per il recupero e la sincronizzazione sicura.'}</p></div>
         {mode === 'signup' ? <label className="field"><span className="field__label">Nome</span><input autoFocus autoComplete="name" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Es. Claudio" /></label> : null}
-        <label className="field"><span className="field__label">{mode === 'login' && !identifier.includes('@') ? 'Email o utente demo' : 'Email'}</span><input autoFocus={mode === 'login'} type={mode === 'signup' ? 'email' : 'text'} autoComplete="username" value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder="nome@email.it" /></label>
-        <label className="field"><span className="field__label">Password</span><input type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" /></label>
+        <label className="field"><span className="field__label">{cloudEnabled ? 'Email' : (mode === 'login' ? 'Email o utente locale' : 'Email')}</span><input autoFocus={mode === 'login'} type={cloudEnabled || mode === 'signup' ? 'email' : 'text'} autoComplete="username" value={identifier} onChange={e => setIdentifier(e.target.value)} placeholder={cloudEnabled ? 'nome@email.it' : 'Nome utente'} /></label>
+        <label className="field"><span className="field__label">Password</span><input type="password" minLength={mode === 'signup' ? 10 : undefined} autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••••" />{mode === 'signup' ? <small className="field__hint">Almeno 10 caratteri.</small> : null}</label>
         {error ? <div className="login-error">{error}</div> : null}
         {message ? <div className="callout callout--success">{message}</div> : null}
         <Button type="submit" className="login-submit" disabled={busy || cloudLoading}>{busy || cloudLoading ? 'Attendi…' : (mode === 'login' ? 'Accedi' : 'Crea account')} {!busy && !cloudLoading ? <ChevronRight size={18} /> : null}</Button>
         {cloudEnabled && needsVerification ? <Button type="button" variant="soft" className="login-submit" disabled={busy || cloudLoading} onClick={resendVerification}><RefreshCw size={16} /> Reinvia email di verifica</Button> : null}
-        {mode === 'login' ? <div className="demo-access"><button type="button" className="text-link" onClick={() => setShowDemo(v => !v)}>{showDemo ? 'Nascondi accesso demo' : 'Accesso demo locale'}</button>{showDemo ? <div className="login-users"><span>Profili locali di prova</span><div>{data.users.filter(u => u.password).map(user => <button type="button" key={user.id} onClick={() => useDemo(user)}><Avatar user={user} size="sm" /><span>{user.name}</span></button>)}</div></div> : null}</div> : null}
+        {!cloudEnabled && mode === 'login' ? <div className="demo-access"><div className="login-users"><span>Profili locali disponibili</span><div>{data.users.filter(u => u.password).map(user => <button type="button" key={user.id} onClick={() => { setIdentifier(user.name); setPassword(user.password || '') }}><Avatar user={user} size="sm" /><span>{user.name}</span></button>)}</div></div></div> : null}
       </form>
     </div>
   </div>
@@ -202,7 +192,6 @@ function FamilySetupScreen() {
   const [mode, setMode] = useState<'create' | 'join'>('create')
   const [familyName, setFamilyName] = useState('Famiglia Verdolini')
   const [code, setCode] = useState('')
-  const [importLocal, setImportLocal] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -211,7 +200,7 @@ function FamilySetupScreen() {
     setBusy(true)
     setError('')
     try {
-      const result = mode === 'create' ? await createCloudFamily(familyName, importLocal) : await joinCloudFamily(code)
+      const result = mode === 'create' ? await createCloudFamily(familyName, false) : await joinCloudFamily(code)
       if (!result.ok) setError(result.error || 'Operazione non riuscita.')
     } finally {
       setBusy(false)
@@ -224,7 +213,7 @@ function FamilySetupScreen() {
       <div className="setup-hero"><Cloud size={28} /><h2>Collega il tuo account a una famiglia</h2><p>Crea una nuova famiglia oppure entra in quella esistente usando il codice di invito.</p></div>
       <div className="auth-tabs"><button type="button" className={mode === 'create' ? 'is-active' : ''} onClick={() => setMode('create')}>Crea famiglia</button><button type="button" className={mode === 'join' ? 'is-active' : ''} onClick={() => setMode('join')}>Usa un codice</button></div>
       <form onSubmit={submit} className="setup-form">
-        {mode === 'create' ? <><label className="field"><span className="field__label">Nome famiglia</span><input autoFocus value={familyName} onChange={e => setFamilyName(e.target.value)} placeholder="Es. Famiglia Verdolini" /></label><label className="toggle-row toggle-row--boxed"><input type="checkbox" checked={importLocal} onChange={e => setImportLocal(e.target.checked)} /><span><strong>Importa i dati già presenti su questo dispositivo</strong><small>Calendario, spesa, pasti, paghette e profili locali verranno portati nel cloud.</small></span></label></> : <label className="field"><span className="field__label">Codice famiglia</span><input autoFocus value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="ES. A1B2C3D4" maxLength={12} /></label>}
+        {mode === 'create' ? <label className="field"><span className="field__label">Nome famiglia</span><input autoFocus maxLength={100} value={familyName} onChange={e => setFamilyName(e.target.value)} placeholder="Es. Famiglia Verdolini" /></label> : <label className="field"><span className="field__label">Codice famiglia</span><input autoFocus value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="ES. A1B2C3D4E5F6A7B8" maxLength={16} /></label>}
         {error ? <div className="login-error">{error}</div> : null}
         <Button type="submit" disabled={busy || cloudLoading}>{busy || cloudLoading ? 'Attendi…' : (mode === 'create' ? 'Crea e sincronizza' : 'Entra nella famiglia')}</Button>
       </form>
