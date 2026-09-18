@@ -32,10 +32,15 @@ export function pantryAverageDailyUse(itemId: number, movements: PantryMovement[
   const relevant = (movements || []).filter(movement =>
     Number(movement.pantryItemId) === Number(itemId) &&
     movement.date >= fromDate &&
-    movement.date <= asOfDate &&
-    Number(movement.delta || 0) < 0
+    movement.date <= asOfDate
   )
-  const consumed = relevant.reduce((sum, movement) => sum + Math.abs(Number(movement.delta || 0)), 0)
+  const manualConsumed = relevant
+    .filter(movement => movement.reason === 'manual' && Number(movement.delta || 0) < 0)
+    .reduce((sum, movement) => sum + Math.abs(Number(movement.delta || 0)), 0)
+  const mealNet = relevant
+    .filter(movement => movement.reason === 'meal')
+    .reduce((sum, movement) => sum + Number(movement.delta || 0), 0)
+  const consumed = manualConsumed + Math.max(0, -mealNet)
   return consumed > 0 ? consumed / Math.max(1, lookbackDays) : 0
 }
 
