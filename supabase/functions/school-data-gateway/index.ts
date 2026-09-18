@@ -22,6 +22,40 @@ function dbError(error: any, label: string) {
   throw new Error(`${label}: ${error.message || String(error)}`);
 }
 
+async function rateLimit(admin: any, scope: string, subjectKey: string, limit: number, windowSeconds: number) {
+  const { data, error } = await admin.rpc("system_security_rate_limit", {
+    p_scope: scope,
+    p_subject_key: subjectKey,
+    p_limit: limit,
+    p_window_seconds: windowSeconds
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+async function audit(admin: any, event: {
+  actorUserId?: string | null;
+  familyId?: string | null;
+  eventType: string;
+  success?: boolean;
+  severity?: "info" | "warning" | "critical";
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await admin.rpc("system_security_audit", {
+    p_actor_user_id: event.actorUserId || null,
+    p_family_id: event.familyId || null,
+    p_event_type: event.eventType,
+    p_success: event.success !== false,
+    p_severity: event.severity || "info",
+    p_target_type: event.targetType || null,
+    p_target_id: event.targetId || null,
+    p_metadata: event.metadata || {}
+  });
+  if (error) console.warn("security_audit_failed", error.message);
+}
+
 function uniqueLegacyIds(items: any[]) {
   const seen = new Set<number>();
   for (const item of items) {
@@ -305,9 +339,36 @@ Deno.serve(async (req) => {
     }
 
     if (action === "sync") {
+      const allowed = await rateLimit(
+        admin,
+        "school_sync",
+        `${user.id}:${familyId}`,
+        role === "child" ? 60 : 120,
+        600
+      );
+      if (!allowed) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "school_sync_rate_limited",
+          success: false, severity: "warning", targetType: "school", targetId: familyId,
+          metadata: { role }
+        });
+        return json({ ok: false, error: "rate_limited" }, 429);
+      }
+
       if (role === "child") await syncChildSchool(admin, familyId, user.id, body?.data || {});
       else if (role === "adult" || role === "admin") await syncAdultSchool(admin, familyId, body?.data || {});
       else return json({ ok: false, error: "forbidden" }, 403);
+
+      await audit(admin, {
+        actorUserId: user.id, familyId, eventType: "school_synced",
+        targetType: "school", targetId: familyId,
+        metadata: {
+          role,
+          subjects: arr(body?.data?.schoolSubjects).length,
+          timetable: arr(body?.data?.schoolTimetable).length,
+          items: arr(body?.data?.schoolItems).length
+        }
+      });
 
       return json({ ok: true, role, ...(await readSchool(userClient, admin, familyId)) });
     }
