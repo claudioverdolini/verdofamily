@@ -147,6 +147,71 @@ function datePlusDays(date: string, offset: number) {
   return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(value.getUTCDate()).padStart(2, "0")}`;
 }
 
+function dateParts(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return { year, month, day };
+}
+
+function daysBetween(startDate: string, endDate: string) {
+  const start = new Date(`${startDate}T12:00:00Z`).getTime();
+  const end = new Date(`${endDate}T12:00:00Z`).getTime();
+  return Math.round((end - start) / 86400000);
+}
+
+function monthDiff(startDate: string, date: string) {
+  const start = dateParts(startDate);
+  const target = dateParts(date);
+  return (target.year - start.year) * 12 + (target.month - start.month);
+}
+
+function daysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0, 12)).getUTCDate();
+}
+
+function clampedRoutineDate(year: number, month: number, preferredDay: number) {
+  const day = Math.min(preferredDay, daysInMonth(year, month));
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function routineDueOn(routine: any, date: string) {
+  if (!routine || routine.active === false || !routine.startDate || date < String(routine.startDate)) return false;
+  if (routine.endDate && date > String(routine.endDate)) return false;
+
+  const frequency = String(routine.frequency || "weekly");
+  if (frequency === "daily") return true;
+
+  if (frequency === "weekly" || frequency === "fortnightly") {
+    const diff = daysBetween(String(routine.startDate), date);
+    const interval = frequency === "weekly" ? 7 : 14;
+    return diff >= 0 && diff % interval === 0;
+  }
+
+  const start = dateParts(String(routine.startDate));
+  const target = dateParts(date);
+  const months = monthDiff(String(routine.startDate), date);
+  if (months < 0) return false;
+
+  if (frequency === "monthly") {
+    return date === clampedRoutineDate(target.year, target.month, start.day);
+  }
+
+  if (frequency === "semiannual") {
+    return months % 6 === 0 && date === clampedRoutineDate(target.year, target.month, start.day);
+  }
+
+  if (frequency === "yearly") {
+    return target.month === start.month && date === clampedRoutineDate(target.year, start.month, start.day);
+  }
+
+  return false;
+}
+
+function routineCompletedOn(completions: any[], routineId: number, date: string) {
+  return (Array.isArray(completions) ? completions : []).some((item: any) =>
+    Number(item?.routineId || 0) === Number(routineId) && String(item?.date || "") === date
+  );
+}
+
 function weekdayFromDate(date: string) {
   const day = new Date(`${date}T12:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
@@ -310,7 +375,15 @@ async function buildReport(schedule: ReportSchedule) {
       .filter((item: any) => !item?.done)
       .filter((item: any) => scopeFamily || itemForUser(item, appUserId))
       .map((item: any) => `${item.title}${scopeFamily ? (userName(data, Number(item.userId)) ? ` · ${userName(data, Number(item.userId))}` : "") : ""}`);
-    lines.push("", "✅ Da fare", ...listLines(todos, "Nessuna attività"));
+
+    const completions = Array.isArray(data.routineCompletions) ? data.routineCompletions : [];
+    const routines = (Array.isArray(data.routines) ? data.routines : [])
+      .filter((item: any) => routineDueOn(item, targetDate))
+      .filter((item: any) => !routineCompletedOn(completions, Number(item.id), targetDate))
+      .filter((item: any) => scopeFamily || itemForUser(item, appUserId))
+      .map((item: any) => `🔁 ${item.title}${scopeFamily ? (userName(data, Number(item.userId)) ? ` · ${userName(data, Number(item.userId))}` : "") : ""}`);
+
+    lines.push("", "✅ Da fare & routine", ...listLines([...routines, ...todos], "Nessuna attività"));
   }
 
   if (schedule.sections.chores) {
