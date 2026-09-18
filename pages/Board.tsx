@@ -432,7 +432,7 @@ function BoardCard({
     {post.type === 'reminder' && post.dueDate ? <div className="board-card__due"><Badge tone={reminderTone}><Bell size={12} /> {post.dueDate.split('-').reverse().join('/')}</Badge></div> : null}
 
     <div className="board-card__footer">
-      <div>{author ? <Avatar user={author} size="xs" /> : null}<span><strong>{author?.name || 'Famiglia'}</strong><small>{audienceText}</small></span></div>
+      <div className="board-card__author">{author ? <Avatar user={author} size="sm" /> : null}<span><strong>{author?.name || 'Famiglia'}</strong><small>{audienceText}</small></span></div>
       <time>{formatWhen(post.updatedAt)}</time>
     </div>
   </Card>

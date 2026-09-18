@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react'
-import { CalendarDays, Check, ClipboardCopy, Cloud, Download, Link2, RefreshCw, RotateCcw, Unlink, Upload } from 'lucide-react'
+import { CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Link2, RefreshCw, RotateCcw, Unlink, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
 import type { PageKey, ThemeMode } from '../types'
 import { Avatar, Button, Card, CardHeader, Field, PageIntro, Segmented } from '../ui'
 import TelegramReportsCard from '../components/TelegramReportsCard'
+import { imageFileToAvatarDataUrl } from '../utils'
 
 const ACCENTS = [
   { name: 'Indigo', color: '#5B5BD6' },
@@ -156,11 +157,25 @@ export default function SettingsPage() {
   const [googleStatus, setGoogleStatus] = useState<GoogleCalendarStatus | null>(null)
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarChoice[]>([])
   const [googleBusy, setGoogleBusy] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
   const [googleMessage, setGoogleMessage] = useState('')
   const [googleDraft, setGoogleDraft] = useState({ personalCalendarId: 'primary', familyCalendarId: '', familyEventTarget: 'personal' as 'personal' | 'shared' | 'both' })
 
   const prefs = authUser?.prefs
   const backupHealth = getBackupHealth(driveStatus)
+
+  async function changeAvatar(file?: File) {
+    if (!file) return
+    setAvatarBusy(true)
+    try {
+      const avatarUrl = await imageFileToAvatarDataUrl(file)
+      updateCurrentProfile({ avatarUrl })
+    } catch (error: any) {
+      setMessage(error?.message || 'Impossibile elaborare la foto.')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
 
   useEffect(() => {
     void refreshBackupStatus()
@@ -427,6 +442,10 @@ export default function SettingsPage() {
             <section className="settings-subsection">
               <div className="settings-subsection__head"><div><strong>Profilo</strong><span>Nome e colore personale</span></div></div>
               <div className="settings-profile settings-profile--compact"><Avatar user={authUser} size="lg" /><div><strong>{authUser.name}</strong><span>{authUser.role}</span></div></div>
+              <div className="settings-profile-photo-actions">
+                <label className="btn btn--soft btn--sm"><Camera size={15} /> {avatarBusy ? 'Elaboro…' : authUser.avatarUrl ? 'Cambia foto' : 'Aggiungi foto'}<input type="file" accept="image/*" hidden disabled={avatarBusy} onChange={e => changeAvatar(e.target.files?.[0])} /></label>
+                {authUser.avatarUrl ? <button className="text-link" onClick={() => { if (confirm('Rimuovere la foto identificativa dal tuo profilo?')) updateCurrentProfile({ avatarUrl: '' }) }}>Rimuovi foto</button> : null}
+              </div>
               <div className="form-grid form-grid--2">
                 <Field label="Nome"><input value={authUser.name} onChange={e => updateCurrentProfile({ name: e.target.value })} /></Field>
                 <Field label="Colore profilo"><input type="color" value={authUser.color} onChange={e => updateCurrentProfile({ color: e.target.value })} /></Field>

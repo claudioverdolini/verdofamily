@@ -3,6 +3,37 @@ import type { BoardPost, Deadline, FamilyData, FamilyUser, MedicinePackage, Pant
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
 
+export async function imageFileToAvatarDataUrl(file: File, size = 320) {
+  if (!file.type.startsWith('image/')) throw new Error('Seleziona un file immagine.')
+  if (file.size > 12 * 1024 * 1024) throw new Error('La foto è troppo grande. Massimo 12 MB.')
+
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('Impossibile leggere la foto.'))
+      img.src = objectUrl
+    })
+
+    const side = Math.min(image.naturalWidth, image.naturalHeight)
+    if (!side) throw new Error('Foto non valida.')
+    const sx = Math.max(0, (image.naturalWidth - side) / 2)
+    const sy = Math.max(0, (image.naturalHeight - side) / 2)
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Impossibile elaborare la foto.')
+
+    ctx.drawImage(image, sx, sy, side, side, 0, 0, size, size)
+    const webp = canvas.toDataURL('image/webp', .82)
+    return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', .84)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
 export function localDateISO(date = new Date()) {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
