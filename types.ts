@@ -82,6 +82,8 @@ export type HealthAttachment = {
   createdAt: string
 }
 
+export type DeadlineCategory = 'documents' | 'insurance' | 'car' | 'subscriptions' | 'school' | 'holidays' | 'birthdays' | 'home' | 'other'
+
 export type Deadline = {
   id: number
   title: string
@@ -89,6 +91,11 @@ export type Deadline = {
   userId: number
   done: boolean
   kind?: 'general' | 'medicine' | 'therapy' | 'visit' | 'health-record'
+  category?: DeadlineCategory
+  reminderDays?: number[]
+  repeatYearly?: boolean
+  lastCompletedAt?: string
+  lastCompletedDate?: string
   activeIngredient?: string
   purpose?: string
   usage?: string
