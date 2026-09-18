@@ -1,0 +1,381 @@
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS"
+};
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
+  status,
+  headers: { "Content-Type": "application/json", ...cors }
+});
+
+const arr = (value: any) => Array.isArray(value) ? value : [];
+const n = (value: any) => Number(value || 0);
+const s = (value: any) => String(value ?? "").trim();
+const same = (a: any, b: any) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function dbError(error: any, label: string) {
+  if (!error) return;
+  throw new Error(`${label}: ${error.message || String(error)}`);
+}
+
+function cleanWeekdays(value: any) {
+  return Array.from(new Set(arr(value).map(Number).filter(day => day >= 1 && day <= 7))).sort((a,b) => a-b);
+}
+
+async function readFinance(client: any, familyId: string) {
+  const [peopleR, walletsR, recurringR, transactionsR, choresR] = await Promise.all([
+    client.from("family_people").select("id,legacy_user_id").eq("family_id", familyId),
+    client.from("finance_wallets").select("*").eq("family_id", familyId),
+    client.from("finance_recurring_chores").select("*").eq("family_id", familyId),
+    client.from("finance_transactions").select("*").eq("family_id", familyId),
+    client.from("finance_chores").select("*").eq("family_id", familyId)
+  ]);
+
+  for (const [label, result] of [
+    ["people", peopleR],
+    ["wallets", walletsR],
+    ["recurring chores", recurringR],
+    ["transactions", transactionsR],
+    ["chores", choresR]
+  ] as const) dbError(result.error, label);
+
+  const people = peopleR.data || [];
+  const personLegacy = new Map(people.map((row: any) => [String(row.id), Number(row.legacy_user_id)]));
+  const txLegacy = new Map((transactionsR.data || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
+  const recurringLegacy = new Map((recurringR.data || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
+
+  const wallets = (walletsR.data || []).map((row: any) => ({
+    userId: personLegacy.get(String(row.person_id)) || 0,
+    balance: Number(row.balance || 0),
+    currency: row.currency || "EUR"
+  })).filter((row: any) => row.userId > 0);
+
+  const recurringChores = (recurringR.data || []).map((row: any) => ({
+    id: Number(row.legacy_id),
+    title: String(row.title || "Compito ricorrente"),
+    userId: personLegacy.get(String(row.person_id)) || 0,
+    amount: Number(row.amount || 0),
+    weekdays: arr(row.weekdays).map(Number),
+    active: row.active !== false,
+    startDate: row.start_date,
+    endDate: row.end_date || undefined
+  })).filter((row: any) => row.userId > 0);
+
+  const transactions = (transactionsR.data || []).map((row: any) => ({
+    id: Number(row.legacy_id),
+    userId: personLegacy.get(String(row.person_id)) || 0,
+    type: row.type,
+    amount: Number(row.amount || 0),
+    date: row.transaction_date,
+    note: String(row.note || ""),
+    reversed: row.reversed === true
+  })).filter((row: any) => row.userId > 0);
+
+  const chores = (choresR.data || []).map((row: any) => ({
+    id: Number(row.legacy_id),
+    title: String(row.title || "Compito"),
+    deadline: row.deadline,
+    userId: personLegacy.get(String(row.person_id)) || 0,
+    amount: Number(row.amount || 0),
+    done: row.status === "approved",
+    completionStatus: row.status,
+    completedAt: row.completed_at || undefined,
+    completedByUserId: row.completed_by_person_id ? personLegacy.get(String(row.completed_by_person_id)) || undefined : undefined,
+    approvedAt: row.approved_at || undefined,
+    approvedByUserId: row.approved_by_person_id ? personLegacy.get(String(row.approved_by_person_id)) || undefined : undefined,
+    creditedTransactionId: row.credited_transaction_id ? txLegacy.get(String(row.credited_transaction_id)) || undefined : undefined,
+    recurringChoreId: row.recurring_chore_id ? recurringLegacy.get(String(row.recurring_chore_id)) || undefined : undefined
+  })).filter((row: any) => row.userId > 0);
+
+  return { wallets, recurringChores, transactions, chores };
+}
+
+async function syncPeople(admin: any, familyId: string, users: any[]) {
+  const rows = users
+    .filter((user: any) => n(user?.id) > 0)
+    .map((user: any) => ({
+      family_id: familyId,
+      legacy_user_id: n(user.id),
+      auth_user_id: uuidPattern.test(String(user?.cloudUserId || "")) ? String(user.cloudUserId) : null,
+      display_name: s(user?.name) || "Familiare",
+      role: user?.role === "admin" ? "admin" : user?.role === "bimbo" ? "child" : "adult",
+      updated_at: new Date().toISOString()
+    }));
+
+  if (!rows.length) return;
+  const { error } = await admin.from("family_people").upsert(rows, { onConflict: "family_id,legacy_user_id" });
+  dbError(error, "sync people");
+}
+
+async function syncAdultFinance(admin: any, familyId: string, snapshot: any) {
+  const users = arr(snapshot?.users);
+  const chores = arr(snapshot?.chores);
+  const recurring = arr(snapshot?.recurringChores);
+  const transactions = arr(snapshot?.transactions);
+
+  const bytes = new TextEncoder().encode(JSON.stringify({ users, chores, recurring, transactions })).byteLength;
+  if (bytes > 5 * 1024 * 1024) throw new Error("finance_payload_too_large");
+  if (users.length > 200 || chores.length > 10000 || recurring.length > 2000 || transactions.length > 20000) {
+    throw new Error("finance_payload_limit");
+  }
+
+  await syncPeople(admin, familyId, users);
+
+  const { data: people, error: peopleError } = await admin
+    .from("family_people")
+    .select("id,legacy_user_id")
+    .eq("family_id", familyId);
+  dbError(peopleError, "read people");
+  const personByLegacy = new Map((people || []).map((row: any) => [Number(row.legacy_user_id), String(row.id)]));
+
+  const now = new Date().toISOString();
+  const walletRows = users.map((user: any) => ({
+    family_id: familyId,
+    person_id: personByLegacy.get(n(user.id)),
+    balance: Math.max(0, n(user.balance)),
+    currency: "EUR",
+    updated_at: now
+  })).filter((row: any) => row.person_id);
+
+  if (walletRows.length) {
+    const { error } = await admin.from("finance_wallets").upsert(walletRows, { onConflict: "family_id,person_id" });
+    dbError(error, "sync wallets");
+  }
+
+  const recurringRows = recurring.map((item: any) => ({
+    family_id: familyId,
+    legacy_id: n(item.id),
+    person_id: personByLegacy.get(n(item.userId)),
+    title: s(item.title) || "Compito ricorrente",
+    amount: Math.max(0, n(item.amount)),
+    weekdays: cleanWeekdays(item.weekdays),
+    active: item.active !== false,
+    start_date: s(item.startDate) || new Date().toISOString().slice(0,10),
+    end_date: s(item.endDate) || null,
+    updated_at: now
+  })).filter((row: any) => row.legacy_id > 0 && row.person_id && row.weekdays.length);
+
+  if (recurringRows.length) {
+    const { error } = await admin.from("finance_recurring_chores").upsert(recurringRows, { onConflict: "family_id,legacy_id" });
+    dbError(error, "sync recurring chores");
+  }
+
+  const transactionRows = transactions.map((item: any) => ({
+    family_id: familyId,
+    legacy_id: n(item.id),
+    person_id: personByLegacy.get(n(item.userId)),
+    type: ["credit","payment","reversal"].includes(String(item.type)) ? item.type : "credit",
+    amount: Math.max(0, n(item.amount)),
+    transaction_date: s(item.date) || new Date().toISOString().slice(0,10),
+    note: String(item.note || ""),
+    reversed: item.reversed === true,
+    updated_at: now
+  })).filter((row: any) => row.legacy_id > 0 && row.person_id);
+
+  if (transactionRows.length) {
+    const { error } = await admin.from("finance_transactions").upsert(transactionRows, { onConflict: "family_id,legacy_id" });
+    dbError(error, "sync transactions");
+  }
+
+  const [{ data: recurringDb, error: recurringError }, { data: txDb, error: txError }] = await Promise.all([
+    admin.from("finance_recurring_chores").select("id,legacy_id").eq("family_id", familyId),
+    admin.from("finance_transactions").select("id,legacy_id").eq("family_id", familyId)
+  ]);
+  dbError(recurringError, "read recurring chores");
+  dbError(txError, "read transactions");
+  const recurringByLegacy = new Map((recurringDb || []).map((row: any) => [Number(row.legacy_id), String(row.id)]));
+  const txByLegacy = new Map((txDb || []).map((row: any) => [Number(row.legacy_id), String(row.id)]));
+
+  const choreRows = chores.map((item: any) => ({
+    family_id: familyId,
+    legacy_id: n(item.id),
+    person_id: personByLegacy.get(n(item.userId)),
+    title: s(item.title) || "Compito",
+    deadline: s(item.deadline) || new Date().toISOString().slice(0,10),
+    amount: Math.max(0, n(item.amount)),
+    status: item.done === true ? "approved" : item.completionStatus === "pending" ? "pending" : "open",
+    completed_at: s(item.completedAt) || null,
+    completed_by_person_id: personByLegacy.get(n(item.completedByUserId)) || null,
+    approved_at: s(item.approvedAt) || null,
+    approved_by_person_id: personByLegacy.get(n(item.approvedByUserId)) || null,
+    credited_transaction_id: txByLegacy.get(n(item.creditedTransactionId)) || null,
+    recurring_chore_id: recurringByLegacy.get(n(item.recurringChoreId)) || null,
+    updated_at: now
+  })).filter((row: any) => row.legacy_id > 0 && row.person_id);
+
+  if (choreRows.length) {
+    const { error } = await admin.from("finance_chores").upsert(choreRows, { onConflict: "family_id,legacy_id" });
+    dbError(error, "sync chores");
+  }
+
+  const keepChores = new Set(choreRows.map((row: any) => row.legacy_id));
+  const keepRecurring = new Set(recurringRows.map((row: any) => row.legacy_id));
+  const keepTransactions = new Set(transactionRows.map((row: any) => row.legacy_id));
+
+  const [{ data: choresDb }, { data: recurringAll }, { data: txAll }] = await Promise.all([
+    admin.from("finance_chores").select("id,legacy_id").eq("family_id", familyId),
+    admin.from("finance_recurring_chores").select("id,legacy_id").eq("family_id", familyId),
+    admin.from("finance_transactions").select("id,legacy_id").eq("family_id", familyId)
+  ]);
+
+  for (const row of choresDb || []) {
+    if (!keepChores.has(Number(row.legacy_id))) {
+      const { error } = await admin.from("finance_chores").delete().eq("id", row.id);
+      dbError(error, "delete chore");
+    }
+  }
+  for (const row of recurringAll || []) {
+    if (!keepRecurring.has(Number(row.legacy_id))) {
+      const { error } = await admin.from("finance_recurring_chores").delete().eq("id", row.id);
+      dbError(error, "delete recurring chore");
+    }
+  }
+  for (const row of txAll || []) {
+    if (!keepTransactions.has(Number(row.legacy_id))) {
+      const { error } = await admin.from("finance_transactions").delete().eq("id", row.id);
+      dbError(error, "delete transaction");
+    }
+  }
+}
+
+async function syncChildFinance(admin: any, familyId: string, userId: string, snapshot: any) {
+  const { data: person, error: personError } = await admin
+    .from("family_people")
+    .select("id,legacy_user_id")
+    .eq("family_id", familyId)
+    .eq("auth_user_id", userId)
+    .maybeSingle();
+  if (personError || !person) throw new Error("child_identity_not_linked");
+
+  const childId = Number(person.legacy_user_id);
+  const incomingChores = arr(snapshot?.chores);
+  if (incomingChores.length > 5000) throw new Error("finance_payload_limit");
+
+  const { data: currentRows, error: currentError } = await admin
+    .from("finance_chores")
+    .select("*, finance_transactions!finance_chores_credited_transaction_id_fkey(legacy_id), finance_recurring_chores!finance_chores_recurring_chore_id_fkey(legacy_id)")
+    .eq("family_id", familyId)
+    .eq("person_id", person.id);
+  dbError(currentError, "read child chores");
+
+  const currentByLegacy = new Map((currentRows || []).map((row: any) => [Number(row.legacy_id), row]));
+
+  for (const proposed of incomingChores) {
+    if (n(proposed?.userId) !== childId) throw new Error("forbidden_chore_change");
+    const current = currentByLegacy.get(n(proposed?.id));
+    if (!current) throw new Error("forbidden_chore_create");
+
+    const currentRecurring = current.finance_recurring_chores?.legacy_id || undefined;
+    const currentTx = current.finance_transactions?.legacy_id || undefined;
+    const immutablePairs = [
+      [current.title, proposed?.title],
+      [String(current.deadline), proposed?.deadline],
+      [Number(current.amount || 0), Number(proposed?.amount || 0)],
+      [currentRecurring, proposed?.recurringChoreId],
+      [currentTx, proposed?.creditedTransactionId]
+    ];
+    if (immutablePairs.some(([a,b]) => !same(a,b))) throw new Error("forbidden_chore_change");
+    if (current.status === "approved") {
+      if (!proposed?.done || proposed?.completionStatus !== "approved") throw new Error("forbidden_approved_chore_change");
+      continue;
+    }
+
+    const nextStatus = proposed?.completionStatus === "pending" ? "pending" : "open";
+    if (nextStatus === "pending" && n(proposed?.completedByUserId) !== childId) {
+      throw new Error("forbidden_chore_completion");
+    }
+    if (nextStatus === "open" && (proposed?.completedAt || proposed?.completedByUserId)) {
+      throw new Error("forbidden_chore_completion");
+    }
+
+    const update = nextStatus === "pending"
+      ? {
+          status: "pending",
+          completed_at: s(proposed?.completedAt) || new Date().toISOString(),
+          completed_by_person_id: person.id,
+          updated_at: new Date().toISOString()
+        }
+      : {
+          status: "open",
+          completed_at: null,
+          completed_by_person_id: null,
+          updated_at: new Date().toISOString()
+        };
+
+    const { error } = await admin.from("finance_chores").update(update).eq("id", current.id);
+    dbError(error, "update child chore");
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
+
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token) return json({ ok: false, error: "unauthorized" }, 401);
+
+    const admin = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
+    const { data: userResult, error: userError } = await admin.auth.getUser(token);
+    const user = userResult?.user;
+    if (userError || !user) return json({ ok: false, error: "unauthorized" }, 401);
+
+    const userClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: authHeader } }
+    });
+
+    const body = await req.json().catch(() => ({}));
+    const action = String(body?.action || "read");
+    const familyId = String(body?.familyId || "").trim();
+    if (!familyId) return json({ ok: false, error: "family_id_required" }, 400);
+
+    const { data: membership, error: membershipError } = await admin
+      .from("family_members")
+      .select("role")
+      .eq("family_id", familyId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (membershipError || !membership) return json({ ok: false, error: "forbidden" }, 403);
+
+    const role = String(membership.role || "adult");
+
+    if (action === "read") {
+      const data = await readFinance(userClient, familyId);
+      return json({ ok: true, role, ...data });
+    }
+
+    if (action === "sync") {
+      if (role === "child") await syncChildFinance(admin, familyId, user.id, body?.data || {});
+      else if (["admin","adult"].includes(role)) await syncAdultFinance(admin, familyId, body?.data || {});
+      else return json({ ok: false, error: "forbidden" }, 403);
+
+      const data = await readFinance(userClient, familyId);
+      return json({ ok: true, role, ...data });
+    }
+
+    return json({ ok: false, error: "unsupported_action" }, 400);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("finance-data-gateway", message);
+    const clientErrors = new Set([
+      "child_identity_not_linked",
+      "forbidden_chore_change",
+      "forbidden_chore_create",
+      "forbidden_approved_chore_change",
+      "forbidden_chore_completion",
+      "finance_payload_limit",
+      "finance_payload_too_large"
+    ]);
+    return json({ ok: false, error: clientErrors.has(message) ? message : "server_error" }, clientErrors.has(message) ? 403 : 500);
+  }
+});
