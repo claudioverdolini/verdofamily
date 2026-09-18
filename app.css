@@ -200,3 +200,35 @@
 @media(max-width:1100px){.school-timetable{grid-template-columns:repeat(3,minmax(0,1fr))}.school-subject-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:860px){.school-tomorrow-grid{grid-template-columns:1fr}.school-timetable{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.school-stats{grid-template-columns:1fr}.school-timetable,.school-subject-grid{grid-template-columns:1fr}.school-agenda-row{grid-template-columns:auto 38px minmax(0,1fr) auto}.school-agenda-row>.badge{grid-column:3}.school-agenda-row>.icon-btn{grid-column:auto}}
+
+/* advanced inventory */
+.inventory-location-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.inventory-location-stats button{border:1px solid var(--border);background:var(--surface);border-radius:13px;padding:10px 12px;display:flex;align-items:center;gap:9px;text-align:left;color:var(--muted)}
+.inventory-location-stats button.is-active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface));color:var(--accent)}
+.inventory-location-stats span{display:flex;flex-direction:column}
+.inventory-location-stats strong{font-size:15px;line-height:1}
+.inventory-location-stats small{font-size:8px;margin-top:3px}
+.shopping-stock-destination{display:flex;align-items:center;gap:7px}
+.shopping-stock-destination select{min-height:32px;border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:0 8px;font-size:9px}
+.inventory-badges{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.inventory-card-meta{display:flex;flex-direction:column;gap:2px;margin-top:7px}
+.inventory-card-meta span{font-size:8px;color:var(--faint)}
+.inventory-insights-layout{display:flex;flex-direction:column;gap:12px}
+.inventory-insight-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.inventory-insight-stats>.card{padding:14px;display:flex;flex-direction:column;gap:3px}
+.inventory-insight-stats span{font-size:9px;color:var(--muted);font-weight:800;text-transform:uppercase}
+.inventory-insight-stats strong{font-size:23px;line-height:1}
+.inventory-insight-stats small{font-size:8px;color:var(--faint)}
+.inventory-suggestion-list{display:flex;flex-direction:column}
+.inventory-suggestion-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;min-height:70px;border-bottom:1px solid var(--border)}
+.inventory-suggestion-row:last-child{border-bottom:0}
+.inventory-suggestion-icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 9%,var(--surface2));color:var(--accent)}
+.inventory-suggestion-icon--warning{background:color-mix(in srgb,var(--warning) 10%,var(--surface2));color:var(--warning)}
+.inventory-suggestion-row>div:nth-child(2){display:flex;flex-direction:column;min-width:0}
+.inventory-suggestion-row strong{font-size:10px}
+.inventory-suggestion-row span{font-size:8px;color:var(--muted);margin-top:2px}
+.inventory-suggestion-row small{font-size:8px;color:var(--faint);margin-top:3px}
+.inventory-import-destination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2)}
+.inventory-import-destination>strong{font-size:9px}
+@media(max-width:800px){.inventory-location-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-insight-stats{grid-template-columns:1fr}}
+@media(max-width:560px){.inventory-suggestion-row{grid-template-columns:auto minmax(0,1fr)}.inventory-suggestion-row>.button,.inventory-suggestion-row>button{grid-column:2;justify-self:start;margin-bottom:8px}.shopping-stock-destination{align-items:stretch;flex-direction:column}.inventory-import-destination{align-items:flex-start;flex-direction:column}}
