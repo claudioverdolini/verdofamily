@@ -386,6 +386,17 @@ async function handleCallback(url: URL) {
     return redirectResult("error", "expired_state");
   }
 
+  const { data: callbackMembership, error: callbackMemberError } = await admin
+    .from("family_members")
+    .select("role")
+    .eq("family_id", stateRow.family_id)
+    .eq("user_id", stateRow.user_id)
+    .maybeSingle();
+  if (callbackMemberError || !callbackMembership || String(callbackMembership.role || "") === "child") {
+    await admin.from("google_calendar_oauth_states").delete().eq("state", state);
+    return redirectResult("error", "adult_or_admin_required");
+  }
+
   try {
     const tokenPayload = await tokenRequest(new URLSearchParams({
       code,
