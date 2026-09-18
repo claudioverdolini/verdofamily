@@ -172,6 +172,18 @@ export type Chore = {
   amount: number
   done: boolean
   creditedTransactionId?: number
+  recurringChoreId?: number
+}
+
+export type RecurringChore = {
+  id: number
+  title: string
+  userId: number
+  amount: number
+  weekdays: number[]
+  active: boolean
+  startDate: string
+  endDate?: string
 }
 
 export type Transaction = {
@@ -203,6 +215,7 @@ export type FamilyData = {
   dishes: Dish[]
   mealPlans: MealPlan[]
   chores: Chore[]
+  recurringChores: RecurringChore[]
   transactions: Transaction[]
   todos: Todo[]
 }
