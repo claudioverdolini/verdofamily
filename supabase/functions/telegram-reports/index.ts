@@ -20,7 +20,7 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false }
 });
 
-const SECTION_KEYS = ["agenda", "meals", "shopping", "lowStock", "deadlines", "todos", "chores"] as const;
+const SECTION_KEYS = ["agenda", "meals", "shopping", "lowStock", "deadlines", "todos", "chores", "school"] as const;
 type SectionKey = typeof SECTION_KEYS[number];
 
 type ReportSchedule = {
@@ -113,7 +113,8 @@ function sanitizeSections(value: any): Record<SectionKey, boolean> {
     lowStock: source.lowStock === true,
     deadlines: source.deadlines !== false,
     todos: source.todos !== false,
-    chores: source.chores === true
+    chores: source.chores === true,
+    school: source.school !== false
   };
 }
 
@@ -384,6 +385,49 @@ async function buildReport(schedule: ReportSchedule) {
       .map((item: any) => `🔁 ${item.title}${scopeFamily ? (userName(data, Number(item.userId)) ? ` · ${userName(data, Number(item.userId))}` : "") : ""}`);
 
     lines.push("", "✅ Da fare & routine", ...listLines([...routines, ...todos], "Nessuna attività"));
+  }
+
+  if (schedule.sections.school) {
+    const subjects = new Map((Array.isArray(data.schoolSubjects) ? data.schoolSubjects : []).map((subject: any) => [Number(subject.id), subject]));
+    const schoolItems = (Array.isArray(data.schoolItems) ? data.schoolItems : [])
+      .filter((item: any) => !item?.done && String(item?.date || "") === targetDate)
+      .filter((item: any) => scopeFamily || itemForUser(item, appUserId))
+      .map((item: any) => {
+        const student = scopeFamily ? userName(data, Number(item.userId)) : "";
+        const subject: any = item.subjectId ? subjects.get(Number(item.subjectId)) : null;
+        const typeLabels: Record<string, string> = {
+          homework: "Compito",
+          test: "Verifica",
+          oral: "Interrogazione",
+          material: "Materiale",
+          circular: "Circolare",
+          permission: "Autorizzazione",
+          trip: "Gita/Uscita",
+          payment: "Pagamento"
+        };
+        const prefix = typeLabels[String(item.type || "")] || "Scuola";
+        const amount = item.type === "payment" && Number(item.amount || 0) > 0 ? ` · € ${Number(item.amount).toFixed(2).replace(".", ",")}` : "";
+        return `${prefix}: ${item.title}${subject?.name ? ` · ${subject.name}` : ""}${student ? ` · ${student}` : ""}${amount}`;
+      });
+
+    const day = weekdayFromDate(targetDate);
+    const lessons = (Array.isArray(data.schoolTimetable) ? data.schoolTimetable : [])
+      .filter((entry: any) => Number(entry?.weekday || 0) === day)
+      .filter((entry: any) => scopeFamily || itemForUser(entry, appUserId))
+      .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0))
+      .map((entry: any) => {
+        const subject: any = subjects.get(Number(entry.subjectId));
+        const student = scopeFamily ? userName(data, Number(entry.userId)) : "";
+        return `${entry.order ? `${entry.order}ª · ` : ""}${subject?.name || "Materia"}${student ? ` · ${student}` : ""}`;
+      });
+
+    if (lessons.length || schoolItems.length) {
+      lines.push("", "🎒 Scuola");
+      if (lessons.length) lines.push(...listLines(lessons, "", 12));
+      if (schoolItems.length) lines.push(...listLines(schoolItems, "", 12));
+    } else {
+      lines.push("", "🎒 Scuola", "• Nessun impegno scolastico");
+    }
   }
 
   if (schedule.sections.chores) {
