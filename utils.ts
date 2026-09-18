@@ -1,4 +1,4 @@
-import type { Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
+import type { BoardPost, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -454,7 +454,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   showBalances: true,
   bottomTabs: ['home', 'calendar', 'shopping', 'meals'],
   homeCards: ['today', 'shopping', 'deadlines', 'wallets'],
-  notifications: { calendar: true, deadlines: true, chores: true, school: true, shopping: false, whatsapp: false }
+  notifications: { calendar: true, deadlines: true, chores: true, school: true, board: true, shopping: false, whatsapp: false }
 }
 
 export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
@@ -579,7 +579,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 11,
+    version: 12,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -710,6 +710,27 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       amount: item.amount === undefined || item.amount === null ? undefined : Math.max(0, Number(item.amount) || 0),
       done: !!item.done,
       createdAt: item.createdAt || localDateISO()
+    })) : [],
+    boardPosts: Array.isArray(source.boardPosts) ? source.boardPosts.map((item: any): BoardPost => ({
+      id: String(item.id || crypto.randomUUID()),
+      type: ['note','message','reminder','photo'].includes(String(item.type)) ? item.type : 'note',
+      title: String(item.title || ''),
+      body: String(item.body || ''),
+      authorUserId: Number(item.authorUserId || 0),
+      audience: item.audience === 'users' ? 'users' : 'family',
+      userIds: Array.from(new Set((Array.isArray(item.userIds) ? item.userIds : []).map(Number).filter((id: number) => id > 0))),
+      pinned: item.pinned === true,
+      dueDate: item.dueDate || undefined,
+      createdAt: item.createdAt || new Date().toISOString(),
+      updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+      attachments: Array.isArray(item.attachments) ? item.attachments.map((attachment: any) => ({
+        id: String(attachment.id || crypto.randomUUID()),
+        name: String(attachment.name || 'foto'),
+        path: String(attachment.path || ''),
+        mimeType: attachment.mimeType || undefined,
+        size: attachment.size === undefined ? undefined : Number(attachment.size || 0),
+        createdAt: attachment.createdAt || new Date().toISOString()
+      })).filter((attachment: any) => attachment.path) : []
     })) : []
   }
 }
