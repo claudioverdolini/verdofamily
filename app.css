@@ -232,3 +232,38 @@
 .inventory-import-destination>strong{font-size:9px}
 @media(max-width:800px){.inventory-location-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-insight-stats{grid-template-columns:1fr}}
 @media(max-width:560px){.inventory-suggestion-row{grid-template-columns:auto minmax(0,1fr)}.inventory-suggestion-row>.button,.inventory-suggestion-row>button{grid-column:2;justify-self:start;margin-bottom:8px}.shopping-stock-destination{align-items:stretch;flex-direction:column}.inventory-import-destination{align-items:flex-start;flex-direction:column}}
+
+/* smart meals */
+.smart-meals{display:flex;flex-direction:column;gap:12px}
+.smart-meals__controls{padding-bottom:14px}
+.form-grid--4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.smart-meal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.smart-meal-card{display:flex;flex-direction:column;gap:10px;min-height:280px;position:relative}
+.smart-meal-card.is-top{border-color:color-mix(in srgb,var(--accent) 48%,var(--border));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 13%,transparent)}
+.smart-meal-card__head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.smart-meal-card__head>span{display:flex;align-items:center;gap:4px;font-size:8px;font-weight:800;color:var(--muted)}
+.smart-meal-card__title{display:flex;flex-direction:column;min-width:0}
+.smart-meal-card__title strong{font-size:14px;line-height:1.1}
+.smart-meal-card__title span{font-size:9px;color:var(--muted);margin-top:3px}
+.smart-meal-score{display:flex;flex-direction:column;gap:4px}
+.smart-meal-score>div{height:6px;border-radius:999px;background:var(--surface2);overflow:hidden}
+.smart-meal-score>div>span{display:block;height:100%;border-radius:999px;background:var(--accent)}
+.smart-meal-score small{font-size:8px;color:var(--muted)}
+.smart-meal-reasons{display:flex;flex-direction:column;gap:5px}
+.smart-meal-reasons span{display:flex;align-items:flex-start;gap:5px;font-size:8px;color:var(--muted);line-height:1.25}
+.smart-meal-reasons svg{flex:0 0 auto;color:var(--accent);margin-top:1px}
+.smart-meal-missing{display:flex;flex-direction:column;gap:5px;padding:8px;border-radius:10px;background:var(--surface2);margin-top:auto}
+.smart-meal-missing>strong{font-size:8px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+.smart-meal-missing>div{display:flex;flex-wrap:wrap;gap:4px}
+.smart-meal-missing span{font-size:7px;padding:3px 6px;border-radius:999px;background:var(--surface);color:var(--muted)}
+.smart-meal-ready{margin-top:auto;padding:9px;border-radius:10px;background:color-mix(in srgb,#16a34a 8%,var(--surface));font-size:8px;font-weight:800;color:#15803d}
+.smart-meal-actions{display:flex;flex-wrap:wrap;gap:6px}
+.meal-preference-picker{display:flex;flex-wrap:wrap;gap:7px}
+.meal-preference-picker button{min-height:34px;border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:0 10px;display:flex;align-items:center;gap:6px;font-size:8px;font-weight:800;color:var(--muted)}
+.meal-preference-picker button.is-active{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
+.dish-card__time{display:flex;align-items:center;gap:4px;font-size:8px;color:var(--muted);margin-top:5px}
+.dish-card__preferred{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.dish-card__preferred>span{display:flex;align-items:center;gap:4px;font-size:7px;color:var(--muted);padding:2px 6px;border-radius:999px;background:var(--surface2)}
+@media(max-width:1200px){.smart-meal-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:900px){.smart-meal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid--4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.smart-meal-grid,.form-grid--4{grid-template-columns:1fr}.smart-meal-card{min-height:0}}
