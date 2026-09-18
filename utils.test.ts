@@ -136,7 +136,7 @@ describe('data migration', () => {
   it('migrates legacy meals to dishes', () => {
     const migrated = migrateData({ users: initialData.users, meals: [{ id: 9, name: 'Riso', type: 'Primo', variant: '', ingredients: [] }] }, initialData)
     expect(migrated.dishes[0].name).toBe('Riso')
-    expect(migrated.version).toBe(4)
+    expect(migrated.version).toBe(12)
   })
 
   it('separates a legacy medicine from its prescribed therapy without losing data', () => {
