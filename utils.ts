@@ -513,7 +513,27 @@ function migrateDeadlines(input: any[]): Deadline[] {
       return
     }
 
-    result.push({ ...base, kind: raw?.kind || 'general' })
+    if (!raw?.kind || raw.kind === 'general') {
+      const allowedCategories = ['documents','insurance','car','subscriptions','school','holidays','birthdays','home','other']
+      const reminderDays = Array.from(new Set(
+        (Array.isArray(raw.reminderDays) ? raw.reminderDays : [90, 30, 7])
+          .map(Number)
+          .filter((value: number) => Number.isFinite(value) && value >= 0 && value <= 3650)
+      )).sort((a, b) => b - a)
+      result.push({
+        ...base,
+        kind: 'general',
+        category: allowedCategories.includes(String(raw.category)) ? raw.category : 'other',
+        reminderDays: reminderDays.length ? reminderDays : [90, 30, 7],
+        repeatYearly: raw.repeatYearly === true,
+        lastCompletedAt: raw.lastCompletedAt || undefined,
+        lastCompletedDate: raw.lastCompletedDate || undefined,
+        notes: raw.notes || ''
+      })
+      return
+    }
+
+    result.push({ ...base, kind: raw.kind })
   })
 
   return [...result, ...pendingTherapies]
@@ -523,7 +543,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 8,
+    version: 9,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
