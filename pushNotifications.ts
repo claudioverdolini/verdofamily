@@ -99,7 +99,8 @@ export async function enablePush(familyId: string, topics: PushTopics) {
     action: 'subscribe',
     subscription: subscription.toJSON(),
     topics,
-    userAgent: navigator.userAgent
+    userAgent: navigator.userAgent,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Rome'
   })
   return subscription
 }
