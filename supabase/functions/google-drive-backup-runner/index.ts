@@ -12,13 +12,19 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json", ...cors }
 });
 
-function stripHealthFromFamilyData(value: any) {
+function stripSensitiveFromFamilyData(value: any) {
   const data = value && typeof value === "object" && !Array.isArray(value)
     ? structuredClone(value)
     : {};
   data.deadlines = Array.isArray(data.deadlines)
     ? data.deadlines.filter((item: any) => !["medicine","therapy","visit","health-record"].includes(String(item?.kind || "")))
     : [];
+  data.users = Array.isArray(data.users)
+    ? data.users.map((user: any) => ({ ...user, balance: 0, password: "" }))
+    : [];
+  data.chores = [];
+  data.recurringChores = [];
+  data.transactions = [];
   return data;
 }
 
@@ -104,25 +110,30 @@ Deno.serve(async (req) => {
         const [
           { data: family, error: famError },
           { data: doc, error: docError },
-          { data: healthData, error: healthError }
+          { data: healthData, error: healthError },
+          { data: financeData, error: financeError }
         ] = await Promise.all([
           client.from("families").select("name").eq("id", familyId).single(),
           client.from("family_documents").select("data,revision,updated_at").eq("family_id", familyId).single(),
-          client.rpc("system_health_snapshot", { p_family_id: familyId })
+          client.rpc("system_health_snapshot", { p_family_id: familyId }),
+          client.rpc("system_finance_snapshot", { p_family_id: familyId })
         ]);
         if (famError) throw famError;
         if (docError) throw docError;
         if (healthError) throw healthError;
+        if (financeError) throw financeError;
 
-        const familyData = stripHealthFromFamilyData(doc.data || {});
+        const familyData = stripSensitiveFromFamilyData(doc.data || {});
         const normalizedHealth = healthData || { version: 1, items: [] };
+        const normalizedFinance = financeData || { version: 1, wallets: [], chores: [], recurringChores: [], transactions: [] };
 
         await client.from("family_backups").insert({
           family_id: familyId,
           revision: Number(doc.revision || 0),
           data: familyData,
           health_data: normalizedHealth,
-          backup_format_version: 2,
+          finance_data: normalizedFinance,
+          backup_format_version: 3,
           reason: cronMode ? "google_drive_export" : "manual_google_drive_export",
           created_by: null
         });
@@ -130,14 +141,15 @@ Deno.serve(async (req) => {
         const payload = {
           secret: cfg.webhook_secret,
           app: "VerdoFamily",
-          schemaVersion: 2,
+          schemaVersion: 3,
           familyId,
           familyName: family?.name || "Famiglia",
           revision: Number(doc.revision || 0),
           sourceUpdatedAt: doc.updated_at,
           exportedAt: new Date().toISOString(),
           data: familyData,
-          healthData: normalizedHealth
+          healthData: normalizedHealth,
+          financeData: normalizedFinance
         };
 
         // Google Apps Script ContentService intentionally answers through a 3xx
