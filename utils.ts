@@ -236,6 +236,7 @@ export function materializeRecurringChores(data: FamilyData, dateStr = localDate
       userId: Number(template.userId),
       amount: Math.max(0, Number(template.amount) || 0),
       done: false,
+      completionStatus: 'open',
       recurringChoreId: Number(template.id)
     }]
     changed = true
@@ -457,7 +458,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 6,
+    version: 7,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -489,6 +490,13 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       userId: Number(chore.userId),
       amount: Math.max(0, Number(chore.amount) || 0),
       done: !!chore.done,
+      completionStatus: chore.done
+        ? 'approved'
+        : (chore.completionStatus === 'pending' ? 'pending' : 'open'),
+      completedAt: chore.completedAt || undefined,
+      completedByUserId: chore.completedByUserId ? Number(chore.completedByUserId) : undefined,
+      approvedAt: chore.approvedAt || undefined,
+      approvedByUserId: chore.approvedByUserId ? Number(chore.approvedByUserId) : undefined,
       recurringChoreId: chore.recurringChoreId ? Number(chore.recurringChoreId) : undefined
     })) : [],
     recurringChores: Array.isArray(source.recurringChores) ? source.recurringChores.map((chore: any): RecurringChore => ({
