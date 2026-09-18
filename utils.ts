@@ -621,7 +621,20 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       reason: ['manual','purchase','meal','import','adjustment'].includes(String(movement.reason)) ? movement.reason : 'manual'
     })) : [],
     shopping: Array.isArray(source.shopping) ? source.shopping : [],
-    dishes: Array.isArray(source.dishes) ? source.dishes : (Array.isArray(source.meals) ? source.meals : fallback.dishes),
+    dishes: (Array.isArray(source.dishes) ? source.dishes : (Array.isArray(source.meals) ? source.meals : fallback.dishes)).map((dish: any) => ({
+      ...dish,
+      id: Number(dish.id),
+      name: String(dish.name || 'Piatto'),
+      type: String(dish.type || 'Altro'),
+      variant: String(dish.variant || ''),
+      ingredients: Array.isArray(dish.ingredients) ? dish.ingredients.map((ing: any) => ({
+        name: String(ing?.name || ''),
+        qty: Math.max(0, Number(ing?.qty || 0)),
+        unit: String(ing?.unit || 'pz')
+      })).filter((ing: any) => ing.name) : [],
+      prepMinutes: dish.prepMinutes === undefined || dish.prepMinutes === null ? undefined : Math.max(0, Number(dish.prepMinutes) || 0),
+      preferredByUserIds: Array.from(new Set((Array.isArray(dish.preferredByUserIds) ? dish.preferredByUserIds : []).map(Number).filter((id: number) => id > 0)))
+    })),
     mealPlans: Array.isArray(source.mealPlans) ? source.mealPlans.map((p: any) => ({ ...p, dishId: Number(p.dishId ?? p.mealId) })) : [],
     chores: Array.isArray(source.chores) ? source.chores.map((chore: any) => ({
       ...chore,
