@@ -25,7 +25,7 @@ import { FamilyProvider, useFamily } from './store'
 import type { PageKey } from './types'
 import { Avatar, Button, IconButton } from './ui'
 import { supabase } from './supabaseClient'
-import { localDateISO, routineCompletedOn, routineDueOn } from './utils'
+import { localDateISO, pantryExpiryDays, pantryNeedsRestock, routineCompletedOn, routineDueOn } from './utils'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/Calendar'
 import ShoppingPantryPage from './pages/ShoppingPantry'
@@ -306,8 +306,9 @@ function NotificationCenter() {
     deadlines: JSON.stringify(data.deadlines),
     todos: JSON.stringify(data.todos),
     routines: JSON.stringify([data.routines, data.routineCompletions]),
-    school: JSON.stringify([data.schoolSubjects, data.schoolTimetable, data.schoolItems])
-  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos, data.routines, data.routineCompletions, data.schoolSubjects, data.schoolTimetable, data.schoolItems])
+    school: JSON.stringify([data.schoolSubjects, data.schoolTimetable, data.schoolItems]),
+    inventory: JSON.stringify([data.pantry, data.pantryMovements])
+  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos, data.routines, data.routineCompletions, data.schoolSubjects, data.schoolTimetable, data.schoolItems, data.pantry, data.pantryMovements])
 
   useEffect(() => {
     if (!previousHashes.current) {
@@ -323,7 +324,8 @@ function NotificationCenter() {
       { key: 'deadlines', title: 'Scadenze aggiornate', detail: 'Lo scadenziario familiare è stato modificato.', page: 'deadlines' },
       { key: 'todos', title: 'Da fare aggiornati', detail: 'La lista delle attività è stata modificata.', page: 'todos' },
       { key: 'routines', title: 'Routine aggiornate', detail: 'Sono cambiate le attività ricorrenti della famiglia.', page: 'todos' },
-      { key: 'school', title: 'Scuola aggiornata', detail: 'Ci sono novità su compiti, verifiche, materiale o orario.', page: 'school' }
+      { key: 'school', title: 'Scuola aggiornata', detail: 'Ci sono novità su compiti, verifiche, materiale o orario.', page: 'school' },
+      { key: 'inventory', title: 'Inventario aggiornato', detail: 'Sono cambiate scorte, quantità o scadenze.', page: 'shopping' }
     ]
 
     const createdAt = new Date().toISOString()
@@ -501,17 +503,34 @@ function NotificationCenter() {
     }
 
     if (authUser.prefs?.notifications?.shopping !== false) {
-      const lowStock = data.pantry.filter(item => Number(item.minQty || 0) > 0 && Number(item.qty || 0) <= Number(item.minQty || 0))
+      const lowStock = data.pantry.filter(item => pantryNeedsRestock(item, data.pantryMovements, today))
+      const expiring = data.pantry
+        .map(item => ({ item, days: pantryExpiryDays(item, today) }))
+        .filter(entry => entry.days !== null && entry.days <= 3)
+
       if (lowStock.length) {
         items.push({
           id: `stock-${today}`,
-          title: lowStock.length === 1 ? `${lowStock[0].name} sotto scorta` : `${lowStock.length} prodotti sotto scorta`,
-          detail: lowStock.length === 1 ? 'Controlla la dispensa o aggiungilo alla spesa.' : 'Controlla i prodotti da reintegrare.',
+          title: lowStock.length === 1 ? `${lowStock[0].name} da reintegrare` : `${lowStock.length} prodotti da reintegrare`,
+          detail: lowStock.length === 1 ? 'Scorta minima o consumo previsto: controlla l’inventario.' : 'Controlla i suggerimenti automatici dell’inventario.',
           page: 'shopping',
           createdAt: `${today}T08:00:00`,
-          priority: 55,
+          priority: 58,
           kind: 'stock',
-          label: 'Dispensa'
+          label: 'Scorte'
+        })
+      }
+
+      if (expiring.length) {
+        items.push({
+          id: `expiry-${today}`,
+          title: expiring.length === 1 ? `${expiring[0].item.name} da consumare` : `${expiring.length} prodotti in scadenza`,
+          detail: expiring.some(entry => Number(entry.days) < 0) ? 'Ci sono prodotti già scaduti o molto vicini alla scadenza.' : 'Controlla i prodotti da consumare nei prossimi giorni.',
+          page: 'shopping',
+          createdAt: `${today}T08:05:00`,
+          priority: expiring.some(entry => Number(entry.days) < 0) ? 76 : 63,
+          kind: 'stock',
+          label: 'Scadenze'
         })
       }
     }
