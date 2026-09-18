@@ -10,6 +10,8 @@ import type {
   PageKey,
   RecurringChore,
   Routine,
+  PantryLocation,
+  PantryMovement,
   SchoolItem,
   SchoolSubject,
   SchoolTimetableEntry,
@@ -68,8 +70,8 @@ type StoreValue = {
   addShoppingItem: (item: Omit<ShoppingItem, 'id' | 'taken'>) => void
   toggleShoppingItem: (id: number) => void
   deleteShoppingItem: (id: number) => void
-  moveTakenShoppingToPantry: () => void
-  importReceiptItems: (items: Array<{ name: string; qty: number; unit: string; category: string }>, removeFromShopping: boolean) => void
+  moveTakenShoppingToPantry: (location?: PantryLocation) => void
+  importReceiptItems: (items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string }>, removeFromShopping: boolean, defaultLocation?: PantryLocation) => void
   upsertDish: (dish: Omit<Dish, 'id'> & { id?: number }) => void
   deleteDish: (id: number) => void
   upsertMealPlan: (plan: Omit<MealPlan, 'id'> & { id?: number }) => void
@@ -605,48 +607,184 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return true
   }
 
-  function upsertPantryItem(item: Omit<PantryItem, 'id'> & { id?: number }) {
-    setData(prev => ({ ...prev, pantry: item.id ? prev.pantry.map(p => p.id === item.id ? { ...p, ...item, id: p.id } : p) : [...prev.pantry, { ...item, id: nextId(prev.pantry) }] }))
+  function movement(movements: PantryMovement[], pantryItemId: number, delta: number, reason: PantryMovement['reason']): PantryMovement[] {
+    if (!delta) return movements
+    return [...movements, {
+      id: nextId(movements),
+      pantryItemId,
+      delta,
+      date: localDateISO(),
+      createdAt: new Date().toISOString(),
+      reason
+    }]
   }
-  function deletePantryItem(id: number) { setData(prev => ({ ...prev, pantry: prev.pantry.filter(p => p.id !== id) })) }
-  function changePantryQty(id: number, delta: number) { setData(prev => ({ ...prev, pantry: prev.pantry.map(p => p.id === id ? { ...p, qty: Math.max(0, Number(p.qty || 0) + delta) } : p) })) }
+
+  function upsertPantryItem(item: Omit<PantryItem, 'id'> & { id?: number }) {
+    setData(prev => {
+      if (item.id) {
+        const old = prev.pantry.find(p => p.id === item.id)
+        if (!old) return prev
+        const clean = {
+          ...old,
+          ...item,
+          id: old.id,
+          qty: Math.max(0, Number(item.qty || 0)),
+          minQty: Math.max(0, Number(item.minQty || 0)),
+          location: item.location || 'pantry' as PantryLocation,
+          expiryDate: item.expiryDate || undefined,
+          autoRestock: item.autoRestock !== false
+        }
+        const delta = Number(clean.qty || 0) - Number(old.qty || 0)
+        return {
+          ...prev,
+          pantry: prev.pantry.map(p => p.id === item.id ? clean : p),
+          pantryMovements: movement(prev.pantryMovements, old.id, delta, 'adjustment')
+        }
+      }
+
+      const id = nextId(prev.pantry)
+      const clean: PantryItem = {
+        ...item,
+        id,
+        name: item.name.trim(),
+        qty: Math.max(0, Number(item.qty || 0)),
+        minQty: Math.max(0, Number(item.minQty || 0)),
+        location: item.location || 'pantry',
+        expiryDate: item.expiryDate || undefined,
+        autoRestock: item.autoRestock !== false
+      }
+      return {
+        ...prev,
+        pantry: [...prev.pantry, clean],
+        pantryMovements: movement(prev.pantryMovements, id, Number(clean.qty || 0), 'adjustment')
+      }
+    })
+  }
+
+  function deletePantryItem(id: number) {
+    setData(prev => ({
+      ...prev,
+      pantry: prev.pantry.filter(p => p.id !== id),
+      pantryMovements: prev.pantryMovements.filter(m => m.pantryItemId !== id)
+    }))
+  }
+
+  function changePantryQty(id: number, delta: number) {
+    setData(prev => {
+      const target = prev.pantry.find(p => p.id === id)
+      if (!target) return prev
+      const current = Number(target.qty || 0)
+      const nextQty = Math.max(0, current + Number(delta || 0))
+      const actualDelta = nextQty - current
+      if (!actualDelta) return prev
+      return {
+        ...prev,
+        pantry: prev.pantry.map(p => p.id === id ? { ...p, qty: nextQty } : p),
+        pantryMovements: movement(prev.pantryMovements, id, actualDelta, 'manual')
+      }
+    })
+  }
 
   function addShoppingItem(item: Omit<ShoppingItem, 'id' | 'taken'>) { setData(prev => ({ ...prev, shopping: [...prev.shopping, { ...item, id: nextId(prev.shopping), taken: false }] })) }
   function toggleShoppingItem(id: number) { setData(prev => ({ ...prev, shopping: prev.shopping.map(s => s.id === id ? { ...s, taken: !s.taken } : s) })) }
   function deleteShoppingItem(id: number) { setData(prev => ({ ...prev, shopping: prev.shopping.filter(s => s.id !== id) })) }
 
-  function mergeIntoPantry(pantry: PantryItem[], items: Array<{ name: string; qty: number; unit: string; category?: string }>) {
+  function mergeIntoPantry(
+    pantry: PantryItem[],
+    movements: PantryMovement[],
+    items: Array<{ name: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string }>,
+    reason: PantryMovement['reason'],
+    defaultLocation: PantryLocation = 'pantry'
+  ) {
     const next = [...pantry]
+    let nextMovements = [...movements]
     for (const item of items) {
-      const idx = next.findIndex(p => normalize(p.name) === normalize(item.name) && normalize(p.unit) === normalize(item.unit))
-      if (idx >= 0) next[idx] = { ...next[idx], qty: Number(next[idx].qty || 0) + Number(item.qty || 0) }
-      else next.push({ id: nextId(next), name: item.name.trim(), qty: Number(item.qty || 0), unit: item.unit || 'pz', category: item.category || 'Generico' })
+      const location = item.location || defaultLocation
+      const expiryDate = item.expiryDate || undefined
+      const idx = next.findIndex(p =>
+        normalize(p.name) === normalize(item.name) &&
+        normalize(p.unit) === normalize(item.unit) &&
+        (p.location || 'pantry') === location &&
+        (p.expiryDate || '') === (expiryDate || '')
+      )
+      const qty = Math.max(0, Number(item.qty || 0))
+      if (idx >= 0) {
+        const current = next[idx]
+        next[idx] = { ...current, qty: Number(current.qty || 0) + qty }
+        nextMovements = movement(nextMovements, current.id, qty, reason)
+      } else {
+        const id = nextId(next)
+        next.push({
+          id,
+          name: item.name.trim(),
+          qty,
+          unit: item.unit || 'pz',
+          category: item.category || 'Generico',
+          minQty: 0,
+          location,
+          expiryDate,
+          autoRestock: true
+        })
+        nextMovements = movement(nextMovements, id, qty, reason)
+      }
     }
-    return next
+    return { pantry: next, pantryMovements: nextMovements }
   }
 
-  function moveTakenShoppingToPantry() {
+  function moveTakenShoppingToPantry(location: PantryLocation = 'pantry') {
     setData(prev => {
       const taken = prev.shopping.filter(s => s.taken)
       if (!taken.length) return prev
-      return { ...prev, pantry: mergeIntoPantry(prev.pantry, taken.map(s => ({ name: s.name, qty: s.qty, unit: s.unit, category: s.category || 'Generico' }))), shopping: prev.shopping.filter(s => !s.taken) }
+      const merged = mergeIntoPantry(
+        prev.pantry,
+        prev.pantryMovements,
+        taken.map(s => ({ name: s.name, qty: s.qty, unit: s.unit, category: s.category || 'Generico', location })),
+        'purchase',
+        location
+      )
+      return { ...prev, ...merged, shopping: prev.shopping.filter(s => !s.taken) }
     })
   }
 
-  function importReceiptItems(items: Array<{ name: string; qty: number; unit: string; category: string }>, removeFromShopping: boolean) {
-    setData(prev => ({ ...prev, pantry: mergeIntoPantry(prev.pantry, items), shopping: removeFromShopping ? prev.shopping.filter(s => !items.some(i => normalize(i.name) === normalize(s.name))) : prev.shopping }))
+  function importReceiptItems(
+    items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string }>,
+    removeFromShopping: boolean,
+    defaultLocation: PantryLocation = 'pantry'
+  ) {
+    setData(prev => {
+      const merged = mergeIntoPantry(prev.pantry, prev.pantryMovements, items, 'import', defaultLocation)
+      return {
+        ...prev,
+        ...merged,
+        shopping: removeFromShopping ? prev.shopping.filter(s => !items.some(i => normalize(i.name) === normalize(s.name))) : prev.shopping
+      }
+    })
   }
 
   function adjustIngredients(prev: FamilyData, dishId: number, factor: number) {
     const dish = prev.dishes.find(d => d.id === dishId)
-    if (!dish) return prev.pantry
+    if (!dish) return { pantry: prev.pantry, pantryMovements: prev.pantryMovements }
     const pantry = [...prev.pantry]
+    let pantryMovements = [...prev.pantryMovements]
     for (const ing of dish.ingredients) {
-      const idx = pantry.findIndex(p => normalize(p.name) === normalize(ing.name))
-      const delta = Number(ing.qty || 0) * factor
-      if (idx >= 0) pantry[idx] = { ...pantry[idx], qty: Math.max(0, Number(pantry[idx].qty || 0) + delta) }
+      const candidates = pantry
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => normalize(item.name) === normalize(ing.name))
+        .sort((a, b) => {
+          const expiryA = a.item.expiryDate || '9999-12-31'
+          const expiryB = b.item.expiryDate || '9999-12-31'
+          return expiryA.localeCompare(expiryB)
+        })
+      if (!candidates.length) continue
+      const target = candidates[0]
+      const requestedDelta = Number(ing.qty || 0) * factor
+      const current = Number(target.item.qty || 0)
+      const nextQty = Math.max(0, current + requestedDelta)
+      const actualDelta = nextQty - current
+      pantry[target.index] = { ...target.item, qty: nextQty }
+      pantryMovements = movement(pantryMovements, target.item.id, actualDelta, 'meal')
     }
-    return pantry
+    return { pantry, pantryMovements }
   }
 
   function upsertDish(dish: Omit<Dish, 'id'> & { id?: number }) { setData(prev => ({ ...prev, dishes: dish.id ? prev.dishes.map(d => d.id === dish.id ? { ...d, ...dish, id: d.id } : d) : [...prev.dishes, { ...dish, id: nextId(prev.dishes) }] })) }
@@ -657,19 +795,24 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       let pantry = prev.pantry
       if (plan.id) {
         const old = prev.mealPlans.find(p => p.id === plan.id)
-        if (old) pantry = adjustIngredients({ ...prev, pantry }, old.dishId, +1)
+        if (old) {
+          const restored = adjustIngredients({ ...prev, pantry }, old.dishId, +1)
+          pantry = restored.pantry
+          prev = { ...prev, pantryMovements: restored.pantryMovements }
+        }
       }
-      pantry = adjustIngredients({ ...prev, pantry }, plan.dishId, -1)
+      const consumed = adjustIngredients({ ...prev, pantry }, plan.dishId, -1)
+      pantry = consumed.pantry
       const mealPlans = plan.id ? prev.mealPlans.map(p => p.id === plan.id ? { ...p, ...plan, id: p.id } : p) : [...prev.mealPlans, { ...plan, id: nextId(prev.mealPlans) }]
-      return { ...prev, pantry, mealPlans }
+      return { ...prev, pantry, pantryMovements: consumed.pantryMovements, mealPlans }
     })
   }
 
   function deleteMealPlan(id: number) {
     setData(prev => {
       const plan = prev.mealPlans.find(p => p.id === id)
-      const pantry = plan ? adjustIngredients(prev, plan.dishId, +1) : prev.pantry
-      return { ...prev, pantry, mealPlans: prev.mealPlans.filter(p => p.id !== id) }
+      const restored = plan ? adjustIngredients(prev, plan.dishId, +1) : { pantry: prev.pantry, pantryMovements: prev.pantryMovements }
+      return { ...prev, pantry: restored.pantry, pantryMovements: restored.pantryMovements, mealPlans: prev.mealPlans.filter(p => p.id !== id) }
     })
   }
 
