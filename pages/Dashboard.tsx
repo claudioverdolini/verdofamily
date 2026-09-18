@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 import { useFamily } from '../store'
 import { Card, CardHeader, EmptyState, ListRow, PageIntro, StatCard } from '../ui'
-import { addDays, dayLabel, localDateISO, money, weekDates } from '../utils'
+import { addDays, dayLabel, localDateISO, money, routineCompletedOn, routineDueOn, weekDates } from '../utils'
 import './dashboard-command-center.css'
 
 type HomeView = 'today' | 'week' | 'family'
@@ -49,6 +49,9 @@ export default function Dashboard() {
   const choresAwaitingApproval = data.chores.filter(x => !x.done && x.completionStatus === 'pending')
   const choresStillToDo = pendingChores.filter(x => x.completionStatus !== 'pending')
   const pendingTodos = data.todos.filter(x => !x.done)
+  const dueRoutinesToday = data.routines.filter(routine =>
+    routineDueOn(routine, today) && !routineCompletedOn(data.routineCompletions, routine.id, today)
+  )
   const lowStock = data.pantry.filter(x => Number(x.minQty || 0) > 0 && Number(x.qty || 0) <= Number(x.minQty || 0))
 
   const eventsByDate = useMemo(() => {
@@ -77,6 +80,17 @@ export default function Dashboard() {
     }
     return map
   }, [data.mealPlans, data.dishes, week.join('|')])
+
+  const routinesByDate = useMemo(() => {
+    const map: Record<string, typeof data.routines> = {}
+    for (const date of week) map[date] = []
+    for (const date of week) {
+      map[date] = data.routines.filter(routine =>
+        routineDueOn(routine, date) && !routineCompletedOn(data.routineCompletions, routine.id, date)
+      )
+    }
+    return map
+  }, [data.routines, data.routineCompletions, week.join('|')])
 
   const deadlinesByDate = useMemo(() => {
     const map: Record<string, typeof data.deadlines> = {}
@@ -117,18 +131,20 @@ export default function Dashboard() {
       .filter(event => event.date >= today && event.date <= weekEnd && eventForUser(event, user.id))
       .sort((a, b) => `${a.date}${a.time || ''}`.localeCompare(`${b.date}${b.time || ''}`))
     const userTodos = pendingTodos.filter(item => item.userId === user.id)
+    const userRoutines = week.flatMap(date => (routinesByDate[date] || []).filter(item => item.userId === user.id))
     const userChores = pendingChores.filter(item => item.userId === user.id)
     const userDeadlines = data.deadlines
       .filter(item => !item.done && item.userId === user.id && item.date >= today && item.date <= weekEnd && item.kind !== 'medicine' && item.kind !== 'therapy')
       .sort((a, b) => a.date.localeCompare(b.date))
-    return { user, weekEvents, userTodos, userChores, userDeadlines }
-  }), [data.users, data.calendarEvents, data.deadlines, pendingTodos, pendingChores, today, weekEnd])
+    return { user, weekEvents, userTodos, userRoutines, userChores, userDeadlines }
+  }), [data.users, data.calendarEvents, data.deadlines, pendingTodos, pendingChores, routinesByDate, week.join('|'), today, weekEnd])
 
   const familyAlerts = [
     pendingShopping.length ? { label: `${pendingShopping.length} articoli da comprare`, page: 'shopping' as const } : null,
     lowStock.length ? { label: `${lowStock.length} prodotti sotto scorta`, page: 'shopping' as const } : null,
     nextDeadlines.length ? { label: `${nextDeadlines.length} scadenze nei prossimi 15 giorni`, page: 'deadlines' as const } : null,
-    pendingTodos.length ? { label: `${pendingTodos.length} cose da fare aperte`, page: 'todos' as const } : null,
+    pendingTodos.length ? { label: `${pendingTodos.length} promemoria aperti`, page: 'todos' as const } : null,
+    dueRoutinesToday.length ? { label: `${dueRoutinesToday.length} routine da fare oggi`, page: 'todos' as const } : null,
     authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? { label: `${choresAwaitingApproval.length} compiti da confermare`, page: 'chores' as const } : null
   ].filter(Boolean) as Array<{ label: string; page: any }>
 
@@ -177,8 +193,9 @@ export default function Dashboard() {
 
           <Card className="command-panel">
             <CardHeader title="Da fare" subtitle="Attività ancora aperte" action={<button className="text-link" onClick={() => setActivePage('todos')}>Tutte <ChevronRight size={16} /></button>} />
-            {pendingTodos.length || pendingChores.length ? <div className="command-simple-list">
-              {pendingTodos.slice(0, 3).map(item => <button key={`todo-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
+            {pendingTodos.length || dueRoutinesToday.length || pendingChores.length ? <div className="command-simple-list">
+              {dueRoutinesToday.slice(0, 2).map(item => <button key={`routine-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>Routine · {data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
+              {pendingTodos.slice(0, 2).map(item => <button key={`todo-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
               {pendingChores.slice(0, 2).map(item => <button key={`chore-${item.id}`} onClick={() => setActivePage('chores')}><CheckCircle2 size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'} · entro {shortDate(item.deadline)}</small></span></button>)}
             </div> : <EmptyState icon={<CheckCircle2 size={28} />} title="Tutto fatto" text="Non risultano attività aperte." />}
           </Card>
@@ -201,6 +218,7 @@ export default function Dashboard() {
             const meals = mealByDate[date] || []
             const deadlines = deadlinesByDate[date] || []
             const chores = choresByDate[date] || []
+            const routines = routinesByDate[date] || []
             return <section key={date} className={`week-command-day ${date === today ? 'is-today' : ''}`}>
               <header><span>{dayLabel(date)}</span><strong>{date.slice(8, 10)}</strong>{date === today ? <small>Oggi</small> : null}</header>
               <div className="week-command-day__section">
@@ -212,8 +230,9 @@ export default function Dashboard() {
                 <label><Utensils size={15} /> Pasti</label>
                 {meals.length ? meals.slice(0, 2).map((meal, index) => <button key={`${meal.slot}-${index}`} onClick={() => setActivePage('meals')}><span>{meal.slot}</span><strong>{meal.name}</strong></button>) : <em>Da pianificare</em>}
               </div>
-              {(chores.length || deadlines.length) ? <div className="week-command-day__flags">
-                {chores.length ? <button onClick={() => setActivePage('chores')}><ListTodo size={14} /> {chores.length} attività</button> : null}
+              {(chores.length || routines.length || deadlines.length) ? <div className="week-command-day__flags">
+                {routines.length ? <button onClick={() => setActivePage('todos')}><ListTodo size={14} /> {routines.length} routine</button> : null}
+                {chores.length ? <button onClick={() => setActivePage('chores')}><ListTodo size={14} /> {chores.length} compiti</button> : null}
                 {deadlines.length ? <button onClick={() => setActivePage('deadlines')}><ReceiptText size={14} /> {deadlines.length} scadenze</button> : null}
               </div> : null}
             </section>
@@ -233,7 +252,7 @@ export default function Dashboard() {
           <button className="week-command-heading__calendar" onClick={() => setActivePage('users')}><Users size={18} /> Membri</button>
         </div>
         <div className="family-command-grid">
-          {familyCards.map(({ user, weekEvents, userTodos, userChores, userDeadlines }) => <Card key={user.id} className="family-member-card">
+          {familyCards.map(({ user, weekEvents, userTodos, userRoutines, userChores, userDeadlines }) => <Card key={user.id} className="family-member-card">
             <div className="family-member-card__head">
               <span className="family-member-dot" style={{ background: user.color }} />
               <div><strong>{user.name}</strong><small>{user.role}</small></div>
@@ -244,7 +263,7 @@ export default function Dashboard() {
               {weekEvents[0] ? <button onClick={() => setActivePage('calendar')}><CalendarDays size={16} /><span><strong>{weekEvents[0].title}</strong><small>{shortDate(weekEvents[0].date)} · {weekEvents[0].time || 'tutto il giorno'}</small></span></button> : <span className="family-member-card__empty">Nessun impegno questa settimana</span>}
             </div>
             <div className="family-member-card__metrics">
-              <button onClick={() => setActivePage('todos')}><strong>{userTodos.length}</strong><small>da fare</small></button>
+              <button onClick={() => setActivePage('todos')}><strong>{userTodos.length + userRoutines.length}</strong><small>da fare</small></button>
               <button onClick={() => setActivePage('chores')}><strong>{userChores.length}</strong><small>compiti</small></button>
               <button onClick={() => setActivePage('deadlines')}><strong>{userDeadlines.length}</strong><small>scadenze</small></button>
             </div>
