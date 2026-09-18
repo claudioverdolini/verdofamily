@@ -44,39 +44,109 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-function appUserId(documentData: any, cloudUserId: string) {
-  const users = Array.isArray(documentData?.users) ? documentData.users : [];
-  const user = users.find((item: any) => String(item?.cloudUserId || "") === cloudUserId);
-  return user ? Number(user.id || 0) : 0;
+type NormalizedRecord = {
+  category: "visit" | "therapy" | "record";
+  entityId: string;
+  personId: string;
+  title: string;
+  personName: string;
+  description: string;
+};
+
+function parseRecordId(recordId: string) {
+  const match = recordId.match(/^(visit|therapy|health-record)-(\d+)$/);
+  if (!match) return null;
+  return {
+    kind: match[1] as "visit" | "therapy" | "health-record",
+    legacyId: Number(match[2])
+  };
 }
 
-function healthRecord(recordId: string, documentData: any) {
-  const match = recordId.match(/-(\d+)$/);
-  const id = match ? Number(match[1]) : 0;
-  const deadlines = Array.isArray(documentData?.deadlines) ? documentData.deadlines : [];
-  return deadlines.find((item: any) => Number(item?.id) === id) || null;
-}
+async function normalizedRecordInfo(admin: any, familyId: string, recordId: string): Promise<NormalizedRecord | null> {
+  const parsed = parseRecordId(recordId);
+  if (!parsed) return null;
 
-function childCanAccessRecord(recordId: string, documentData: any, childId: number) {
-  if (!recordId || !childId) return false;
-  const record = healthRecord(recordId, documentData);
-  return !!record && Number(record?.userId || 0) === childId;
-}
+  let row: any = null;
+  let error: any = null;
+  let category: NormalizedRecord["category"] = "record";
 
-function recordInfo(recordId: string, documentData: any) {
-  const match = recordId.match(/-(\d+)$/);
-  const id = match ? Number(match[1]) : 0;
-  const deadlines = Array.isArray(documentData?.deadlines) ? documentData.deadlines : [];
-  const users = Array.isArray(documentData?.users) ? documentData.users : [];
-  const record = deadlines.find((item: any) => Number(item?.id) === id);
-  const person = users.find((item: any) => Number(item?.id) === Number(record?.userId));
-  const category = recordId.startsWith("visit-") ? "visit" : recordId.startsWith("therapy-") ? "therapy" : "record";
+  if (parsed.kind === "visit") {
+    const result = await admin
+      .from("health_visits")
+      .select("id,person_id,title,specialty,doctor,facility,purpose")
+      .eq("family_id", familyId)
+      .eq("legacy_id", parsed.legacyId)
+      .maybeSingle();
+    row = result.data;
+    error = result.error;
+    category = "visit";
+  } else if (parsed.kind === "therapy") {
+    const result = await admin
+      .from("health_therapies")
+      .select("id,person_id,title,prescriber,purpose")
+      .eq("family_id", familyId)
+      .eq("legacy_id", parsed.legacyId)
+      .maybeSingle();
+    row = result.data;
+    error = result.error;
+    category = "therapy";
+  } else {
+    const result = await admin
+      .from("health_records")
+      .select("id,person_id,title,provider")
+      .eq("family_id", familyId)
+      .eq("legacy_id", parsed.legacyId)
+      .maybeSingle();
+    row = result.data;
+    error = result.error;
+    category = "record";
+  }
+
+  if (error) throw error;
+  if (!row) return null;
+
+  const { data: person, error: personError } = await admin
+    .from("family_people")
+    .select("display_name")
+    .eq("id", row.person_id)
+    .eq("family_id", familyId)
+    .maybeSingle();
+  if (personError) throw personError;
+
   return {
     category,
-    title: String(record?.title || "Documento sanitario"),
-    personName: String(person?.name || "Famiglia"),
-    description: [record?.specialty, record?.doctor, record?.provider, record?.purpose].filter(Boolean).join(" · ")
+    entityId: String(row.id),
+    personId: String(row.person_id),
+    title: String(row.title || "Documento sanitario"),
+    personName: String(person?.display_name || "Familiare"),
+    description: [row.specialty, row.doctor, row.facility, row.provider, row.prescriber, row.purpose]
+      .filter(Boolean)
+      .join(" · ")
   };
+}
+
+async function attachmentAccessInfo(admin: any, familyId: string, path: string) {
+  const { data: attachment, error } = await admin
+    .from("health_attachments")
+    .select("id,visit_id,therapy_id,record_id,storage_path")
+    .eq("family_id", familyId)
+    .eq("storage_path", path)
+    .maybeSingle();
+  if (error) throw error;
+  if (!attachment) return null;
+
+  let personId = "";
+  if (attachment.visit_id) {
+    const { data } = await admin.from("health_visits").select("person_id").eq("id", attachment.visit_id).maybeSingle();
+    personId = String(data?.person_id || "");
+  } else if (attachment.therapy_id) {
+    const { data } = await admin.from("health_therapies").select("person_id").eq("id", attachment.therapy_id).maybeSingle();
+    personId = String(data?.person_id || "");
+  } else if (attachment.record_id) {
+    const { data } = await admin.from("health_records").select("person_id").eq("id", attachment.record_id).maybeSingle();
+    personId = String(data?.person_id || "");
+  }
+  return { attachment, personId };
 }
 
 async function backupToDrive(admin: any, familyId: string, recordId: string, fileName: string, mimeType: string, bytes: Uint8Array) {
@@ -90,14 +160,8 @@ async function backupToDrive(admin: any, familyId: string, recordId: string, fil
     return { ok: false, skipped: true, error: "drive_backup_not_configured" };
   }
 
-  const { data: doc, error: docError } = await admin
-    .from("family_documents")
-    .select("data")
-    .eq("family_id", familyId)
-    .single();
-  if (docError) throw docError;
-
-  const info = recordInfo(recordId, doc?.data || {});
+  const info = await normalizedRecordInfo(admin, familyId, recordId);
+  if (!info) throw new Error("health_record_not_found");
   const payload = {
     type: "health_attachment",
     secret: cfg.webhook_secret,
@@ -139,8 +203,7 @@ Deno.serve(async (req) => {
     let serverMode = false;
     let user: any = null;
     let membershipRole = "";
-    let childAppId = 0;
-    let childDocumentData: any = null;
+    let childPersonId = "";
 
     if (providedCronSecret) {
       const { data: secretRow, error: secretError } = await admin
@@ -196,24 +259,23 @@ Deno.serve(async (req) => {
       membershipRole = String(membership.role || "adult");
 
       if (membershipRole === "child") {
-        const { data: document, error: documentError } = await admin
-          .from("family_documents")
-          .select("data")
+        const { data: person, error: personError } = await admin
+          .from("family_people")
+          .select("id")
           .eq("family_id", familyId)
-          .single();
-        if (documentError || !document) return json({ ok: false, error: "family_document_not_found" }, 404);
-        childDocumentData = document.data || {};
-        childAppId = appUserId(childDocumentData, user.id);
-        if (!childAppId) return json({ ok: false, error: "child_identity_not_linked" }, 403);
+          .eq("auth_user_id", user.id)
+          .maybeSingle();
+        if (personError || !person) return json({ ok: false, error: "child_identity_not_linked" }, 403);
+        childPersonId = String(person.id);
       }
     }
 
     if (action === "upload") {
       if (serverMode) return json({ ok: false, error: "upload_requires_user" }, 403);
       if (!recordId) return json({ ok: false, error: "record_id_required" }, 400);
-      if (membershipRole === "child" && !childCanAccessRecord(recordId, childDocumentData, childAppId)) {
-        return json({ ok: false, error: "forbidden_health_record" }, 403);
-      }
+      if (membershipRole === "child") return json({ ok: false, error: "health_read_only_for_child" }, 403);
+      const record = await normalizedRecordInfo(admin, familyId, recordId);
+      if (!record) return json({ ok: false, error: "health_record_not_found" }, 404);
       if (!file) return json({ ok: false, error: "file_required" }, 400);
       if (file.size <= 0 || file.size > MAX_BYTES) return json({ ok: false, error: "file_too_large" }, 413);
       if (!ALLOWED.has(file.type)) return json({ ok: false, error: "file_type_not_allowed" }, 415);
@@ -233,15 +295,35 @@ Deno.serve(async (req) => {
         console.error("health_attachment_drive_backup_failed", driveBackup.error);
       }
 
+      const attachmentId = crypto.randomUUID();
+      const createdAt = new Date().toISOString();
+      const metadata = {
+        id: attachmentId,
+        family_id: familyId,
+        visit_id: record.category === "visit" ? record.entityId : null,
+        therapy_id: record.category === "therapy" ? record.entityId : null,
+        record_id: record.category === "record" ? record.entityId : null,
+        storage_path: objectPath,
+        file_name: file.name,
+        mime_type: file.type,
+        file_size: file.size,
+        created_at: createdAt
+      };
+      const { error: metadataError } = await admin.from("health_attachments").insert(metadata);
+      if (metadataError) {
+        await admin.storage.from("health-attachments").remove([objectPath]).catch(() => {});
+        throw metadataError;
+      }
+
       return json({
         ok: true,
         attachment: {
-          id: crypto.randomUUID(),
+          id: attachmentId,
           name: file.name,
           path: objectPath,
           mimeType: file.type,
           size: file.size,
-          createdAt: new Date().toISOString(),
+          createdAt,
           driveBackup
         }
       });
@@ -251,8 +333,16 @@ Deno.serve(async (req) => {
     const pathRecordId = path.split("/")[1] || "";
     if (!recordId) recordId = pathRecordId;
     if (recordId !== pathRecordId) return json({ ok: false, error: "record_path_mismatch" }, 400);
-    if (!serverMode && membershipRole === "child" && !childCanAccessRecord(recordId, childDocumentData, childAppId)) {
-      return json({ ok: false, error: "forbidden_health_record" }, 403);
+
+    if (!serverMode) {
+      const access = await attachmentAccessInfo(admin, familyId, path);
+      if (!access) return json({ ok: false, error: "attachment_not_found" }, 404);
+      if (membershipRole === "child" && access.personId !== childPersonId) {
+        return json({ ok: false, error: "forbidden_health_record" }, 403);
+      }
+      if ((action === "delete" || req.method === "DELETE") && membershipRole === "child") {
+        return json({ ok: false, error: "health_read_only_for_child" }, 403);
+      }
     }
 
     if (action === "backup-existing") {
@@ -274,6 +364,12 @@ Deno.serve(async (req) => {
     if (action === "delete" || req.method === "DELETE") {
       const { error } = await admin.storage.from("health-attachments").remove([path]);
       if (error) throw error;
+      const { error: metadataError } = await admin
+        .from("health_attachments")
+        .delete()
+        .eq("family_id", familyId)
+        .eq("storage_path", path);
+      if (metadataError) throw metadataError;
       return json({ ok: true });
     }
 
