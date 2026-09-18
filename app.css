@@ -90,3 +90,44 @@
 .routine-history-copy span{display:flex!important;align-items:center;gap:5px}
 @media(max-width:900px){.todo-routine-grid{grid-template-columns:1fr}}
 @media(max-width:520px){.routine-row{grid-template-columns:auto minmax(0,1fr) auto}.routine-row>.badge{display:none}.routine-row>.icon-btn:last-child{grid-column:3}}
+
+/* smart annual deadline center */
+.deadline-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.deadline-stat{padding:14px 16px;display:flex;flex-direction:column;gap:3px}
+.deadline-stat span{font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.deadline-stat strong{font-size:24px;line-height:1}
+.deadline-stat small{font-size:8px;color:var(--faint)}
+.deadline-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.deadline-category-filter{display:flex;align-items:center;gap:5px;overflow:auto;padding:2px;scrollbar-width:none}
+.deadline-category-filter::-webkit-scrollbar{display:none}
+.deadline-category-filter button{border:1px solid var(--border);background:var(--surface);border-radius:999px;min-height:31px;padding:0 9px;display:flex;align-items:center;gap:5px;color:var(--muted);font-size:8px;font-weight:800;white-space:nowrap}
+.deadline-category-filter button.is-active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--surface));color:var(--accent)}
+.deadline-copy--smart small{display:block;font-size:8px;color:var(--muted);margin-top:3px}
+.deadline-copy--smart em{display:block;font-size:8px;color:var(--faint);font-style:normal;margin-top:3px;max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.deadline-row--overdue{background:color-mix(in srgb,var(--danger) 5%,var(--surface));border-radius:12px;padding-left:7px;padding-right:5px}
+.deadline-row--today{background:color-mix(in srgb,var(--warning) 7%,var(--surface));border-radius:12px;padding-left:7px;padding-right:5px}
+.deadline-row--soon{background:color-mix(in srgb,var(--accent) 3%,var(--surface))}
+.deadline-reminder-picker{display:flex;flex-wrap:wrap;gap:7px}
+.deadline-reminder-picker button{min-height:34px;border:1px solid var(--border);background:var(--surface);border-radius:999px;padding:0 11px;font-size:9px;font-weight:800;color:var(--muted)}
+.deadline-reminder-picker button.is-active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--surface));color:var(--accent)}
+.deadline-last-completed{display:flex;align-items:center;gap:7px;padding:10px 12px;border-radius:10px;background:var(--surface2);font-size:9px;color:var(--muted)}
+.year-deadline-view{display:flex;flex-direction:column;gap:12px}
+.year-deadline-head{display:flex;align-items:center;justify-content:center;gap:12px}
+.year-deadline-head>div{min-width:140px;text-align:center;display:flex;flex-direction:column}
+.year-deadline-head span{font-size:8px;color:var(--muted);text-transform:uppercase;font-weight:800}
+.year-deadline-head strong{font-size:24px}
+.year-deadline-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.year-month-card{min-height:165px;padding:12px}
+.year-month-card>header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.year-month-card>header>span{font-size:11px;font-weight:850;text-transform:capitalize}
+.year-month-list{display:flex;flex-direction:column;gap:4px}
+.year-month-list button{border:0;background:var(--surface2);border-radius:9px;padding:7px;display:grid;grid-template-columns:24px 18px minmax(0,1fr);align-items:center;gap:5px;text-align:left}
+.year-month-list button>strong{font-size:12px;color:var(--accent)}
+.year-month-list button>span{display:grid;place-items:center;color:var(--muted)}
+.year-month-list button>div{display:flex;flex-direction:column;min-width:0}
+.year-month-list b{font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.year-month-list small{font-size:7px;color:var(--faint)}
+.year-month-empty{font-size:8px;color:var(--faint);padding:18px 2px}
+@media(max-width:1100px){.year-deadline-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.deadline-toolbar{align-items:flex-start;flex-direction:column}}
+@media(max-width:760px){.deadline-stats{grid-template-columns:1fr}.year-deadline-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.year-deadline-grid{grid-template-columns:1fr}.deadline-category-filter{width:100%}.deadline-row{grid-template-columns:auto 40px minmax(0,1fr) auto}.deadline-row>.badge{grid-column:3}.deadline-row>.icon-btn{grid-column:auto}}
