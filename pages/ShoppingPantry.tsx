@@ -383,8 +383,8 @@ export default function ShoppingPantryPage() {
     <div className="page">
       <PageIntro
         eyebrow="Casa"
-        title="Spesa & Dispensa"
-        description="Lista spesa, inventario e scontrini in un unico flusso: compri, confermi, aggiorni la dispensa."
+        title="Spesa & Inventario"
+        description="Lista spesa, dispensa, frigo e freezer con scadenze, consumi e suggerimenti automatici."
         actions={<Button icon={<Plus size={18} />} onClick={() => tab === 'pantry' ? openNewPantry() : setTab('shopping')}>{tab === 'pantry' ? 'Nuovo prodotto' : 'Aggiungi prodotto'}</Button>}
       />
 
@@ -394,7 +394,8 @@ export default function ShoppingPantryPage() {
           onChange={setTab}
           options={[
             { value: 'shopping', label: `Lista spesa · ${pending.length}` },
-            { value: 'pantry', label: `Dispensa · ${data.pantry.length}` },
+            { value: 'pantry', label: `Inventario · ${data.pantry.length}` },
+            { value: 'insights', label: `Suggerimenti · ${restockSuggestions.length + expiringSoon.length}` },
             { value: 'scan', label: 'Acquisisci' }
           ]}
         />
@@ -424,7 +425,14 @@ export default function ShoppingPantryPage() {
             <CardHeader
               title="Da comprare"
               subtitle={pending.length ? `${pending.length} ${pending.length === 1 ? 'prodotto' : 'prodotti'} ancora da prendere` : 'Lista completata'}
-              action={taken.length ? <Button variant="soft" size="sm" icon={<PackageOpen size={16} />} onClick={moveTakenShoppingToPantry}>Metti {taken.length} in dispensa</Button> : null}
+              action={taken.length ? <div className="shopping-stock-destination">
+                <select value={inventoryDestination} onChange={e => setInventoryDestination(e.target.value as PantryLocation)} aria-label="Destinazione inventario">
+                  <option value="pantry">Dispensa</option>
+                  <option value="fridge">Frigo</option>
+                  <option value="freezer">Freezer</option>
+                </select>
+                <Button variant="soft" size="sm" icon={<PackageOpen size={16} />} onClick={() => moveTakenShoppingToPantry(inventoryDestination)}>Carica {taken.length}</Button>
+              </div> : null}
             />
             {data.shopping.length ? (
               <div className="check-list">
@@ -449,6 +457,12 @@ export default function ShoppingPantryPage() {
 
       {tab === 'pantry' ? (
         <div className="pantry-layout">
+          <div className="inventory-location-stats">
+            <button className={locationFilter === 'all' ? 'is-active' : ''} onClick={() => setLocationFilter('all')}><PackageOpen size={18} /><span><strong>{data.pantry.length}</strong><small>Tutto</small></span></button>
+            <button className={locationFilter === 'pantry' ? 'is-active' : ''} onClick={() => setLocationFilter('pantry')}><PackageOpen size={18} /><span><strong>{locations.pantry}</strong><small>Dispensa</small></span></button>
+            <button className={locationFilter === 'fridge' ? 'is-active' : ''} onClick={() => setLocationFilter('fridge')}><Refrigerator size={18} /><span><strong>{locations.fridge}</strong><small>Frigo</small></span></button>
+            <button className={locationFilter === 'freezer' ? 'is-active' : ''} onClick={() => setLocationFilter('freezer')}><Snowflake size={18} /><span><strong>{locations.freezer}</strong><small>Freezer</small></span></button>
+          </div>
           <div className="pantry-toolbar">
             <div className="search-box"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca in dispensa…" /></div>
             <div className="chip-scroll">
@@ -460,12 +474,23 @@ export default function ShoppingPantryPage() {
           {pantryFiltered.length ? (
             <div className="pantry-grid">
               {pantryFiltered.map(item => {
-                const low = Number(item.minQty || 0) > 0 && Number(item.qty || 0) <= Number(item.minQty || 0)
+                const status = inventoryStatus.find(entry => entry.item.id === item.id)
+                const low = !!status?.needsRestock
+                const expiryDays = status?.expiryDays
+                const expiring = expiryDays !== null && expiryDays !== undefined && expiryDays <= 7
                 return (
                   <Card key={item.id} className="pantry-item-card" onClick={() => setEditingPantry({ ...item })}>
-                    <div className="pantry-item-card__top"><Badge>{item.category}</Badge>{low ? <Badge tone="danger">Da ricomprare</Badge> : null}</div>
+                    <div className="pantry-item-card__top">
+                      <div className="inventory-badges"><Badge>{locationLabel(item.location)}</Badge><Badge>{item.category}</Badge></div>
+                      <div className="inventory-badges">{expiring ? <Badge tone="warning">{expiryDays! < 0 ? 'Scaduto' : expiryDays === 0 ? 'Scade oggi' : `Scade tra ${expiryDays}g`}</Badge> : null}{low ? <Badge tone="danger">Da ricomprare</Badge> : null}</div>
+                    </div>
                     <strong>{item.name}</strong>
                     <div className="pantry-item-card__qty"><span>{item.qty}</span><small>{item.unit}</small></div>
+                    <div className="inventory-card-meta">
+                      {item.expiryDate ? <span>Scadenza {item.expiryDate.slice(8,10)}/{item.expiryDate.slice(5,7)}</span> : <span>Nessuna scadenza</span>}
+                      {status?.averageDailyUse ? <span>Consumo medio {status.averageDailyUse < 1 ? status.averageDailyUse.toFixed(2) : status.averageDailyUse.toFixed(1)} {item.unit}/g</span> : <span>Consumo in apprendimento</span>}
+                      {status?.daysRemaining !== null && status?.daysRemaining !== undefined ? <span>Autonomia ~{Math.max(0, Math.ceil(status.daysRemaining))} giorni</span> : null}
+                    </div>
                     <div className="pantry-item-card__actions" onClick={e => e.stopPropagation()}>
                       <button onClick={() => changePantryQty(item.id, -1)}>−</button>
                       <button onClick={() => changePantryQty(item.id, 1)}>+</button>
@@ -481,11 +506,58 @@ export default function ShoppingPantryPage() {
         </div>
       ) : null}
 
+      {tab === 'insights' ? (
+        <div className="inventory-insights-layout">
+          <div className="inventory-insight-stats">
+            <Card><span>Da ricomprare</span><strong>{restockSuggestions.length}</strong><small>soglia o consumo previsto</small></Card>
+            <Card><span>Scadenze 7 giorni</span><strong>{expiringSoon.length}</strong><small>da consumare o controllare</small></Card>
+            <Card><span>Movimenti registrati</span><strong>{data.pantryMovements.length}</strong><small>base del consumo medio</small></Card>
+          </div>
+
+          <Card>
+            <CardHeader title="Suggerimenti di riacquisto" subtitle="Basati su soglia minima e ritmo di consumo degli ultimi 30 giorni." />
+            {restockSuggestions.length ? <div className="inventory-suggestion-list">
+              {restockSuggestions.map(({ item, daysRemaining, averageDailyUse }) => {
+                const already = data.shopping.some(row => !row.taken && normalize(row.name) === normalize(item.name))
+                return <div key={item.id} className="inventory-suggestion-row">
+                  <div className="inventory-suggestion-icon"><Sparkles size={18} /></div>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{locationLabel(item.location)} · {item.qty} {item.unit} disponibili</span>
+                    <small>{daysRemaining !== null ? `A questo ritmo può finire tra ~${Math.max(0, Math.ceil(daysRemaining))} giorni` : `Sotto la soglia minima di ${item.minQty || 0} ${item.unit}`}{averageDailyUse > 0 ? ` · media ${averageDailyUse.toFixed(2)} ${item.unit}/giorno` : ''}</small>
+                  </div>
+                  <Button variant="soft" size="sm" disabled={already} onClick={() => addRestockSuggestion(item, daysRemaining)}>{already ? 'Già in lista' : 'Aggiungi alla spesa'}</Button>
+                </div>
+              })}
+            </div> : <EmptyState icon={<Sparkles size={28} />} title="Scorte sotto controllo" text="Non risultano prodotti da reintegrare in questo momento." />}
+          </Card>
+
+          <Card>
+            <CardHeader title="Scadenze da controllare" subtitle="Prodotti già scaduti o in scadenza nei prossimi 7 giorni." />
+            {expiringSoon.length ? <div className="inventory-suggestion-list">
+              {expiringSoon.map(({ item, expiryDays }) => <div key={item.id} className="inventory-suggestion-row">
+                <div className="inventory-suggestion-icon inventory-suggestion-icon--warning"><AlertTriangle size={18} /></div>
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>{locationLabel(item.location)} · {item.qty} {item.unit}</span>
+                  <small>{expiryDays! < 0 ? `Scaduto da ${Math.abs(expiryDays!)} giorni` : expiryDays === 0 ? 'Scade oggi' : `Scade tra ${expiryDays} giorni`} · {item.expiryDate}</small>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => { setEditingPantry({ ...item }); setTab('pantry') }}>Apri</Button>
+              </div>)}
+            </div> : <EmptyState icon={<Check size={28} />} title="Nessuna scadenza vicina" text="Non risultano prodotti in scadenza nei prossimi 7 giorni." />}
+          </Card>
+        </div>
+      ) : null}
+
       {tab === 'scan' ? (
         <div>
           <div className="scan-mode-switch">
             <Segmented value={scanMode} onChange={setScanMode} options={[{ value: 'receipt', label: '🧾 Leggi scontrino' }, { value: 'pantry-photo', label: '📷 Riconosci prodotti' }]} />
             <span>{scanMode === 'receipt' ? 'Usa questa modalità solo per una foto dello scontrino.' : 'Usa questa modalità per prodotti, scaffali, frigorifero o dispensa.'}</span>
+          </div>
+          <div className="inventory-import-destination">
+            <strong>Dove caricare i prodotti?</strong>
+            <Segmented value={inventoryDestination} onChange={setInventoryDestination} options={[{ value: 'pantry', label: 'Dispensa' }, { value: 'fridge', label: 'Frigo' }, { value: 'freezer', label: 'Freezer' }]} />
           </div>
 
           {scanMode === 'receipt' ? <div className="scan-layout">
@@ -611,7 +683,7 @@ export default function ShoppingPantryPage() {
       <Modal
         open={!!editingPantry}
         onClose={() => setEditingPantry(null)}
-        title={editingPantry?.id ? 'Modifica prodotto' : 'Nuovo prodotto in dispensa'}
+        title={editingPantry?.id ? 'Modifica prodotto' : 'Nuovo prodotto in inventario'}
         footer={<div className="modal-actions"><div>{editingPantry?.id ? <Button variant="danger" icon={<Trash2 size={17} />} onClick={() => { deletePantryItem(editingPantry.id); setEditingPantry(null) }}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditingPantry(null)}>Annulla</Button><Button onClick={savePantry}>Salva</Button></div></div>}
       >
         {editingPantry ? <div className="form-grid form-grid--2">
@@ -619,7 +691,10 @@ export default function ShoppingPantryPage() {
           <Field label="Quantità"><input type="number" min="0" value={editingPantry.qty} onChange={e => setEditingPantry({ ...editingPantry, qty: Number(e.target.value) })} /></Field>
           <Field label="Unità"><select value={editingPantry.unit} onChange={e => setEditingPantry({ ...editingPantry, unit: e.target.value })}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
           <Field label="Categoria"><select value={editingPantry.category} onChange={e => setEditingPantry({ ...editingPantry, category: e.target.value })}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field>
-          <Field label="Soglia minima" hint="0 = nessun avviso"><input type="number" min="0" value={editingPantry.minQty || 0} onChange={e => setEditingPantry({ ...editingPantry, minQty: Number(e.target.value) })} /></Field>
+          <Field label="Posizione"><select value={editingPantry.location || 'pantry'} onChange={e => setEditingPantry({ ...editingPantry, location: e.target.value as PantryLocation })}><option value="pantry">Dispensa</option><option value="fridge">Frigo</option><option value="freezer">Freezer</option></select></Field>
+          <Field label="Scadenza" hint="Facoltativa"><input type="date" value={editingPantry.expiryDate || ''} onChange={e => setEditingPantry({ ...editingPantry, expiryDate: e.target.value })} /></Field>
+          <Field label="Soglia minima" hint="0 = solo previsione consumo"><input type="number" min="0" value={editingPantry.minQty || 0} onChange={e => setEditingPantry({ ...editingPantry, minQty: Number(e.target.value) })} /></Field>
+          <label className="toggle-row field--wide"><input type="checkbox" checked={editingPantry.autoRestock !== false} onChange={e => setEditingPantry({ ...editingPantry, autoRestock: e.target.checked })} /><span><strong>Suggerimenti automatici di riacquisto</strong><small>Usa soglia minima e consumo medio per avvisarti prima che finisca.</small></span></label>
         </div> : null}
       </Modal>
 
