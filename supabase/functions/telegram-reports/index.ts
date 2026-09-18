@@ -332,20 +332,32 @@ function isHealthDeadline(item: any) {
 }
 
 async function buildReport(schedule: ReportSchedule) {
-  const { data: document, error } = await admin
-    .from("family_documents")
-    .select("data")
-    .eq("family_id", schedule.family_id)
-    .single();
+  const [{ data: document, error }, { data: membership, error: membershipError }] = await Promise.all([
+    admin
+      .from("family_documents")
+      .select("data")
+      .eq("family_id", schedule.family_id)
+      .single(),
+    admin
+      .from("family_members")
+      .select("role")
+      .eq("family_id", schedule.family_id)
+      .eq("user_id", schedule.user_id)
+      .maybeSingle()
+  ]);
   if (error) throw error;
+  if (membershipError || !membership) throw new Error("report_user_not_family_member");
 
+  const role = String(membership.role || "adult");
+  const isChild = role === "child";
+  const includeHealth = !isChild && schedule.include_health === true;
   const data: any = document?.data || {};
   const users = Array.isArray(data.users) ? data.users : [];
   const appUser = users.find((user: any) => String(user?.cloudUserId || "") === schedule.user_id) || null;
   const appUserId = appUser ? Number(appUser.id) : null;
   const local = zonedNow(schedule.timezone);
   const targetDate = datePlusDays(local.date, schedule.target_day_offset);
-  const scopeFamily = schedule.scope === "family";
+  const scopeFamily = !isChild && schedule.scope === "family";
   const titlePrefix = schedule.target_day_offset === 1 ? "🌙 Domani" : "☀️ Oggi";
   const lines: string[] = [
     `${titlePrefix} · ${schedule.name}`,
@@ -355,7 +367,7 @@ async function buildReport(schedule: ReportSchedule) {
   if (schedule.sections.agenda) {
     const events = (Array.isArray(data.calendarEvents) ? data.calendarEvents : [])
       .filter((event: any) => String(event?.date || "") === targetDate)
-      .filter((event: any) => schedule.include_health || !isHealthCalendarEvent(event))
+      .filter((event: any) => includeHealth || !isHealthCalendarEvent(event))
       .filter((event: any) => scopeFamily || eventForUser(event, appUserId))
       .sort((a: any, b: any) => String(a?.time || "99:99").localeCompare(String(b?.time || "99:99")))
       .map((event: any) => {
@@ -416,7 +428,7 @@ async function buildReport(schedule: ReportSchedule) {
   if (schedule.sections.deadlines) {
     const deadlines = (Array.isArray(data.deadlines) ? data.deadlines : [])
       .filter((item: any) => !item?.done && String(item?.date || "") === targetDate)
-      .filter((item: any) => schedule.include_health || !isHealthDeadline(item))
+      .filter((item: any) => includeHealth || !isHealthDeadline(item))
       .filter((item: any) => scopeFamily || itemForUser(item, appUserId))
       .map((item: any) => `${item.title}${scopeFamily ? (userName(data, Number(item.userId)) ? ` · ${userName(data, Number(item.userId))}` : "") : ""}`);
     lines.push("", "⟰ Scadenze", ...listLines(deadlines, "Nessuna scadenza"));
@@ -489,7 +501,7 @@ async function buildReport(schedule: ReportSchedule) {
     lines.push("", "🧁 Compiti", ...listLines(chores, "Nessun compito"));
   }
 
-  if (!schedule.include_health) {
+  if (!includeHealth) {
     lines.push("", "🔒 Dati salute esclusi");
   }
 
@@ -755,7 +767,8 @@ async function appAction(req: Request, body: any) {
   const familyId = String(body?.familyId || "");
   if (!familyId) return json({ error: "family_id_required" }, 400);
 
-  const { user } = await authenticatedMember(req, familyId);
+  const { user, membership } = await authenticatedMember(req, familyId);
+  const memberRole = String(membership?.role || "adult");
 
   if (action === "status") {
     return json(await statusFor(familyId, user.id));
@@ -811,6 +824,12 @@ async function appAction(req: Request, body: any) {
     const timeLocal = String(body?.schedule?.time_local || body?.schedule?.timeLocal || "07:30").slice(0, 5);
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(timeLocal)) return json({ error: "invalid_time" }, 400);
 
+    const requestedFamilyScope = body?.schedule?.scope === "family";
+    const requestedHealth = body?.schedule?.include_health === true || body?.schedule?.includeHealth === true;
+    if (memberRole === "child" && (requestedFamilyScope || requestedHealth)) {
+      return json({ error: "child_report_scope_forbidden" }, 403);
+    }
+
     const row = {
       family_id: familyId,
       user_id: user.id,
@@ -821,9 +840,9 @@ async function appAction(req: Request, body: any) {
       timezone: String(body?.schedule?.timezone || "Europe/Rome").slice(0, 80),
       days: sanitizeDays(body?.schedule?.days),
       target_day_offset: Number(body?.schedule?.target_day_offset ?? body?.schedule?.targetDayOffset ?? 0) === 1 ? 1 : 0,
-      scope: body?.schedule?.scope === "family" ? "family" : "personal",
+      scope: requestedFamilyScope ? "family" : "personal",
       sections: sanitizeSections(body?.schedule?.sections),
-      include_health: body?.schedule?.include_health === true || body?.schedule?.includeHealth === true,
+      include_health: requestedHealth,
       updated_at: new Date().toISOString()
     };
 
