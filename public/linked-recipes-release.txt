@@ -2,3 +2,4 @@ VerdoFamily linked recipes module
 Release: 2026-09-18
 Features: recipe links, planner integration, pantry comparison, shopping generation
 Profile photos + board author avatars: 2026-09-18
+Web Push notifications v2.1.2: 2026-09-18
