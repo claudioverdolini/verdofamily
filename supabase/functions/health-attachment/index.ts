@@ -362,15 +362,15 @@ Deno.serve(async (req) => {
     }
 
     if (action === "delete" || req.method === "DELETE") {
-      const { error } = await admin.storage.from("health-attachments").remove([path]);
-      if (error) throw error;
+      // Keep the private binary object for historical backup restores.
+      // Access is revoked immediately by removing its normalized metadata row.
       const { error: metadataError } = await admin
         .from("health_attachments")
         .delete()
         .eq("family_id", familyId)
         .eq("storage_path", path);
       if (metadataError) throw metadataError;
-      return json({ ok: true });
+      return json({ ok: true, retainedForRestore: true });
     }
 
     return json({ ok: false, error: "unsupported_action" }, 400);
