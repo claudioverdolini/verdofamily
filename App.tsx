@@ -415,8 +415,25 @@ function NotificationCenter() {
       })
     }
 
+    if (authUser.role !== 'bimbo') {
+      for (const chore of data.chores) {
+        if (chore.done || chore.completionStatus !== 'pending') continue
+        const child = data.users.find(user => user.id === chore.userId)
+        items.push({
+          id: `chore-approval-${chore.id}-${chore.completedAt || today}`,
+          title: `${child?.name || 'Un ragazzo'} ha completato: ${chore.title}`,
+          detail: `Verifica il compito e conferma per accreditare ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(chore.amount || 0))}.`,
+          page: 'chores',
+          createdAt: chore.completedAt || new Date(nowTick).toISOString(),
+          priority: 94,
+          kind: 'chore',
+          label: 'Da confermare'
+        })
+      }
+    }
+
     for (const chore of data.chores) {
-      if (chore.done || !chore.deadline || chore.deadline > today || chore.userId !== authUser.id) continue
+      if (chore.done || chore.completionStatus === 'pending' || !chore.deadline || chore.deadline > today || chore.userId !== authUser.id) continue
       items.push({
         id: `chore-${chore.id}-${today}`,
         title: chore.title,
