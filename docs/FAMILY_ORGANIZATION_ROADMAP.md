@@ -49,14 +49,26 @@ Future refinements:
 - link deadlines directly to documents when the document center is implemented;
 - richer completion history for recurring annual deadlines.
 
-## Next features to develop
+## Current priority completed
 
 ### 4. Children / school center
-- School timetable and subjects.
-- Homework, tests and oral exams.
-- Material to bring.
+Status: **implemented — first version**
+
+Implemented:
+- Per-child school timetable and reusable subject catalog.
+- Homework, tests, oral exams and material to bring.
 - Circulars, permissions, trips and school payments.
-- Evening / next-day preparation summary.
+- Per-child school agenda with completion state.
+- Evening / next-day preparation summary with lessons and backpack checklist.
+- Integration with Home / Command Center and the in-app notification center.
+- School section in Telegram reports, including next-day reports.
+
+Future refinements:
+- Optional school year / class profile and term dates.
+- Attachments for circulars and school documents after the document center is available.
+- Import options from school calendars or structured files if useful.
+
+## Next features to develop
 
 ### 5. Advanced home inventory
 - Separate pantry / fridge / freezer locations.
@@ -96,7 +108,8 @@ Already implemented:
 Still to implement:
 - Sunday family-week preview.
 - Monthly preview of the following month.
-- School section after the school center is available.
+
+School content is now available in daily Telegram reports.
 
 ## Product principles
 
