@@ -34,6 +34,61 @@ function childCanViewPost(post: any, childId: number) {
   return Array.isArray(post?.userIds) && post.userIds.map(Number).includes(childId);
 }
 
+async function rateLimit(admin: any, scope: string, subjectKey: string, limit: number, windowSeconds: number) {
+  const { data, error } = await admin.rpc("system_security_rate_limit", {
+    p_scope: scope,
+    p_subject_key: subjectKey,
+    p_limit: limit,
+    p_window_seconds: windowSeconds
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+async function audit(admin: any, event: {
+  actorUserId?: string | null;
+  familyId?: string | null;
+  eventType: string;
+  success?: boolean;
+  severity?: "info" | "warning" | "critical";
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await admin.rpc("system_security_audit", {
+    p_actor_user_id: event.actorUserId || null,
+    p_family_id: event.familyId || null,
+    p_event_type: event.eventType,
+    p_success: event.success !== false,
+    p_severity: event.severity || "info",
+    p_target_type: event.targetType || null,
+    p_target_id: event.targetId || null,
+    p_metadata: event.metadata || {}
+  });
+  if (error) console.warn("security_audit_failed", error.message);
+}
+
+function matchesImageSignature(bytes: Uint8Array, mimeType: string) {
+  if (mimeType === "image/jpeg") {
+    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  if (mimeType === "image/png") {
+    const sig = [0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a];
+    return bytes.length >= sig.length && sig.every((value, index) => bytes[index] === value);
+  }
+  if (mimeType === "image/webp") {
+    return bytes.length >= 12
+      && String.fromCharCode(...bytes.subarray(0,4)) === "RIFF"
+      && String.fromCharCode(...bytes.subarray(8,12)) === "WEBP";
+  }
+  if (mimeType === "image/heic" || mimeType === "image/heif") {
+    if (bytes.length < 12 || String.fromCharCode(...bytes.subarray(4,8)) !== "ftyp") return false;
+    const brand = String.fromCharCode(...bytes.subarray(8,12)).toLowerCase();
+    return new Set(["heic","heix","hevc","hevx","heif","mif1","msf1"]).has(brand);
+  }
+  return false;
+}
+
 function safeName(name: string) {
   return (name || "foto")
     .normalize("NFD")
@@ -94,45 +149,76 @@ Deno.serve(async (req) => {
 
     if (memberError || !membership) return json({ ok: false, error: "forbidden" }, 403);
     const memberRole = String(membership.role || "adult");
-    let childId = 0;
-    let documentData: any = null;
 
-    if (memberRole === "child") {
-      const { data: document, error: documentError } = await admin
-        .from("family_documents")
-        .select("data")
-        .eq("family_id", familyId)
-        .single();
-      if (documentError || !document) return json({ ok: false, error: "family_document_not_found" }, 404);
-      documentData = document.data || {};
-      childId = appUserId(documentData, user.id);
-      if (!childId) return json({ ok: false, error: "child_identity_not_linked" }, 403);
-    }
+    const { data: document, error: documentError } = await admin
+      .from("family_documents")
+      .select("data")
+      .eq("family_id", familyId)
+      .single();
+    if (documentError || !document) return json({ ok: false, error: "family_document_not_found" }, 404);
+    const documentData: any = document.data || {};
+    const actorAppId = appUserId(documentData, user.id);
+    const childId = memberRole === "child" ? actorAppId : 0;
+    if (memberRole === "child" && !childId) return json({ ok: false, error: "child_identity_not_linked" }, 403);
 
     if (action === "upload") {
       if (!postId) return json({ ok: false, error: "post_id_required" }, 400);
+      const post = boardPost(documentData, postId);
+      if (!post) return json({ ok: false, error: "board_post_not_found" }, 404);
+      if (memberRole === "child" && Number(post?.authorUserId || 0) !== childId) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "board_upload_denied",
+          success: false, severity: "warning", targetType: "board_post", targetId: postId
+        });
+        return json({ ok: false, error: "forbidden_board_post" }, 403);
+      }
+      const attachments = Array.isArray(post?.attachments) ? post.attachments : [];
+      if (attachments.length >= 12) return json({ ok: false, error: "attachment_limit_reached" }, 409);
       if (!file) return json({ ok: false, error: "file_required" }, 400);
       if (file.size <= 0 || file.size > MAX_BYTES) return json({ ok: false, error: "file_too_large" }, 413);
       if (!ALLOWED.has(file.type)) return json({ ok: false, error: "file_type_not_allowed" }, 415);
 
-      const objectPath = `${familyId}/${postId}/${crypto.randomUUID()}-${safeName(file.name)}`;
+      const allowed = await rateLimit(admin, "board_upload", `${user.id}:${familyId}`, 12, 600);
+      if (!allowed) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "board_upload_rate_limited",
+          success: false, severity: "warning", targetType: "board_post", targetId: postId
+        });
+        return json({ ok: false, error: "rate_limited" }, 429);
+      }
+
       const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!matchesImageSignature(bytes, file.type)) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "board_upload_signature_rejected",
+          success: false, severity: "warning", targetType: "board_post", targetId: postId,
+          metadata: { mimeType: file.type, size: file.size }
+        });
+        return json({ ok: false, error: "file_signature_invalid" }, 415);
+      }
+
+      const objectPath = `${familyId}/${postId}/${crypto.randomUUID()}-${safeName(file.name)}`;
       const { error: uploadError } = await admin.storage
         .from(BUCKET)
         .upload(objectPath, bytes, { contentType: file.type, cacheControl: "3600", upsert: false });
       if (uploadError) throw uploadError;
 
-      return json({
-        ok: true,
-        attachment: {
-          id: crypto.randomUUID(),
-          name: file.name,
-          path: objectPath,
-          mimeType: file.type,
-          size: file.size,
-          createdAt: new Date().toISOString()
-        }
+      const attachment = {
+        id: crypto.randomUUID(),
+        name: file.name,
+        path: objectPath,
+        mimeType: file.type,
+        size: file.size,
+        createdAt: new Date().toISOString()
+      };
+
+      await audit(admin, {
+        actorUserId: user.id, familyId, eventType: "board_attachment_uploaded",
+        targetType: "board_post", targetId: postId,
+        metadata: { mimeType: file.type, size: file.size }
       });
+
+      return json({ ok: true, attachment });
     }
 
     if (!path || !path.startsWith(`${familyId}/`)) return json({ ok: false, error: "invalid_path" }, 400);
@@ -140,25 +226,46 @@ Deno.serve(async (req) => {
     if (postId && postId !== pathPostId) return json({ ok: false, error: "post_path_mismatch" }, 400);
     postId = postId || pathPostId;
 
+    const post = boardPost(documentData, postId);
+    if (!post) return json({ ok: false, error: "board_post_not_found" }, 404);
+    const attachment = (Array.isArray(post?.attachments) ? post.attachments : [])
+      .find((item: any) => String(item?.path || "") === path);
+    if (!attachment) return json({ ok: false, error: "attachment_not_linked_to_post" }, 404);
+
     if (memberRole === "child") {
-      const post = boardPost(documentData, postId);
       if (action === "signed-url" && !childCanViewPost(post, childId)) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "board_attachment_view_denied",
+          success: false, severity: "warning", targetType: "board_post", targetId: postId
+        });
         return json({ ok: false, error: "forbidden_board_post" }, 403);
       }
       if ((action === "delete" || req.method === "DELETE") && Number(post?.authorUserId || 0) !== childId) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "board_attachment_delete_denied",
+          success: false, severity: "warning", targetType: "board_post", targetId: postId
+        });
         return json({ ok: false, error: "forbidden_board_post" }, 403);
       }
     }
 
     if (action === "signed-url") {
+      const allowed = await rateLimit(admin, "board_signed_url", `${user.id}:${familyId}`, 300, 600);
+      if (!allowed) return json({ ok: false, error: "rate_limited" }, 429);
       const { data, error } = await admin.storage.from(BUCKET).createSignedUrl(path, 3600);
       if (error) throw error;
       return json({ ok: true, signedUrl: data?.signedUrl || null });
     }
 
     if (action === "delete" || req.method === "DELETE") {
+      const allowed = await rateLimit(admin, "board_delete", `${user.id}:${familyId}`, 30, 3600);
+      if (!allowed) return json({ ok: false, error: "rate_limited" }, 429);
       const { error } = await admin.storage.from(BUCKET).remove([path]);
       if (error) throw error;
+      await audit(admin, {
+        actorUserId: user.id, familyId, eventType: "board_attachment_deleted",
+        targetType: "board_post", targetId: postId
+      });
       return json({ ok: true });
     }
 
