@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  GraduationCap,
   ListTodo,
   Plus,
   ReceiptText,
@@ -43,6 +44,14 @@ export default function Dashboard() {
       .slice(0, 5),
     [data.deadlines, today]
   )
+
+  const tomorrow = addDays(today, 1)
+  const schoolTomorrow = data.schoolItems
+    .filter(item => !item.done && item.date === tomorrow)
+    .filter(item => authUser?.role !== 'bimbo' || item.userId === authUser.id)
+  const schoolTomorrowLessons = data.schoolTimetable
+    .filter(entry => entry.weekday === (() => { const day = new Date(`${tomorrow}T12:00:00`).getDay(); return day === 0 ? 7 : day })())
+    .filter(entry => authUser?.role !== 'bimbo' || entry.userId === authUser.id)
 
   const pendingShopping = data.shopping.filter(x => !x.taken)
   const pendingChores = data.chores.filter(x => !x.done)
@@ -145,6 +154,7 @@ export default function Dashboard() {
     nextDeadlines.length ? { label: `${nextDeadlines.length} scadenze nei prossimi 15 giorni`, page: 'deadlines' as const } : null,
     pendingTodos.length ? { label: `${pendingTodos.length} promemoria aperti`, page: 'todos' as const } : null,
     dueRoutinesToday.length ? { label: `${dueRoutinesToday.length} routine da fare oggi`, page: 'todos' as const } : null,
+    schoolTomorrow.length ? { label: `${schoolTomorrow.length} cose di scuola da preparare per domani`, page: 'school' as const } : null,
     authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? { label: `${choresAwaitingApproval.length} compiti da confermare`, page: 'chores' as const } : null
   ].filter(Boolean) as Array<{ label: string; page: any }>
 
@@ -168,6 +178,7 @@ export default function Dashboard() {
         <button onClick={() => setActivePage('shopping')}><ShoppingCart size={18} /><span>Aggiungi spesa</span><Plus size={16} /></button>
         <button onClick={() => setActivePage('meals')}><Utensils size={18} /><span>Pianifica pasto</span><Plus size={16} /></button>
         <button onClick={() => setActivePage('todos')}><ListTodo size={18} /><span>Da fare</span><Plus size={16} /></button>
+        <button onClick={() => setActivePage('school')}><GraduationCap size={18} /><span>Scuola</span><ChevronRight size={16} /></button>
       </div>
 
       {homeView === 'today' ? <>
@@ -189,6 +200,14 @@ export default function Dashboard() {
           <Card className="command-panel">
             <CardHeader title="Pasti di oggi" subtitle="Pranzo e cena pianificati" action={<button className="text-link" onClick={() => setActivePage('meals')}>Pasti <ChevronRight size={16} /></button>} />
             {(mealByDate[today] || []).length ? <div className="command-simple-list">{mealByDate[today].map((meal, index) => <button key={`${meal.slot}-${index}`} onClick={() => setActivePage('meals')}><Utensils size={17} /><span><strong>{meal.slot}</strong><small>{meal.name}</small></span></button>)}</div> : <EmptyState icon={<Utensils size={28} />} title="Pasti non pianificati" text="Puoi aggiungere pranzo e cena dal planner pasti." />}
+          </Card>
+
+          <Card className="command-panel">
+            <CardHeader title="Scuola · domani" subtitle="Lezioni e cose da preparare" action={<button className="text-link" onClick={() => setActivePage('school')}>Scuola <ChevronRight size={16} /></button>} />
+            {schoolTomorrow.length || schoolTomorrowLessons.length ? <div className="command-simple-list">
+              {schoolTomorrow.slice(0, 4).map(item => <button key={`school-${item.id}`} onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Scuola'}</small></span></button>)}
+              {schoolTomorrow.length === 0 && schoolTomorrowLessons.length ? <button onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{schoolTomorrowLessons.length} lezioni previste</strong><small>Controlla orario e zaino</small></span></button> : null}
+            </div> : <EmptyState icon={<GraduationCap size={28} />} title="Niente da preparare" text="Nessun impegno scolastico registrato per domani." />}
           </Card>
 
           <Card className="command-panel">
