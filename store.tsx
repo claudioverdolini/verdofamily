@@ -190,6 +190,7 @@ function dbRoleToApp(role?: string): FamilyUser['role'] {
 function cloudSafeData(value: FamilyData): FamilyData {
   return {
     ...value,
+    storageModel: 'normalized-v1',
     users: value.users.map(user => ({ ...user, password: '', balance: 0 })),
     deadlines: value.deadlines.filter(item => !isHealthDeadline(item)),
     chores: [],
