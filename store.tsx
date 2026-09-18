@@ -25,7 +25,7 @@ import type {
 import { initialData } from './data'
 import { localDateISO, materializeRecurringChores, mergePrefs, migrateData, nextId, normalize } from './utils'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
-import { notifyFamilyPush, type PushTopics } from './pushNotifications'
+import type { PushTopics } from './pushNotifications'
 
 const STORAGE_KEY = 'verdofamily_v3'
 const LEGACY_KEYS = ['familyhub_v2', 'familyhub_v1']
@@ -600,9 +600,6 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       : []
     const publishPushUpdates = () => {
       pushCategoryHashesRef.current = nextPushHashes
-      if (changedPushCategories.length && familyIdRef.current) {
-        void notifyFamilyPush(familyIdRef.current, changedPushCategories)
-      }
     }
     setCloudStatus('saving')
     const expected = revisionRef.current
