@@ -438,7 +438,7 @@ function NotificationCenter() {
 
     if (authUser.role !== 'bimbo') {
       const tomorrow = localDateISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 12))
-    for (const schoolItem of data.schoolItems) {
+    if (authUser.prefs?.notifications?.school !== false) for (const schoolItem of data.schoolItems) {
       if (schoolItem.done || (schoolItem.date !== today && schoolItem.date !== tomorrow)) continue
       if (authUser.role === 'bimbo' && schoolItem.userId !== authUser.id) continue
       const student = data.users.find(user => user.id === schoolItem.userId)
