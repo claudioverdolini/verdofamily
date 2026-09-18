@@ -8,6 +8,7 @@ export type PageKey =
   | 'meals'
   | 'chores'
   | 'school'
+  | 'board'
   | 'health'
   | 'deadlines'
   | 'todos'
@@ -27,6 +28,7 @@ export type UserPrefs = {
     deadlines: boolean
     chores: boolean
     school: boolean
+    board: boolean
     shopping: boolean
     whatsapp: boolean
   }
@@ -291,6 +293,32 @@ export type SchoolItem = {
   createdAt: string
 }
 
+export type BoardPostType = 'note' | 'message' | 'reminder' | 'photo'
+
+export type BoardAttachment = {
+  id: string
+  name: string
+  path: string
+  mimeType?: string
+  size?: number
+  createdAt: string
+}
+
+export type BoardPost = {
+  id: string
+  type: BoardPostType
+  title: string
+  body: string
+  authorUserId: number
+  audience: 'family' | 'users'
+  userIds: number[]
+  pinned: boolean
+  dueDate?: string
+  createdAt: string
+  updatedAt: string
+  attachments: BoardAttachment[]
+}
+
 export type FamilyData = {
   version: number
   users: FamilyUser[]
@@ -311,4 +339,5 @@ export type FamilyData = {
   schoolSubjects: SchoolSubject[]
   schoolTimetable: SchoolTimetableEntry[]
   schoolItems: SchoolItem[]
+  boardPosts: BoardPost[]
 }
