@@ -453,7 +453,9 @@ Deno.serve(async (req: Request) => {
   if (!familyId) return json({ error: "family_id_required" }, 400);
 
   try {
-    const { user } = await authenticatedMember(req, familyId);
+    const { user, membership } = await authenticatedMember(req, familyId);
+    const memberRole = String(membership?.role || "adult");
+    const isChild = memberRole === "child";
     if (action === "status") {
       const { data: connection } = await admin
         .from("google_calendar_connections")
@@ -484,6 +486,7 @@ Deno.serve(async (req: Request) => {
     if (!configured()) return json({ error: "google_calendar_not_configured", redirectUri: REDIRECT_URI }, 503);
 
     if (action === "auth-url") {
+      if (isChild) return json({ error: "adult_or_admin_required" }, 403);
       await admin.from("google_calendar_oauth_states").delete().lt("expires_at", new Date().toISOString());
       const state = crypto.randomUUID();
       const { error } = await admin.from("google_calendar_oauth_states").insert({
@@ -533,6 +536,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "save-settings") {
+      if (isChild) return json({ error: "adult_or_admin_required" }, 403);
       const accessToken = await refreshAccessToken(connection as Connection);
       const calendars = await calendarList(accessToken);
       const personalId = String(body?.personalCalendarId || "primary");
@@ -556,6 +560,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "sync-all") {
+      if (isChild) return json({ error: "adult_or_admin_required" }, 403);
       return json(await syncAll(familyId));
     }
 
