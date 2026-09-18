@@ -213,6 +213,42 @@ function routineCompletedOn(completions: any[], routineId: number, date: string)
   );
 }
 
+function pantryAverageDailyUse(data: any, itemId: number, asOfDate: string, lookbackDays = 30) {
+  const fromDate = datePlusDays(asOfDate, -Math.max(1, lookbackDays) + 1);
+  const movements = (Array.isArray(data?.pantryMovements) ? data.pantryMovements : [])
+    .filter((movement: any) =>
+      Number(movement?.pantryItemId || 0) === Number(itemId) &&
+      String(movement?.date || "") >= fromDate &&
+      String(movement?.date || "") <= asOfDate
+    );
+  const manualConsumed = movements
+    .filter((movement: any) => movement?.reason === "manual" && Number(movement?.delta || 0) < 0)
+    .reduce((sum: number, movement: any) => sum + Math.abs(Number(movement?.delta || 0)), 0);
+  const mealNet = movements
+    .filter((movement: any) => movement?.reason === "meal")
+    .reduce((sum: number, movement: any) => sum + Number(movement?.delta || 0), 0);
+  const consumed = manualConsumed + Math.max(0, -mealNet);
+  return consumed > 0 ? consumed / Math.max(1, lookbackDays) : 0;
+}
+
+function pantryDaysRemaining(data: any, item: any, asOfDate: string) {
+  const daily = pantryAverageDailyUse(data, Number(item?.id || 0), asOfDate);
+  if (daily <= 0) return null;
+  return Math.max(0, Number(item?.qty || 0) / daily);
+}
+
+function pantryNeedsRestock(data: any, item: any, asOfDate: string) {
+  const low = Number(item?.minQty || 0) > 0 && Number(item?.qty || 0) <= Number(item?.minQty || 0);
+  const days = pantryDaysRemaining(data, item, asOfDate);
+  return low || (item?.autoRestock !== false && days !== null && days <= 7);
+}
+
+function pantryLocationLabel(value: string) {
+  if (value === "fridge") return "Frigo";
+  if (value === "freezer") return "Freezer";
+  return "Dispensa";
+}
+
 function weekdayFromDate(date: string) {
   const day = new Date(`${date}T12:00:00Z`).getUTCDay();
   return day === 0 ? 7 : day;
@@ -356,10 +392,25 @@ async function buildReport(schedule: ReportSchedule) {
   }
 
   if (schedule.sections.lowStock) {
-    const low = (Array.isArray(data.pantry) ? data.pantry : [])
-      .filter((item: any) => item?.minQty !== undefined && item?.minQty !== null && Number(item.qty || 0) <= Number(item.minQty || 0))
-      .map((item: any) => `${item.name}: ${item.qty}${item.unit ? ` ${item.unit}` : ""} (min ${item.minQty})`);
-    lines.push("", "📦 Sotto scorta", ...listLines(low, "Nessun prodotto sotto scorta"));
+    const pantry = Array.isArray(data.pantry) ? data.pantry : [];
+    const restock = pantry
+      .filter((item: any) => pantryNeedsRestock(data, item, targetDate))
+      .map((item: any) => {
+        const days = pantryDaysRemaining(data, item, targetDate);
+        const why = days !== null && days <= 7 ? ` · ~${Math.max(0, Math.ceil(days))}g autonomia` : (Number(item.minQty || 0) > 0 ? ` · min ${item.minQty}` : "");
+        return `${item.name}: ${item.qty}${item.unit ? ` ${item.unit}` : ""} · ${pantryLocationLabel(String(item.location || "pantry"))}${why}`;
+      });
+
+    const expiring = pantry
+      .filter((item: any) => item?.expiryDate && String(item.expiryDate) <= datePlusDays(targetDate, 7))
+      .sort((a: any, b: any) => String(a.expiryDate).localeCompare(String(b.expiryDate)))
+      .map((item: any) => {
+        const diff = daysBetween(targetDate, String(item.expiryDate));
+        const when = diff < 0 ? `scaduto da ${Math.abs(diff)}g` : diff === 0 ? "scade oggi" : `scade tra ${diff}g`;
+        return `${item.name}: ${when} · ${pantryLocationLabel(String(item.location || "pantry"))}`;
+      });
+
+    lines.push("", "📦 Scorte & scadenze", ...listLines([...restock, ...expiring], "Nessun prodotto da reintegrare o in scadenza"));
   }
 
   if (schedule.sections.deadlines) {
