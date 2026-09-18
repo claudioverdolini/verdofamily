@@ -1,4 +1,4 @@
-import type { Deadline, FamilyData, FamilyUser, MedicinePackage, RecurringChore, Routine, RoutineCompletion, TherapyMedicine, UserPrefs } from './types'
+import type { Deadline, FamilyData, FamilyUser, MedicinePackage, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -543,7 +543,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 9,
+    version: 10,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -615,6 +615,34 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       date: item.date || localDateISO(),
       completedAt: item.completedAt || new Date().toISOString(),
       completedByUserId: Number(item.completedByUserId || item.userId || 0)
+    })) : [],
+    schoolSubjects: Array.isArray(source.schoolSubjects) ? source.schoolSubjects.map((item: any): SchoolSubject => ({
+      id: Number(item.id),
+      name: String(item.name || 'Materia'),
+      shortName: item.shortName || undefined
+    })) : [],
+    schoolTimetable: Array.isArray(source.schoolTimetable) ? source.schoolTimetable.map((item: any): SchoolTimetableEntry => ({
+      id: Number(item.id),
+      userId: Number(item.userId || 0),
+      weekday: Math.min(7, Math.max(1, Number(item.weekday || 1))),
+      order: Math.max(1, Number(item.order || 1)),
+      subjectId: Number(item.subjectId || 0),
+      startTime: item.startTime || undefined,
+      endTime: item.endTime || undefined,
+      room: item.room || undefined,
+      notes: item.notes || undefined
+    })) : [],
+    schoolItems: Array.isArray(source.schoolItems) ? source.schoolItems.map((item: any): SchoolItem => ({
+      id: Number(item.id),
+      userId: Number(item.userId || 0),
+      type: ['homework','test','oral','material','circular','permission','trip','payment'].includes(String(item.type)) ? item.type : 'homework',
+      title: String(item.title || 'Attività scuola'),
+      date: item.date || localDateISO(),
+      subjectId: item.subjectId ? Number(item.subjectId) : undefined,
+      notes: item.notes || undefined,
+      amount: item.amount === undefined || item.amount === null ? undefined : Math.max(0, Number(item.amount) || 0),
+      done: !!item.done,
+      createdAt: item.createdAt || localDateISO()
     })) : []
   }
 }
