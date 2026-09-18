@@ -169,3 +169,19 @@ Dal 18 settembre 2026 i backup famiglia usano il formato v3:
 - Il backup Google Drive usa `schemaVersion: 3` e include `data`, `healthData` e `financeData`.
 - Il cron dei compiti ricorrenti scrive direttamente su `finance_chores`, non più nel documento famiglia.
 - I profili child possono leggere soltanto il proprio wallet, i propri movimenti e i propri compiti. Le scritture economiche dirette sulle tabelle sono negate; l'unica modifica child consentita passa dal gateway e riguarda lo stato open/pending dei propri compiti.
+
+
+## Backup v4 — Scuola normalizzata
+
+Dal 18 settembre 2026 i backup famiglia usano il formato v4:
+
+- `family_backups.data` non contiene più Salute, Paghette o dati Scuola.
+- `family_backups.health_data` conserva la cartella sanitaria.
+- `family_backups.finance_data` conserva wallet, movimenti e compiti remunerati.
+- `family_backups.school_data` conserva materie, orario scolastico e impegni.
+- `backup_format_version = 4` identifica il formato corrente.
+- I backup storici vengono convertiti estraendo `schoolSubjects`, `schoolTimetable` e `schoolItems` dal vecchio JSON.
+- `restore_family_backup` ricostruisce tutti e quattro i domini in un'unica operazione protetta.
+- Google Drive usa `schemaVersion: 4` e include `data`, `healthData`, `financeData` e `schoolData`.
+- I child leggono tutte le materie della famiglia, ma soltanto il proprio orario e i propri impegni scolastici.
+- I child non hanno privilegi di scrittura diretta sulle tabelle Scuola; le modifiche ai propri impegni passano dal gateway controllato.

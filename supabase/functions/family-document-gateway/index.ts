@@ -50,8 +50,16 @@ function stripFinanceData(value: any) {
   return data;
 }
 
+function stripSchoolData(value: any) {
+  const data = stripPasswords(value);
+  data.schoolSubjects = [];
+  data.schoolTimetable = [];
+  data.schoolItems = [];
+  return data;
+}
+
 function stripSensitiveData(value: any) {
-  return stripFinanceData(stripHealthData(value));
+  return stripSchoolData(stripFinanceData(stripHealthData(value)));
 }
 
 function mergeFinanceSnapshot(base: any, finance: any) {
@@ -65,6 +73,15 @@ function mergeFinanceSnapshot(base: any, finance: any) {
   data.chores = array(finance.chores);
   data.recurringChores = array(finance.recurringChores);
   data.transactions = array(finance.transactions);
+  return data;
+}
+
+function mergeSchoolSnapshot(base: any, school: any) {
+  const data = stripPasswords(base);
+  if (!school || typeof school !== "object") return data;
+  data.schoolSubjects = array(school.schoolSubjects);
+  data.schoolTimetable = array(school.schoolTimetable);
+  data.schoolItems = array(school.schoolItems);
   return data;
 }
 
@@ -92,6 +109,34 @@ async function callFinanceGateway(
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result?.ok !== true) {
     throw new Error(String(result?.error || `finance_gateway_http_${response.status}`));
+  }
+  return result;
+}
+
+async function callSchoolGateway(
+  supabaseUrl: string,
+  anonKey: string,
+  authHeader: string,
+  action: "read" | "sync",
+  familyId: string,
+  payload?: any
+) {
+  const response = await fetch(`${supabaseUrl}/functions/v1/school-data-gateway`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": authHeader,
+      "apikey": anonKey
+    },
+    body: JSON.stringify({
+      action,
+      familyId,
+      ...(action === "sync" ? { data: payload || {} } : {})
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result?.ok !== true) {
+    throw new Error(String(result?.error || `school_gateway_http_${response.status}`));
   }
   return result;
 }
@@ -347,6 +392,16 @@ Deno.serve(async (req) => {
           reason: financeError instanceof Error ? financeError.message : String(financeError)
         });
       }
+      try {
+        const school = await callSchoolGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        output = mergeSchoolSnapshot(output, school);
+      } catch (schoolError) {
+        console.warn("family_gateway_school_read_fallback", {
+          familyId,
+          userId: user.id,
+          reason: schoolError instanceof Error ? schoolError.message : String(schoolError)
+        });
+      }
       return json({
         ok: true,
         family: { id: family.id, name: family.name },
@@ -376,6 +431,12 @@ Deno.serve(async (req) => {
       } catch {
         // Family revision conflict remains actionable even if finance refresh is temporarily unavailable.
       }
+      try {
+        const school = await callSchoolGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        latest = mergeSchoolSnapshot(latest, school);
+      } catch {
+        // Keep the family revision conflict actionable even if school refresh is temporarily unavailable.
+      }
       return json({
         ok: false,
         error: "revision_conflict",
@@ -384,8 +445,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const normalizedClient = incoming?.storageModel === "normalized-v1";
-    if (!normalizedClient) {
+    const financeNormalizedClient = incoming?.storageModel === "normalized-v1" || incoming?.storageModel === "normalized-v2";
+    const schoolNormalizedClient = incoming?.storageModel === "normalized-v2";
+    if (!financeNormalizedClient) {
       try {
         await callFinanceGateway(supabaseUrl, anonKey, authHeader, "sync", familyId, incoming);
       } catch (financeError) {
@@ -394,10 +456,19 @@ Deno.serve(async (req) => {
         return json({ ok: false, error: message }, 403);
       }
     }
+    if (!schoolNormalizedClient) {
+      try {
+        await callSchoolGateway(supabaseUrl, anonKey, authHeader, "sync", familyId, incoming);
+      } catch (schoolError) {
+        const message = schoolError instanceof Error ? schoolError.message : "school_sync_failed";
+        console.warn("legacy_school_sync_denied", { familyId, userId: user.id, role, reason: message });
+        return json({ ok: false, error: message }, 403);
+      }
+    }
 
     let nextData: any;
     try {
-      const familyIncoming = stripFinanceData(incoming);
+      const familyIncoming = stripSchoolData(stripFinanceData(incoming));
       nextData = stripSensitiveData(role === "child" ? mergeChildChanges(fullData, familyIncoming, childId) : familyIncoming);
     } catch (validationError) {
       const message = validationError instanceof Error ? validationError.message : "forbidden_change";
@@ -435,6 +506,12 @@ Deno.serve(async (req) => {
       } catch {
         // Keep the family conflict response usable even during a temporary finance outage.
       }
+      try {
+        const school = await callSchoolGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        latestOutput = mergeSchoolSnapshot(latestOutput, school);
+      } catch {
+        // Keep the family conflict response usable even during a temporary school outage.
+      }
       return json({
         ok: false,
         error: "revision_conflict",
@@ -451,6 +528,12 @@ Deno.serve(async (req) => {
         normalizedData = mergeFinanceSnapshot(normalizedData, finance);
       } catch {
         // The child save itself succeeded; polling will refresh finance if needed.
+      }
+      try {
+        const school = await callSchoolGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
+        normalizedData = mergeSchoolSnapshot(normalizedData, school);
+      } catch {
+        // The child save itself succeeded; polling will refresh school if needed.
       }
     }
 

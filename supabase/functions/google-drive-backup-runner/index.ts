@@ -25,6 +25,9 @@ function stripSensitiveFromFamilyData(value: any) {
   data.chores = [];
   data.recurringChores = [];
   data.transactions = [];
+  data.schoolSubjects = [];
+  data.schoolTimetable = [];
+  data.schoolItems = [];
   return data;
 }
 
@@ -111,21 +114,25 @@ Deno.serve(async (req) => {
           { data: family, error: famError },
           { data: doc, error: docError },
           { data: healthData, error: healthError },
-          { data: financeData, error: financeError }
+          { data: financeData, error: financeError },
+          { data: schoolData, error: schoolError }
         ] = await Promise.all([
           client.from("families").select("name").eq("id", familyId).single(),
           client.from("family_documents").select("data,revision,updated_at").eq("family_id", familyId).single(),
           client.rpc("system_health_snapshot", { p_family_id: familyId }),
-          client.rpc("system_finance_snapshot", { p_family_id: familyId })
+          client.rpc("system_finance_snapshot", { p_family_id: familyId }),
+          client.rpc("system_school_snapshot", { p_family_id: familyId })
         ]);
         if (famError) throw famError;
         if (docError) throw docError;
         if (healthError) throw healthError;
         if (financeError) throw financeError;
+        if (schoolError) throw schoolError;
 
         const familyData = stripSensitiveFromFamilyData(doc.data || {});
         const normalizedHealth = healthData || { version: 1, items: [] };
         const normalizedFinance = financeData || { version: 1, wallets: [], chores: [], recurringChores: [], transactions: [] };
+        const normalizedSchool = schoolData || { version: 1, schoolSubjects: [], schoolTimetable: [], schoolItems: [] };
 
         await client.from("family_backups").insert({
           family_id: familyId,
@@ -133,7 +140,8 @@ Deno.serve(async (req) => {
           data: familyData,
           health_data: normalizedHealth,
           finance_data: normalizedFinance,
-          backup_format_version: 3,
+          school_data: normalizedSchool,
+          backup_format_version: 4,
           reason: cronMode ? "google_drive_export" : "manual_google_drive_export",
           created_by: null
         });
@@ -141,7 +149,7 @@ Deno.serve(async (req) => {
         const payload = {
           secret: cfg.webhook_secret,
           app: "VerdoFamily",
-          schemaVersion: 3,
+          schemaVersion: 4,
           familyId,
           familyName: family?.name || "Famiglia",
           revision: Number(doc.revision || 0),
@@ -149,7 +157,8 @@ Deno.serve(async (req) => {
           exportedAt: new Date().toISOString(),
           data: familyData,
           healthData: normalizedHealth,
-          financeData: normalizedFinance
+          financeData: normalizedFinance,
+          schoolData: normalizedSchool
         };
 
         // Google Apps Script ContentService intentionally answers through a 3xx

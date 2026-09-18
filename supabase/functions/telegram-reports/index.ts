@@ -335,7 +335,8 @@ async function buildReport(schedule: ReportSchedule) {
   const [
     { data: document, error },
     { data: membership, error: membershipError },
-    { data: financeData, error: financeError }
+    { data: financeData, error: financeError },
+    { data: schoolData, error: schoolError }
   ] = await Promise.all([
     admin
       .from("family_documents")
@@ -348,10 +349,12 @@ async function buildReport(schedule: ReportSchedule) {
       .eq("family_id", schedule.family_id)
       .eq("user_id", schedule.user_id)
       .maybeSingle(),
-    admin.rpc("system_finance_snapshot", { p_family_id: schedule.family_id })
+    admin.rpc("system_finance_snapshot", { p_family_id: schedule.family_id }),
+    admin.rpc("system_school_snapshot", { p_family_id: schedule.family_id })
   ]);
   if (error) throw error;
   if (financeError) throw financeError;
+  if (schoolError) throw schoolError;
   if (membershipError || !membership) throw new Error("report_user_not_family_member");
 
   const role = String(membership.role || "adult");
@@ -366,6 +369,11 @@ async function buildReport(schedule: ReportSchedule) {
     data.users = (Array.isArray(data.users) ? data.users : []).map((user: any) =>
       walletMap.has(Number(user.id)) ? { ...user, balance: walletMap.get(Number(user.id)) } : user
     );
+  }
+  if (schoolData && typeof schoolData === "object") {
+    data.schoolSubjects = Array.isArray(schoolData.schoolSubjects) ? schoolData.schoolSubjects : [];
+    data.schoolTimetable = Array.isArray(schoolData.schoolTimetable) ? schoolData.schoolTimetable : [];
+    data.schoolItems = Array.isArray(schoolData.schoolItems) ? schoolData.schoolItems : [];
   }
   const users = Array.isArray(data.users) ? data.users : [];
   const appUser = users.find((user: any) => String(user?.cloudUserId || "") === schedule.user_id) || null;

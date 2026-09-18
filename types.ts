@@ -321,7 +321,7 @@ export type BoardPost = {
 
 export type FamilyData = {
   version: number
-  storageModel?: 'normalized-v1'
+  storageModel?: 'normalized-v1' | 'normalized-v2'
   users: FamilyUser[]
   calendarEvents: CalendarEvent[]
   deadlines: Deadline[]

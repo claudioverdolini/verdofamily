@@ -1,0 +1,1 @@
+VerdoFamily school security cutover\nRelease: 2026-09-18\nBackup format: v4\nNormalized domains: health, finance, school\n

@@ -3,7 +3,7 @@ import { DEFAULT_PREFS } from './utils'
 
 export const initialData: FamilyData = {
   version: 12,
-  storageModel: 'normalized-v1',
+  storageModel: 'normalized-v2',
   users: [
     {
       id: 1,
