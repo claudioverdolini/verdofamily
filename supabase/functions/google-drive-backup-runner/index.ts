@@ -68,7 +68,9 @@ Deno.serve(async (req) => {
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (memberError || !membership) return json({ ok: false, error: "forbidden" }, 403);
+      if (memberError || !membership || !["admin", "adult"].includes(String(membership.role || ""))) {
+        return json({ ok: false, error: "adult_or_admin_required" }, 403);
+      }
     }
 
     let cfgQuery = client
