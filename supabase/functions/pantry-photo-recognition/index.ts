@@ -15,6 +15,38 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const MAX_BASE64_CHARS = 12_500_000;
 const SUPPORTED_MIME = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
+async function rateLimit(client: any, scope: string, subjectKey: string, limit: number, windowSeconds: number) {
+  const { data, error } = await client.rpc("system_security_rate_limit", {
+    p_scope: scope,
+    p_subject_key: subjectKey,
+    p_limit: limit,
+    p_window_seconds: windowSeconds
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+async function audit(client: any, event: {
+  actorUserId?: string | null;
+  familyId?: string | null;
+  eventType: string;
+  success?: boolean;
+  severity?: "info" | "warning" | "critical";
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await client.rpc("system_security_audit", {
+    p_actor_user_id: event.actorUserId || null,
+    p_family_id: event.familyId || null,
+    p_event_type: event.eventType,
+    p_success: event.success !== false,
+    p_severity: event.severity || "info",
+    p_target_type: "pantry_vision",
+    p_target_id: event.familyId || null,
+    p_metadata: event.metadata || {}
+  });
+  if (error) console.warn("security_audit_failed", error.message);
+}
+
 function textPart(result: any) {
   const parts = result?.candidates?.[0]?.content?.parts || [];
   return parts.map((part: any) => part?.text || "").join("").trim();
@@ -67,6 +99,18 @@ Deno.serve(async (req) => {
 
     if (body?.action !== "analyze") return json({ ok: false, error: "unknown_action" }, 400);
     if (!geminiKey) return json({ ok: false, error: "vision_not_configured" }, 503);
+
+    const allowed = await rateLimit(client, "pantry_vision_analyze", `${user.id}:${familyId}`, 20, 3600);
+    if (!allowed) {
+      await audit(client, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "pantry_vision_rate_limited",
+        success: false,
+        severity: "warning"
+      });
+      return json({ ok: false, error: "rate_limited" }, 429);
+    }
 
     const imageData = String(body?.imageData || "").replace(/^data:[^;]+;base64,/, "");
     const mimeType = String(body?.mimeType || "image/jpeg").toLowerCase();
@@ -186,20 +230,29 @@ Deno.serve(async (req) => {
     try { parsed = JSON.parse(output); } catch { return json({ ok: false, error: "invalid_vision_response" }, 502); }
     const items = Array.isArray(parsed?.items) ? parsed.items.slice(0, 80) : [];
 
+    const normalizedItems = items.map((item: any) => ({
+      detectedName: String(item?.detectedName || "").trim(),
+      matchName: String(item?.matchName || "").trim(),
+      qty: Math.max(1, Math.min(99, Number(item?.qty) || 1)),
+      unit: ["pz", "g", "kg", "ml", "l"].includes(item?.unit) ? item.unit : "pz",
+      category: String(item?.category || "Generico").trim() || "Generico",
+      confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+      observedText: String(item?.observedText || "").trim(),
+      expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item?.expiryDate || "")) ? String(item.expiryDate) : "",
+      notes: String(item?.notes || "").trim()
+    })).filter((item: any) => item.detectedName);
+
+    await audit(client, {
+      actorUserId: user.id,
+      familyId,
+      eventType: "pantry_vision_analyzed",
+      metadata: { model: usedModel, items: normalizedItems.length }
+    });
+
     return json({
       ok: true,
       model: usedModel,
-      items: items.map((item: any) => ({
-        detectedName: String(item?.detectedName || "").trim(),
-        matchName: String(item?.matchName || "").trim(),
-        qty: Math.max(1, Math.min(99, Number(item?.qty) || 1)),
-        unit: ["pz", "g", "kg", "ml", "l"].includes(item?.unit) ? item.unit : "pz",
-        category: String(item?.category || "Generico").trim() || "Generico",
-        confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
-        observedText: String(item?.observedText || "").trim(),
-        expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item?.expiryDate || "")) ? String(item.expiryDate) : "",
-        notes: String(item?.notes || "").trim()
-      })).filter((item: any) => item.detectedName)
+      items: normalizedItems
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
