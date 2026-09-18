@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Link2, RefreshCw, RotateCcw, Unlink, Upload } from 'lucide-react'
+import { BellRing, CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Link2, RefreshCw, RotateCcw, Unlink, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
 import type { PageKey, ThemeMode } from '../types'
 import { Avatar, Button, Card, CardHeader, Field, PageIntro, Segmented } from '../ui'
 import TelegramReportsCard from '../components/TelegramReportsCard'
 import { imageFileToAvatarDataUrl } from '../utils'
+import { disablePush, enablePush, getPushStatus, sendPushTest, syncPushTopics, type PushStatus, type PushTopics } from '../pushNotifications'
 
 const ACCENTS = [
   { name: 'Indigo', color: '#5B5BD6' },
@@ -160,8 +161,19 @@ export default function SettingsPage() {
   const [avatarBusy, setAvatarBusy] = useState(false)
   const [googleMessage, setGoogleMessage] = useState('')
   const [googleDraft, setGoogleDraft] = useState({ personalCalendarId: 'primary', familyCalendarId: '', familyEventTarget: 'personal' as 'personal' | 'shared' | 'both' })
+  const [pushStatus, setPushStatus] = useState<PushStatus | null>(null)
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushMessage, setPushMessage] = useState('')
 
   const prefs = authUser?.prefs
+  const pushTopics: PushTopics = {
+    calendar: prefs?.notifications?.calendar !== false,
+    deadlines: prefs?.notifications?.deadlines !== false,
+    chores: prefs?.notifications?.chores !== false,
+    school: prefs?.notifications?.school !== false,
+    board: prefs?.notifications?.board !== false,
+    shopping: prefs?.notifications?.shopping !== false
+  }
   const backupHealth = getBackupHealth(driveStatus)
 
   async function changeAvatar(file?: File) {
@@ -195,7 +207,87 @@ export default function SettingsPage() {
     return () => window.clearInterval(timer)
   }, [familyId, cloudAuthenticated])
 
+  useEffect(() => {
+    if (!familyId || !cloudAuthenticated) {
+      setPushStatus(null)
+      return
+    }
+    void getPushStatus(familyId).then(setPushStatus).catch(() => setPushStatus(null))
+  }, [familyId, cloudAuthenticated])
+
+  useEffect(() => {
+    if (!familyId || !cloudAuthenticated || !pushStatus?.subscribed) return
+    void syncPushTopics(familyId, pushTopics).catch(() => {})
+  }, [
+    familyId,
+    cloudAuthenticated,
+    pushStatus?.subscribed,
+    prefs?.notifications?.calendar,
+    prefs?.notifications?.deadlines,
+    prefs?.notifications?.chores,
+    prefs?.notifications?.school,
+    prefs?.notifications?.board,
+    prefs?.notifications?.shopping
+  ])
+
   if (!authUser || !prefs) return null
+
+  async function refreshPushStatus() {
+    if (!familyId || !cloudAuthenticated) {
+      setPushStatus(null)
+      return
+    }
+    try {
+      setPushStatus(await getPushStatus(familyId))
+    } catch {
+      setPushStatus(null)
+    }
+  }
+
+  async function activatePush() {
+    if (!familyId) return
+    setPushBusy(true)
+    setPushMessage('')
+    try {
+      await enablePush(familyId, pushTopics)
+      await refreshPushStatus()
+      setPushMessage('Notifiche push attivate su questo dispositivo.')
+    } catch (error: any) {
+      setPushMessage(error?.message || 'Attivazione notifiche non riuscita.')
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  async function deactivatePush() {
+    if (!familyId) return
+    if (!confirm('Disattivare le notifiche push su questo dispositivo?')) return
+    setPushBusy(true)
+    setPushMessage('')
+    try {
+      await disablePush(familyId)
+      await refreshPushStatus()
+      setPushMessage('Notifiche push disattivate su questo dispositivo.')
+    } catch (error: any) {
+      setPushMessage(error?.message || 'Disattivazione notifiche non riuscita.')
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  async function testPush() {
+    if (!familyId) return
+    setPushBusy(true)
+    setPushMessage('')
+    try {
+      const result = await sendPushTest(familyId)
+      setPushMessage(result?.sent ? 'Notifica di prova inviata.' : 'Test eseguito, ma il dispositivo non ha ricevuto la push.')
+    } catch (error: any) {
+      setPushMessage(error?.message || 'Test notifiche non riuscito.')
+    } finally {
+      setPushBusy(false)
+    }
+  }
 
   async function refreshBackupStatus() {
     if (!supabase || !familyId || !cloudAuthenticated) {
@@ -515,6 +607,18 @@ export default function SettingsPage() {
           <div><span>03</span><h2>Connessioni & automazioni</h2></div>
           <p>Servizi esterni che lavorano con VerdoFamily: calendario, report e notifiche automatiche.</p>
         </div>
+      <Card className="settings-card--wide">
+        <CardHeader title="Notifiche push" subtitle="Avvisi reali sul telefono, tablet o computer anche quando VerdoFamily non è aperto." />
+        {!cloudAuthenticated || !familyId ? <div className="callout">Accedi con il tuo account VerdoFamily cloud per attivare le notifiche push.</div> : !pushStatus ? <div className="backup-actions"><Button variant="soft" icon={<RefreshCw size={17} />} onClick={refreshPushStatus} disabled={pushBusy}>{pushBusy ? 'Controllo…' : 'Verifica disponibilità'}</Button></div> : !pushStatus.supported ? <div className="callout">Questo browser non supporta Web Push. Su iPhone/iPad usa VerdoFamily installata nella schermata Home; su Android e computer usa un browser aggiornato.</div> : <>
+          <div className={pushStatus.subscribed ? 'callout callout--success' : 'callout'}>{pushStatus.subscribed ? '✅ Push attive su questo dispositivo. Le categorie seguono le preferenze Avvisi qui sopra.' : pushStatus.permission === 'denied' ? '⚠️ Le notifiche sono bloccate dal browser. Riabilitale nelle impostazioni del sito/dispositivo e poi premi Verifica.' : 'Le push non sono ancora attive su questo dispositivo.'}</div>
+          <div className="backup-actions">
+            {pushStatus.subscribed ? <><Button variant="soft" icon={<BellRing size={17} />} onClick={testPush} disabled={pushBusy}>{pushBusy ? 'Attendi…' : 'Invia notifica di prova'}</Button><Button variant="ghost" onClick={deactivatePush} disabled={pushBusy}>Disattiva su questo dispositivo</Button></> : <Button icon={<BellRing size={17} />} onClick={activatePush} disabled={pushBusy || pushStatus.permission === 'denied'}>{pushBusy ? 'Attivazione…' : 'Attiva notifiche push'}</Button>}
+            <Button variant="ghost" icon={<RefreshCw size={16} />} onClick={refreshPushStatus} disabled={pushBusy}>Verifica</Button>
+          </div>
+        </>}
+        {pushMessage ? <div className={pushMessage.includes('attivat') || pushMessage.includes('inviata') ? 'callout callout--success' : 'callout'}>{pushMessage}</div> : null}
+      </Card>
+
       <Card className="settings-card--wide">
         <CardHeader title="Google Calendar" subtitle="Ogni adulto può collegare il proprio account e scegliere dove ricevere gli eventi VerdoFamily." />
         {!cloudAuthenticated || !familyId ? <div className="callout">Accedi con il tuo account VerdoFamily cloud per collegare Google Calendar.</div> : !googleStatus ? <div className="backup-actions"><Button variant="soft" icon={<RefreshCw size={17} />} onClick={refreshGoogleCalendar} disabled={googleBusy}>{googleBusy ? 'Controllo…' : 'Verifica configurazione'}</Button></div> : !googleStatus.configured ? <>
