@@ -541,7 +541,28 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function upsertDeadline(deadline: Omit<Deadline, 'id' | 'done'> & { id?: number; done?: boolean }) {
     setData(prev => ({ ...prev, deadlines: deadline.id ? prev.deadlines.map(d => d.id === deadline.id ? { ...d, ...deadline, id: d.id, done: !!deadline.done } : d) : [...prev.deadlines, { ...deadline, id: nextId(prev.deadlines), done: !!deadline.done }] }))
   }
-  function toggleDeadline(id: number) { setData(prev => ({ ...prev, deadlines: prev.deadlines.map(d => d.id === id ? { ...d, done: !d.done } : d) })) }
+  function toggleDeadline(id: number) {
+    setData(prev => ({
+      ...prev,
+      deadlines: prev.deadlines.map(d => {
+        if (d.id !== id) return d
+        if (!d.done && d.kind === 'general' && d.repeatYearly) {
+          const [year, month, day] = d.date.split('-').map(Number)
+          const nextYear = year + 1
+          const lastDay = new Date(nextYear, month, 0, 12).getDate()
+          const nextDate = localDateISO(new Date(nextYear, month - 1, Math.min(day, lastDay), 12))
+          return {
+            ...d,
+            date: nextDate,
+            done: false,
+            lastCompletedDate: d.date,
+            lastCompletedAt: new Date().toISOString()
+          }
+        }
+        return { ...d, done: !d.done }
+      })
+    }))
+  }
   function deleteDeadline(id: number) { setData(prev => ({ ...prev, deadlines: prev.deadlines.filter(d => d.id !== id) })) }
 
   function addCategory(name: string) {
