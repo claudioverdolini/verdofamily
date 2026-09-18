@@ -332,7 +332,11 @@ function isHealthDeadline(item: any) {
 }
 
 async function buildReport(schedule: ReportSchedule) {
-  const [{ data: document, error }, { data: membership, error: membershipError }] = await Promise.all([
+  const [
+    { data: document, error },
+    { data: membership, error: membershipError },
+    { data: financeData, error: financeError }
+  ] = await Promise.all([
     admin
       .from("family_documents")
       .select("data")
@@ -343,15 +347,26 @@ async function buildReport(schedule: ReportSchedule) {
       .select("role")
       .eq("family_id", schedule.family_id)
       .eq("user_id", schedule.user_id)
-      .maybeSingle()
+      .maybeSingle(),
+    admin.rpc("system_finance_snapshot", { p_family_id: schedule.family_id })
   ]);
   if (error) throw error;
+  if (financeError) throw financeError;
   if (membershipError || !membership) throw new Error("report_user_not_family_member");
 
   const role = String(membership.role || "adult");
   const isChild = role === "child";
   const includeHealth = !isChild && schedule.include_health === true;
   const data: any = document?.data || {};
+  if (financeData && typeof financeData === "object") {
+    data.chores = Array.isArray(financeData.chores) ? financeData.chores : [];
+    data.recurringChores = Array.isArray(financeData.recurringChores) ? financeData.recurringChores : [];
+    data.transactions = Array.isArray(financeData.transactions) ? financeData.transactions : [];
+    const walletMap = new Map((Array.isArray(financeData.wallets) ? financeData.wallets : []).map((wallet: any) => [Number(wallet.userId), Number(wallet.balance || 0)]));
+    data.users = (Array.isArray(data.users) ? data.users : []).map((user: any) =>
+      walletMap.has(Number(user.id)) ? { ...user, balance: walletMap.get(Number(user.id)) } : user
+    );
+  }
   const users = Array.isArray(data.users) ? data.users : [];
   const appUser = users.find((user: any) => String(user?.cloudUserId || "") === schedule.user_id) || null;
   const appUserId = appUser ? Number(appUser.id) : null;
