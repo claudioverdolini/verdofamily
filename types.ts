@@ -211,6 +211,28 @@ export type Todo = {
   createdAt: string
 }
 
+export type RoutineFrequency = 'daily' | 'weekly' | 'fortnightly' | 'monthly' | 'semiannual' | 'yearly'
+
+export type Routine = {
+  id: number
+  title: string
+  userId: number
+  frequency: RoutineFrequency
+  startDate: string
+  endDate?: string
+  active: boolean
+  notes?: string
+}
+
+export type RoutineCompletion = {
+  id: number
+  routineId: number
+  userId: number
+  date: string
+  completedAt: string
+  completedByUserId: number
+}
+
 export type FamilyData = {
   version: number
   users: FamilyUser[]
@@ -225,4 +247,6 @@ export type FamilyData = {
   recurringChores: RecurringChore[]
   transactions: Transaction[]
   todos: Todo[]
+  routines: Routine[]
+  routineCompletions: RoutineCompletion[]
 }
