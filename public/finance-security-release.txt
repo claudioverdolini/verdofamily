@@ -1,0 +1,4 @@
+VerdoFamily finance security cutover
+Release: 2026-09-18
+Backup format: v3
+Normalized domains: health, finance
