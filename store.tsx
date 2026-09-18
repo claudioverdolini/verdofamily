@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  BoardAttachment,
+  BoardPost,
   CalendarEvent,
   Chore,
   Deadline,
@@ -101,6 +103,11 @@ type StoreValue = {
   upsertSchoolItem: (item: Omit<SchoolItem, 'id' | 'done' | 'createdAt'> & { id?: number; done?: boolean; createdAt?: string }) => void
   toggleSchoolItem: (id: number) => void
   deleteSchoolItem: (id: number) => void
+  upsertBoardPost: (post: Omit<BoardPost, 'id' | 'createdAt' | 'updatedAt' | 'attachments' | 'authorUserId'> & { id?: string; attachments?: BoardAttachment[] }) => string
+  toggleBoardPin: (id: string) => void
+  deleteBoardPost: (id: string) => void
+  addBoardAttachment: (postId: string, attachment: BoardAttachment) => void
+  removeBoardAttachment: (postId: string, attachmentId: string) => void
   exportData: () => string
   importData: (raw: string) => boolean
   resetData: () => void
@@ -1206,6 +1213,86 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     })
   }
 
+  function upsertBoardPost(post: Omit<BoardPost, 'id' | 'createdAt' | 'updatedAt' | 'attachments' | 'authorUserId'> & { id?: string; attachments?: BoardAttachment[] }) {
+    if (!authUser) return ''
+    const id = post.id || crypto.randomUUID()
+    const now = new Date().toISOString()
+    setData(prev => {
+      const existing = prev.boardPosts.find(item => item.id === id)
+      if (existing && authUser.role === 'bimbo' && existing.authorUserId !== authUser.id) return prev
+      const clean: BoardPost = {
+        id,
+        type: post.type,
+        title: post.title.trim(),
+        body: post.body.trim(),
+        authorUserId: existing?.authorUserId || authUser.id,
+        audience: post.audience === 'users' ? 'users' : 'family',
+        userIds: post.audience === 'users' ? Array.from(new Set((post.userIds || []).map(Number).filter(userId => userId > 0))) : [],
+        pinned: authUser.role === 'bimbo' ? (existing?.pinned || false) : post.pinned === true,
+        dueDate: post.dueDate || undefined,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+        attachments: post.attachments || existing?.attachments || []
+      }
+      if (!clean.title && !clean.body && !clean.attachments.length) return prev
+      return {
+        ...prev,
+        boardPosts: existing
+          ? prev.boardPosts.map(item => item.id === id ? clean : item)
+          : [clean, ...prev.boardPosts]
+      }
+    })
+    return id
+  }
+
+  function toggleBoardPin(id: string) {
+    if (!authUser || authUser.role === 'bimbo') return
+    setData(prev => ({
+      ...prev,
+      boardPosts: prev.boardPosts.map(item => item.id === id ? { ...item, pinned: !item.pinned, updatedAt: new Date().toISOString() } : item)
+    }))
+  }
+
+  function deleteBoardPost(id: string) {
+    if (!authUser) return
+    setData(prev => {
+      const post = prev.boardPosts.find(item => item.id === id)
+      if (!post) return prev
+      if (authUser.role === 'bimbo' && post.authorUserId !== authUser.id) return prev
+      return { ...prev, boardPosts: prev.boardPosts.filter(item => item.id !== id) }
+    })
+  }
+
+  function addBoardAttachment(postId: string, attachment: BoardAttachment) {
+    if (!authUser) return
+    setData(prev => {
+      const post = prev.boardPosts.find(item => item.id === postId)
+      if (!post) return prev
+      if (authUser.role === 'bimbo' && post.authorUserId !== authUser.id) return prev
+      return {
+        ...prev,
+        boardPosts: prev.boardPosts.map(item => item.id === postId
+          ? { ...item, type: item.type === 'note' && !item.body && !item.title ? 'photo' : item.type, attachments: [...item.attachments, attachment], updatedAt: new Date().toISOString() }
+          : item)
+      }
+    })
+  }
+
+  function removeBoardAttachment(postId: string, attachmentId: string) {
+    if (!authUser) return
+    setData(prev => {
+      const post = prev.boardPosts.find(item => item.id === postId)
+      if (!post) return prev
+      if (authUser.role === 'bimbo' && post.authorUserId !== authUser.id) return prev
+      return {
+        ...prev,
+        boardPosts: prev.boardPosts.map(item => item.id === postId
+          ? { ...item, attachments: item.attachments.filter(attachment => attachment.id !== attachmentId), updatedAt: new Date().toISOString() }
+          : item)
+      }
+    })
+  }
+
   function exportData() { return JSON.stringify(data, null, 2) }
   function importData(raw: string) {
     try {
@@ -1241,6 +1328,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     addTodo, toggleTodo, deleteTodo,
     upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
+    upsertBoardPost, toggleBoardPin, deleteBoardPost, addBoardAttachment, removeBoardAttachment,
     exportData, importData, resetData
   }
 
