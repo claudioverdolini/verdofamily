@@ -141,6 +141,38 @@ async function callSchoolGateway(
   return result;
 }
 
+async function securityRateLimit(admin: any, scope: string, subjectKey: string, limit: number, windowSeconds: number) {
+  const { data, error } = await admin.rpc("system_security_rate_limit", {
+    p_scope: scope,
+    p_subject_key: subjectKey,
+    p_limit: limit,
+    p_window_seconds: windowSeconds
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+async function securityAudit(admin: any, event: {
+  actorUserId?: string | null;
+  familyId?: string | null;
+  eventType: string;
+  success?: boolean;
+  severity?: "info" | "warning" | "critical";
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await admin.rpc("system_security_audit", {
+    p_actor_user_id: event.actorUserId || null,
+    p_family_id: event.familyId || null,
+    p_event_type: event.eventType,
+    p_success: event.success !== false,
+    p_severity: event.severity || "info",
+    p_target_type: "family_document",
+    p_target_id: event.familyId || null,
+    p_metadata: event.metadata || {}
+  });
+  if (error) console.warn("security_audit_failed", error.message);
+}
+
 function participants(event: any) {
   const ids = array(event?.userIds).map(n).filter(Boolean);
   if (ids.length) return ids;
@@ -422,6 +454,19 @@ Deno.serve(async (req) => {
 
     const encoded = new TextEncoder().encode(JSON.stringify(incoming));
     if (encoded.byteLength > MAX_DOCUMENT_BYTES) return json({ ok: false, error: "document_too_large" }, 413);
+
+    const saveAllowed = await securityRateLimit(admin, "family_document_save", `${user.id}:${familyId}`, 240, 600);
+    if (!saveAllowed) {
+      await securityAudit(admin, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "family_document_save_rate_limited",
+        success: false,
+        severity: "warning",
+        metadata: { role }
+      });
+      return json({ ok: false, error: "rate_limited" }, 429);
+    }
 
     if (Number(document.revision || 0) !== expectedRevision) {
       let latest = role === "child" ? redactForChild(fullData, childId) : fullData;
