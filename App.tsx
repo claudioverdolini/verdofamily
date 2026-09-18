@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell,
   CalendarDays,
@@ -24,6 +24,7 @@ import { FamilyProvider, useFamily } from './store'
 import type { PageKey } from './types'
 import { Avatar, Button, IconButton } from './ui'
 import { supabase } from './supabaseClient'
+import { localDateISO } from './utils'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/Calendar'
 import ShoppingPantryPage from './pages/ShoppingPantry'
@@ -231,6 +232,311 @@ function SyncIndicator() {
   return <button className={`sync-indicator sync-indicator--${cloudStatus}`} onClick={() => syncNow()} title="Sincronizzazione cloud"><Cloud size={14} /><span>{label}</span>{cloudStatus === 'saving' ? <RefreshCw size={12} className="spin" /> : null}</button>
 }
 
+
+type AppNotification = {
+  id: string
+  title: string
+  detail: string
+  page: PageKey
+  createdAt: string
+  priority: number
+  kind: 'event' | 'deadline' | 'chore' | 'stock' | 'system' | 'update'
+  label?: string
+}
+
+function NotificationCenter() {
+  const { data, authUser, familyId, activePage, setActivePage, cloudStatus, updateCurrentPrefs } = useFamily()
+  const [open, setOpen] = useState(false)
+  const [onlyUnread, setOnlyUnread] = useState(false)
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  const [liveUpdates, setLiveUpdates] = useState<AppNotification[]>([])
+  const rootRef = useRef<HTMLDivElement>(null)
+  const previousHashes = useRef<Record<string, string> | null>(null)
+
+  const noticeKey = `verdofamily_notice_feed_${familyId || 'local'}_${authUser?.id || 'guest'}`
+  const readIds = authUser?.prefs?.notificationCenterReadIds || []
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(Date.now()), 60000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(noticeKey) || '[]')
+      const cutoff = Date.now() - (14 * 86400000)
+      setLiveUpdates(Array.isArray(saved) ? saved.filter((item: AppNotification) => new Date(item.createdAt).getTime() >= cutoff).slice(0, 40) : [])
+    } catch {
+      setLiveUpdates([])
+    }
+    previousHashes.current = null
+  }, [noticeKey])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(noticeKey, JSON.stringify(liveUpdates.slice(0, 40)))
+    } catch {}
+  }, [noticeKey, liveUpdates])
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const changeHashes = useMemo(() => ({
+    calendar: JSON.stringify(data.calendarEvents),
+    shopping: JSON.stringify(data.shopping),
+    meals: JSON.stringify(data.mealPlans),
+    chores: JSON.stringify(data.chores),
+    deadlines: JSON.stringify(data.deadlines),
+    todos: JSON.stringify(data.todos)
+  }), [data.calendarEvents, data.shopping, data.mealPlans, data.chores, data.deadlines, data.todos])
+
+  useEffect(() => {
+    if (!previousHashes.current) {
+      previousHashes.current = changeHashes
+      return
+    }
+
+    const sources: Array<{ key: keyof typeof changeHashes; title: string; detail: string; page: PageKey }> = [
+      { key: 'calendar', title: 'Calendario aggiornato', detail: 'Ci sono novità negli impegni della famiglia.', page: 'calendar' },
+      { key: 'shopping', title: 'Lista spesa aggiornata', detail: 'La lista della spesa è stata modificata.', page: 'shopping' },
+      { key: 'meals', title: 'Programma pasti aggiornato', detail: 'È cambiata la pianificazione dei pasti.', page: 'meals' },
+      { key: 'chores', title: 'Compiti aggiornati', detail: 'Sono cambiati compiti o paghette.', page: 'chores' },
+      { key: 'deadlines', title: 'Scadenze aggiornate', detail: 'Lo scadenziario familiare è stato modificato.', page: 'deadlines' },
+      { key: 'todos', title: 'Da fare aggiornati', detail: 'La lista delle attività è stata modificata.', page: 'todos' }
+    ]
+
+    const createdAt = new Date().toISOString()
+    const newItems = sources
+      .filter(source => previousHashes.current?.[source.key] !== changeHashes[source.key] && activePage !== source.page)
+      .map((source, index): AppNotification => ({
+        id: `update-${source.key}-${Date.now()}-${index}`,
+        title: source.title,
+        detail: source.detail,
+        page: source.page,
+        createdAt,
+        priority: 45,
+        kind: 'update',
+        label: 'Aggiornamento'
+      }))
+
+    previousHashes.current = changeHashes
+    if (newItems.length) setLiveUpdates(prev => [...newItems, ...prev].slice(0, 40))
+  }, [changeHashes, activePage])
+
+  const notifications = useMemo(() => {
+    if (!authUser) return [] as AppNotification[]
+
+    const now = new Date(nowTick)
+    const today = localDateISO(now)
+    const items: AppNotification[] = [...liveUpdates]
+    const belongsToUser = (userId?: number) => !userId || userId === authUser.id
+
+    for (const event of data.calendarEvents) {
+      if (event.date !== today) continue
+      const ids = event.userIds?.length ? event.userIds : (event.userId ? [event.userId] : [])
+      if (event.audience !== 'family' && ids.length && !ids.includes(authUser.id)) continue
+
+      if (!event.time) {
+        items.push({
+          id: `event-${event.id}-${event.date}-all-day`,
+          title: event.title,
+          detail: 'Impegno previsto per oggi',
+          page: 'calendar',
+          createdAt: `${today}T00:01:00`,
+          priority: 65,
+          kind: 'event',
+          label: 'Oggi'
+        })
+        continue
+      }
+
+      const [hour, minute] = event.time.split(':').map(Number)
+      const start = new Date(now)
+      start.setHours(hour || 0, minute || 0, 0, 0)
+      const diffMinutes = Math.round((start.getTime() - now.getTime()) / 60000)
+      if (diffMinutes > 30 || diffMinutes < -180) continue
+
+      let detail = ''
+      let label = ''
+      let priority = 80
+      if (diffMinutes > 1) {
+        detail = `Inizia alle ${event.time}`
+        label = `Tra ${diffMinutes} min`
+        priority = 82
+      } else if (diffMinutes >= -10) {
+        detail = `Orario ${event.time}`
+        label = 'Ora'
+        priority = 95
+      } else {
+        const ago = Math.abs(diffMinutes)
+        detail = `Previsto alle ${event.time}`
+        label = `Da ${ago} min`
+        priority = 76
+      }
+
+      items.push({
+        id: `event-${event.id}-${event.date}-${event.time}`,
+        title: event.title,
+        detail,
+        page: 'calendar',
+        createdAt: start.toISOString(),
+        priority,
+        kind: 'event',
+        label
+      })
+    }
+
+    for (const deadline of data.deadlines) {
+      if (deadline.done || !deadline.date || deadline.date > today || !belongsToUser(deadline.userId)) continue
+      if (deadline.kind === 'medicine' || deadline.kind === 'therapy') continue
+      const daysLate = Math.max(0, Math.floor((new Date(`${today}T12:00:00`).getTime() - new Date(`${deadline.date}T12:00:00`).getTime()) / 86400000))
+      items.push({
+        id: `deadline-${deadline.id}-${today}`,
+        title: deadline.title,
+        detail: daysLate ? `Scadenza superata da ${daysLate} ${daysLate === 1 ? 'giorno' : 'giorni'}` : 'Scade oggi',
+        page: deadline.kind === 'visit' || deadline.kind === 'health-record' ? 'health' : 'deadlines',
+        createdAt: `${today}T07:00:00`,
+        priority: daysLate ? 92 : 86,
+        kind: 'deadline',
+        label: daysLate ? 'Scaduta' : 'Oggi'
+      })
+    }
+
+    for (const chore of data.chores) {
+      if (chore.done || !chore.deadline || chore.deadline > today || chore.userId !== authUser.id) continue
+      items.push({
+        id: `chore-${chore.id}-${today}`,
+        title: chore.title,
+        detail: chore.deadline < today ? 'Compito ancora da completare' : 'Compito previsto per oggi',
+        page: 'chores',
+        createdAt: `${today}T07:30:00`,
+        priority: chore.deadline < today ? 84 : 74,
+        kind: 'chore',
+        label: chore.deadline < today ? 'In ritardo' : 'Oggi'
+      })
+    }
+
+    if (authUser.prefs?.notifications?.shopping !== false) {
+      const lowStock = data.pantry.filter(item => Number(item.minQty || 0) > 0 && Number(item.qty || 0) <= Number(item.minQty || 0))
+      if (lowStock.length) {
+        items.push({
+          id: `stock-${today}`,
+          title: lowStock.length === 1 ? `${lowStock[0].name} sotto scorta` : `${lowStock.length} prodotti sotto scorta`,
+          detail: lowStock.length === 1 ? 'Controlla la dispensa o aggiungilo alla spesa.' : 'Controlla i prodotti da reintegrare.',
+          page: 'shopping',
+          createdAt: `${today}T08:00:00`,
+          priority: 55,
+          kind: 'stock',
+          label: 'Dispensa'
+        })
+      }
+    }
+
+    if (cloudStatus === 'error') {
+      items.push({
+        id: `system-sync-${today}`,
+        title: 'Sincronizzazione da controllare',
+        detail: 'VerdoFamily non è riuscito a sincronizzare correttamente i dati.',
+        page: 'settings',
+        createdAt: new Date(nowTick).toISOString(),
+        priority: 100,
+        kind: 'system',
+        label: 'Sistema'
+      })
+    }
+
+    const unique = new Map<string, AppNotification>()
+    for (const item of items) if (!unique.has(item.id)) unique.set(item.id, item)
+    return [...unique.values()]
+      .sort((a, b) => b.priority - a.priority || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 60)
+  }, [authUser, data, liveUpdates, cloudStatus, nowTick])
+
+  const unread = notifications.filter(item => !readIds.includes(item.id))
+  const visible = onlyUnread ? unread : notifications
+
+  function saveReadIds(ids: string[]) {
+    const merged = Array.from(new Set([...readIds, ...ids])).slice(-300)
+    updateCurrentPrefs({ notificationCenterReadIds: merged })
+  }
+
+  function markRead(id: string) {
+    if (!readIds.includes(id)) saveReadIds([id])
+  }
+
+  function openNotification(item: AppNotification) {
+    markRead(item.id)
+    setOpen(false)
+    setActivePage(item.page)
+  }
+
+  function formatWhen(item: AppNotification) {
+    if (item.label) return item.label
+    const date = new Date(item.createdAt)
+    if (Number.isNaN(date.getTime())) return ''
+    if (localDateISO(date) === localDateISO()) return date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })
+  }
+
+  function iconFor(item: AppNotification) {
+    if (item.kind === 'event') return <CalendarDays size={17} />
+    if (item.kind === 'deadline') return <ReceiptText size={17} />
+    if (item.kind === 'chore') return <CheckSquare2 size={17} />
+    if (item.kind === 'stock') return <ShoppingBasket size={17} />
+    if (item.kind === 'system') return <CloudOff size={17} />
+    return <RefreshCw size={17} />
+  }
+
+  return <div className="notification-center" ref={rootRef}>
+    <div className="notification-bell-wrap">
+      <IconButton label="Notifiche" onClick={() => setOpen(value => !value)}><Bell size={19} /></IconButton>
+      {unread.length ? <span className="notification-badge">{unread.length > 99 ? '99+' : unread.length}</span> : null}
+    </div>
+
+    {open ? <div className="notification-panel">
+      <div className="notification-panel__head">
+        <div><strong>Notifiche</strong><span>{unread.length ? `${unread.length} non ${unread.length === 1 ? 'letta' : 'lette'}` : 'Tutto sotto controllo'}</span></div>
+        <IconButton label="Chiudi notifiche" onClick={() => setOpen(false)}><X size={18} /></IconButton>
+      </div>
+
+      <div className="notification-panel__toolbar">
+        <div className="notification-filter">
+          <button className={!onlyUnread ? 'is-active' : ''} onClick={() => setOnlyUnread(false)}>Tutte</button>
+          <button className={onlyUnread ? 'is-active' : ''} onClick={() => setOnlyUnread(true)}>Non lette</button>
+        </div>
+        {unread.length ? <button className="notification-mark-all" onClick={() => saveReadIds(unread.map(item => item.id))}>Segna tutte lette</button> : null}
+      </div>
+
+      <div className="notification-list">
+        {visible.length ? visible.map(item => {
+          const isUnread = !readIds.includes(item.id)
+          return <button key={item.id} className={`notification-item ${isUnread ? 'is-unread' : ''}`} onClick={() => openNotification(item)}>
+            <span className={`notification-item__icon notification-item__icon--${item.kind}`}>{iconFor(item)}</span>
+            <span className="notification-item__copy">
+              <span className="notification-item__title">{item.title}</span>
+              <span className="notification-item__detail">{item.detail}</span>
+            </span>
+            <span className="notification-item__meta">{formatWhen(item)}{isUnread ? <i /> : null}</span>
+          </button>
+        }) : <div className="notification-empty"><Bell size={25} /><strong>Nessuna notifica</strong><span>Gli impegni e gli aggiornamenti compariranno qui quando diventano rilevanti.</span></div>}
+      </div>
+    </div> : null}
+  </div>
+}
+
 function AppShell() {
   const { authUser, activePage, setActivePage, logout, cloudAuthenticated, cloudLoading, needsFamilySetup, familyName } = useFamily()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -277,7 +583,7 @@ function AppShell() {
     {drawerOpen ? <button className="scrim" aria-label="Chiudi menu" onClick={() => setDrawerOpen(false)} /> : null}
 
     <div className="app-main">
-      <header className="topbar"><div className="topbar__left"><IconButton className="mobile-menu-btn" label="Menu" onClick={() => setDrawerOpen(true)}><Menu size={21} /></IconButton><div><span>{current?.label || 'VerdoFamily'}</span><small>{familyName || 'Family Hub'}</small></div></div><div className="topbar__right"><SyncIndicator /><IconButton label="Notifiche"><Bell size={19} /></IconButton><button className="topbar-profile" onClick={() => navigate('settings')}><Avatar user={authUser} size="sm" /><span>{authUser.name}</span></button></div></header>
+      <header className="topbar"><div className="topbar__left"><IconButton className="mobile-menu-btn" label="Menu" onClick={() => setDrawerOpen(true)}><Menu size={21} /></IconButton><div><span>{current?.label || 'VerdoFamily'}</span><small>{familyName || 'Family Hub'}</small></div></div><div className="topbar__right"><SyncIndicator /><NotificationCenter /><button className="topbar-profile" onClick={() => navigate('settings')}><Avatar user={authUser} size="sm" /><span>{authUser.name}</span></button></div></header>
       <main className="content"><PageRenderer /></main>
     </div>
 
