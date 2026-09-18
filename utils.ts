@@ -1,4 +1,4 @@
-import type { Deadline, FamilyData, FamilyUser, MedicinePackage, RecurringChore, TherapyMedicine, UserPrefs } from './types'
+import type { Deadline, FamilyData, FamilyUser, MedicinePackage, RecurringChore, Routine, RoutineCompletion, TherapyMedicine, UserPrefs } from './types'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -245,6 +245,71 @@ export function materializeRecurringChores(data: FamilyData, dateStr = localDate
   return changed ? { ...data, chores } : data
 }
 
+
+function daysBetween(startDate: string, endDate: string) {
+  return Math.round((parseISODate(endDate).getTime() - parseISODate(startDate).getTime()) / 86400000)
+}
+
+function monthDiff(startDate: string, dateStr: string) {
+  const start = parseISODate(startDate)
+  const date = parseISODate(dateStr)
+  return (date.getFullYear() - start.getFullYear()) * 12 + (date.getMonth() - start.getMonth())
+}
+
+function clampedRoutineDate(year: number, monthIndex: number, preferredDay: number) {
+  const lastDay = new Date(year, monthIndex + 1, 0, 12).getDate()
+  return localDateISO(new Date(year, monthIndex, Math.min(preferredDay, lastDay), 12))
+}
+
+export function routineDueOn(routine: Routine, dateStr: string) {
+  if (!routine?.active || !routine.startDate || dateStr < routine.startDate) return false
+  if (routine.endDate && dateStr > routine.endDate) return false
+
+  const start = parseISODate(routine.startDate)
+  const date = parseISODate(dateStr)
+
+  if (routine.frequency === 'daily') return true
+
+  if (routine.frequency === 'weekly' || routine.frequency === 'fortnightly') {
+    const diff = daysBetween(routine.startDate, dateStr)
+    const interval = routine.frequency === 'weekly' ? 7 : 14
+    return diff >= 0 && diff % interval === 0
+  }
+
+  const months = monthDiff(routine.startDate, dateStr)
+  const preferredDay = start.getDate()
+  if (months < 0) return false
+
+  if (routine.frequency === 'monthly') {
+    return dateStr === clampedRoutineDate(date.getFullYear(), date.getMonth(), preferredDay)
+  }
+
+  if (routine.frequency === 'semiannual') {
+    return months % 6 === 0 && dateStr === clampedRoutineDate(date.getFullYear(), date.getMonth(), preferredDay)
+  }
+
+  if (routine.frequency === 'yearly') {
+    return date.getMonth() === start.getMonth() &&
+      dateStr === clampedRoutineDate(date.getFullYear(), start.getMonth(), preferredDay)
+  }
+
+  return false
+}
+
+export function routineCompletedOn(completions: RoutineCompletion[], routineId: number, dateStr: string) {
+  return (completions || []).some(item => Number(item.routineId) === Number(routineId) && item.date === dateStr)
+}
+
+export function nextRoutineDueDate(routine: Routine, fromDate = localDateISO()) {
+  const start = routine.startDate && routine.startDate > fromDate ? routine.startDate : fromDate
+  for (let i = 0; i <= 740; i++) {
+    const date = addDays(start, i)
+    if (routineDueOn(routine, date)) return date
+    if (routine.endDate && date > routine.endDate) break
+  }
+  return ''
+}
+
 export function weekDates(dateStr: string) {
   const base = parseISODate(dateStr)
   const day = base.getDay()
@@ -458,7 +523,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 7,
+    version: 8,
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
@@ -510,6 +575,26 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       endDate: chore.endDate || undefined
     })) : [],
     transactions: Array.isArray(source.transactions) ? source.transactions : [],
-    todos: Array.isArray(source.todos) ? source.todos.map((t: any) => ({ ...t, createdAt: t.createdAt || localDateISO() })) : []
+    todos: Array.isArray(source.todos) ? source.todos.map((t: any) => ({ ...t, createdAt: t.createdAt || localDateISO() })) : [],
+    routines: Array.isArray(source.routines) ? source.routines.map((routine: any): Routine => ({
+      id: Number(routine.id),
+      title: String(routine.title || 'Routine'),
+      userId: Number(routine.userId || 0),
+      frequency: ['daily','weekly','fortnightly','monthly','semiannual','yearly'].includes(String(routine.frequency))
+        ? routine.frequency
+        : 'weekly',
+      startDate: routine.startDate || localDateISO(),
+      endDate: routine.endDate || undefined,
+      active: routine.active !== false,
+      notes: routine.notes || ''
+    })) : [],
+    routineCompletions: Array.isArray(source.routineCompletions) ? source.routineCompletions.map((item: any): RoutineCompletion => ({
+      id: Number(item.id),
+      routineId: Number(item.routineId),
+      userId: Number(item.userId || 0),
+      date: item.date || localDateISO(),
+      completedAt: item.completedAt || new Date().toISOString(),
+      completedByUserId: Number(item.completedByUserId || item.userId || 0)
+    })) : []
   }
 }
