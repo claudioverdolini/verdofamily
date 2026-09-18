@@ -12,6 +12,16 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json", ...cors }
 });
 
+function stripHealthFromFamilyData(value: any) {
+  const data = value && typeof value === "object" && !Array.isArray(value)
+    ? structuredClone(value)
+    : {};
+  data.deadlines = Array.isArray(data.deadlines)
+    ? data.deadlines.filter((item: any) => !["medicine","therapy","visit","health-record"].includes(String(item?.kind || "")))
+    : [];
+  return data;
+}
+
 function isAcceptedAppsScriptRedirect(response: Response) {
   if (response.status < 300 || response.status >= 400) return false;
   const location = response.headers.get("location") || "";
@@ -91,17 +101,28 @@ Deno.serve(async (req) => {
       await client.from("drive_backup_configs").update({ last_attempt_at: attemptedAt, last_error: null }).eq("family_id", familyId);
 
       try {
-        const [{ data: family, error: famError }, { data: doc, error: docError }] = await Promise.all([
+        const [
+          { data: family, error: famError },
+          { data: doc, error: docError },
+          { data: healthData, error: healthError }
+        ] = await Promise.all([
           client.from("families").select("name").eq("id", familyId).single(),
-          client.from("family_documents").select("data,revision,updated_at").eq("family_id", familyId).single()
+          client.from("family_documents").select("data,revision,updated_at").eq("family_id", familyId).single(),
+          client.rpc("system_health_snapshot", { p_family_id: familyId })
         ]);
         if (famError) throw famError;
         if (docError) throw docError;
+        if (healthError) throw healthError;
+
+        const familyData = stripHealthFromFamilyData(doc.data || {});
+        const normalizedHealth = healthData || { version: 1, items: [] };
 
         await client.from("family_backups").insert({
           family_id: familyId,
           revision: Number(doc.revision || 0),
-          data: doc.data || {},
+          data: familyData,
+          health_data: normalizedHealth,
+          backup_format_version: 2,
           reason: cronMode ? "google_drive_export" : "manual_google_drive_export",
           created_by: null
         });
@@ -109,13 +130,14 @@ Deno.serve(async (req) => {
         const payload = {
           secret: cfg.webhook_secret,
           app: "VerdoFamily",
-          schemaVersion: 1,
+          schemaVersion: 2,
           familyId,
           familyName: family?.name || "Famiglia",
           revision: Number(doc.revision || 0),
           sourceUpdatedAt: doc.updated_at,
           exportedAt: new Date().toISOString(),
-          data: doc.data || {}
+          data: familyData,
+          healthData: normalizedHealth
         };
 
         // Google Apps Script ContentService intentionally answers through a 3xx
