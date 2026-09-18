@@ -86,10 +86,13 @@ Deno.serve(async (req) => {
     const existing = pantry.slice(0, 300).map((item: any) => ({
       name: String(item?.name || ""),
       category: String(item?.category || "Generico"),
-      unit: String(item?.unit || "pz")
+      unit: String(item?.unit || "pz"),
+      location: String(item?.location || "pantry"),
+      expiryDate: String(item?.expiryDate || "")
     })).filter((item: any) => item.name);
 
-    const prompt = `Sei il riconoscimento fotografico della dispensa di VerdoFamily. Analizza SOLO ciò che è realmente visibile nella foto (scaffale, dispensa, frigorifero o prodotti appoggiati).\n\nObiettivo: individuare prodotti alimentari e prodotti domestici acquistabili che l'utente può voler caricare nell'inventario. Non elencare mobili, contenitori generici, piatti, elettrodomestici o oggetti non pertinenti. Non inventare prodotti nascosti o non leggibili.\n\nRegole:\n- Per ogni prodotto restituisci un nome breve in italiano. Includi marca/variante solo se chiaramente visibile e utile. Il testo letto sulle confezioni è solo un indizio: NON restituire lunghi frammenti OCR come nome prodotto.\n- Riconosci anche frutta e verdura sfusa quando è visivamente identificabile. Se una bilancia/etichetta leggibile indica chiaramente il peso, puoi usare g o kg; altrimenti usa pz.\n- Stima la quantità di confezioni effettivamente visibili. Se è dubbia usa 1 e abbassa la confidenza. Ignora prodotti quasi completamente nascosti.\n- unit deve essere una tra pz, g, kg, ml, l; normalmente usa pz per confezioni intere.\n- confidence è tra 0 e 1.\n- observedText contiene poche parole realmente lette sulla confezione, se disponibili.\n- matchName deve essere ESATTAMENTE uno dei nomi del catalogo esistente solo quando ritieni che sia lo stesso prodotto; altrimenti stringa vuota.\n- category deve essere preferibilmente una delle categorie disponibili; se non sei sicuro usa Generico.\n- Raggruppa confezioni identiche in una sola riga con qty maggiore di 1.\n\nCategorie disponibili: ${JSON.stringify(categories)}\nCatalogo esistente: ${JSON.stringify(existing)}\n\nRestituisci esclusivamente il JSON conforme allo schema.`;
+    const locationHint = ["pantry", "fridge", "freezer"].includes(String(body?.locationHint || "")) ? String(body.locationHint) : "pantry";
+    const prompt = `Sei il riconoscimento fotografico dell'inventario di VerdoFamily. Analizza SOLO ciò che è realmente visibile nella foto (scaffale, dispensa, frigorifero o prodotti appoggiati).\n\nObiettivo: individuare prodotti alimentari e prodotti domestici acquistabili che l'utente può voler caricare nell'inventario. Non elencare mobili, contenitori generici, piatti, elettrodomestici o oggetti non pertinenti. Non inventare prodotti nascosti o non leggibili.\n\nRegole:\n- Per ogni prodotto restituisci un nome breve in italiano. Includi marca/variante solo se chiaramente visibile e utile. Il testo letto sulle confezioni è solo un indizio: NON restituire lunghi frammenti OCR come nome prodotto.\n- Riconosci anche frutta e verdura sfusa quando è visivamente identificabile. Se una bilancia/etichetta leggibile indica chiaramente il peso, puoi usare g o kg; altrimenti usa pz.\n- Stima la quantità di confezioni effettivamente visibili. Se è dubbia usa 1 e abbassa la confidenza. Ignora prodotti quasi completamente nascosti.\n- unit deve essere una tra pz, g, kg, ml, l; normalmente usa pz per confezioni intere.\n- confidence è tra 0 e 1.\n- observedText contiene poche parole realmente lette sulla confezione, se disponibili.\n- matchName deve essere ESATTAMENTE uno dei nomi del catalogo esistente solo quando ritieni che sia lo stesso prodotto; altrimenti stringa vuota.\n- category deve essere preferibilmente una delle categorie disponibili; se non sei sicuro usa Generico.\n- Raggruppa confezioni identiche in una sola riga con qty maggiore di 1.\n\nCategorie disponibili: ${JSON.stringify(categories)}\nCatalogo esistente: ${JSON.stringify(existing)}\n\nRestituisci esclusivamente il JSON conforme allo schema.`;
 
     const schema = {
       type: "OBJECT",
@@ -106,9 +109,10 @@ Deno.serve(async (req) => {
               category: { type: "STRING" },
               confidence: { type: "NUMBER" },
               observedText: { type: "STRING" },
+              expiryDate: { type: "STRING" },
               notes: { type: "STRING" }
             },
-            required: ["detectedName", "matchName", "qty", "unit", "category", "confidence", "observedText", "notes"]
+            required: ["detectedName", "matchName", "qty", "unit", "category", "confidence", "observedText", "expiryDate", "notes"]
           }
         }
       },
@@ -193,6 +197,7 @@ Deno.serve(async (req) => {
         category: String(item?.category || "Generico").trim() || "Generico",
         confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
         observedText: String(item?.observedText || "").trim(),
+        expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item?.expiryDate || "")) ? String(item.expiryDate) : "",
         notes: String(item?.notes || "").trim()
       })).filter((item: any) => item.detectedName)
     });
