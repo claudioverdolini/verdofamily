@@ -136,10 +136,13 @@ function mergeChildChanges(fullData: any, incomingData: any, childId: number) {
       if (!same(old?.[key], proposed?.[key])) throw new Error("forbidden_chore_change");
     }
 
-    const oldStatus = old?.done ? "approved" : String(old?.completionStatus || "open");
-    const nextStatus = proposed?.done ? "approved" : String(proposed?.completionStatus || "open");
+    if (old?.done) {
+      if (!same(old, proposed)) throw new Error("forbidden_approved_chore_change");
+      continue;
+    }
+
+    const nextStatus = String(proposed?.completionStatus || "open");
     if (!["open","pending"].includes(nextStatus)) throw new Error("forbidden_chore_status");
-    if (oldStatus === "approved" && nextStatus !== "approved") throw new Error("forbidden_chore_status");
     if (nextStatus === "pending" && n(proposed?.completedByUserId) !== childId) throw new Error("forbidden_chore_completion");
     if (nextStatus === "open" && (proposed?.completedAt || proposed?.completedByUserId)) throw new Error("forbidden_chore_completion");
   }
