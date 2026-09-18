@@ -90,12 +90,29 @@ Future refinements:
 - Longer-term consumption analytics and seasonality after enough real history exists.
 - Barcode scanning if it provides practical value.
 
-## Next features to develop
+## Current priority completed
 
 ### 6. Smart meals
-- “What should we cook?” assistant based on pantry, expiries, preferences and available time.
-- Avoid repetition across recent meals.
-- Add missing recipe ingredients directly to shopping list.
+Status: **implemented — first version**
+
+Implemented:
+- “Cosa cuciniamo?” recommendation view inside the existing Meals module.
+- Suggestions ranked from real pantry/fridge/freezer availability.
+- Priority bonus for ingredients close to expiry.
+- Per-dish preparation time and selectable maximum available time.
+- Per-family-member dish preferences.
+- Penalty for dishes already planned/eaten repeatedly in the previous 10 days.
+- Clear explanation of why each dish is being suggested.
+- Missing ingredient calculation with quantities.
+- One-tap addition of missing ingredients to the shopping list, skipping items already present.
+- Direct planning of a suggested dish into the weekly meal planner.
+
+Future refinements:
+- Unit conversion between compatible measures such as g/kg and ml/l.
+- Dietary rules/allergens if the family wants to maintain them.
+- AI-generated new recipe ideas in addition to the existing family recipe catalog.
+
+## Next features to develop
 
 ### 7. Family notice board
 - Pinned notes, reminders, photos and quick family messages.
