@@ -25,6 +25,40 @@ const ALLOWED = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ]);
 
+async function rateLimit(admin: any, scope: string, subjectKey: string, limit: number, windowSeconds: number) {
+  const { data, error } = await admin.rpc("system_security_rate_limit", {
+    p_scope: scope,
+    p_subject_key: subjectKey,
+    p_limit: limit,
+    p_window_seconds: windowSeconds
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+async function audit(admin: any, event: {
+  actorUserId?: string | null;
+  familyId?: string | null;
+  eventType: string;
+  success?: boolean;
+  severity?: "info" | "warning" | "critical";
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const { error } = await admin.rpc("system_security_audit", {
+    p_actor_user_id: event.actorUserId || null,
+    p_family_id: event.familyId || null,
+    p_event_type: event.eventType,
+    p_success: event.success !== false,
+    p_severity: event.severity || "info",
+    p_target_type: event.targetType || null,
+    p_target_id: event.targetId || null,
+    p_metadata: event.metadata || {}
+  });
+  if (error) console.warn("security_audit_failed", error.message);
+}
+
 function safeName(name: string) {
   return (name || "allegato")
     .normalize("NFD")
@@ -280,6 +314,15 @@ Deno.serve(async (req) => {
       if (file.size <= 0 || file.size > MAX_BYTES) return json({ ok: false, error: "file_too_large" }, 413);
       if (!ALLOWED.has(file.type)) return json({ ok: false, error: "file_type_not_allowed" }, 415);
 
+      const allowed = await rateLimit(admin, "health_upload", `${user.id}:${familyId}`, 8, 600);
+      if (!allowed) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "health_upload_rate_limited",
+          success: false, severity: "warning", targetType: record.category, targetId: recordId
+        });
+        return json({ ok: false, error: "rate_limited" }, 429);
+      }
+
       const objectPath = `${familyId}/${recordId}/${crypto.randomUUID()}-${safeName(file.name)}`;
       const bytes = new Uint8Array(await file.arrayBuffer());
       const { error: uploadError } = await admin.storage
@@ -314,6 +357,15 @@ Deno.serve(async (req) => {
         await admin.storage.from("health-attachments").remove([objectPath]).catch(() => {});
         throw metadataError;
       }
+
+      await audit(admin, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "health_attachment_uploaded",
+        targetType: record.category,
+        targetId: recordId,
+        metadata: { mimeType: file.type, size: file.size, driveBackupOk: driveBackup?.ok === true }
+      });
 
       return json({
         ok: true,
@@ -356,12 +408,21 @@ Deno.serve(async (req) => {
     }
 
     if (action === "signed-url") {
+      if (!serverMode) {
+        const allowed = await rateLimit(admin, "health_signed_url", `${user.id}:${familyId}`, 300, 600);
+        if (!allowed) return json({ ok: false, error: "rate_limited" }, 429);
+      }
       const { data, error } = await admin.storage.from("health-attachments").createSignedUrl(path, 600);
       if (error) throw error;
       return json({ ok: true, signedUrl: data?.signedUrl || null });
     }
 
     if (action === "delete" || req.method === "DELETE") {
+      if (!serverMode) {
+        const allowed = await rateLimit(admin, "health_delete", `${user.id}:${familyId}`, 30, 3600);
+        if (!allowed) return json({ ok: false, error: "rate_limited" }, 429);
+      }
+
       // Keep the private binary object for historical backup restores.
       // Access is revoked immediately by removing its normalized metadata row.
       const { error: metadataError } = await admin
@@ -370,6 +431,13 @@ Deno.serve(async (req) => {
         .eq("family_id", familyId)
         .eq("storage_path", path);
       if (metadataError) throw metadataError;
+
+      if (!serverMode) {
+        await audit(admin, {
+          actorUserId: user.id, familyId, eventType: "health_attachment_deleted",
+          targetType: "health_attachment", targetId: recordId
+        });
+      }
       return json({ ok: true, retainedForRestore: true });
     }
 
