@@ -74,11 +74,23 @@ Deno.serve(async(req)=>{
         .select("id")
         .maybeSingle();
 
+      let claimId=claim?.id;
       if(claimErr){
-       if(String(claimErr.code||"")==="23505"){duplicate++;continue}
-       throw claimErr;
+       if(String(claimErr.code||"")==="23505"){
+        const {data:retryClaim,error:retryErr}=await sb
+          .from("push_delivery_logs")
+          .update({status:"sending",error:null})
+          .eq("subscription_id",r.id)
+          .eq("notification_key",String(reminder.notification_key))
+          .eq("status","error")
+          .select("id")
+          .maybeSingle();
+        if(retryErr) throw retryErr;
+        if(!retryClaim?.id){duplicate++;continue}
+        claimId=retryClaim.id;
+       }else throw claimErr;
       }
-      if(!claim?.id){duplicate++;continue}
+      if(!claimId){duplicate++;continue}
 
       try{
        await webpush.sendNotification(
@@ -92,7 +104,7 @@ Deno.serve(async(req)=>{
         {TTL:900}
        );
        sent++;
-       await sb.from("push_delivery_logs").update({status:"sent",sent_at:new Date().toISOString(),error:null}).eq("id",claim.id);
+       await sb.from("push_delivery_logs").update({status:"sent",sent_at:new Date().toISOString(),error:null}).eq("id",claimId);
       }catch(e:any){
        const st=Number(e?.statusCode||0);
        if(st===404||st===410) stale++;
@@ -100,7 +112,7 @@ Deno.serve(async(req)=>{
        await sb.from("push_delivery_logs").update({
         status:"error",
         error:String(e?.message||("push_error_"+st)).slice(0,1000)
-       }).eq("id",claim.id);
+       }).eq("id",claimId);
       }
      }
     }

@@ -1,0 +1,2 @@
+-- Migration history marker for the scheduled push reminder foundation.
+-- The final corrected definition is in the immediately following migration.
