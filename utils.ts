@@ -485,6 +485,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   showBalances: true,
   bottomTabs: ['home', 'calendar', 'shopping', 'meals'],
   homeCards: ['today', 'shopping', 'deadlines', 'wallets'],
+  notificationDetail: 'full',
   notifications: { calendar: true, deadlines: true, chores: true, school: true, board: true, shopping: false, whatsapp: false }
 }
 

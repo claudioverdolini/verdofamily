@@ -611,6 +611,13 @@ export default function SettingsPage() {
         <CardHeader title="Notifiche push" subtitle="Avvisi reali sul telefono, tablet o computer anche quando VerdoFamily non è aperto." />
         {!cloudAuthenticated || !familyId ? <div className="callout">Accedi con il tuo account VerdoFamily cloud per attivare le notifiche push.</div> : !pushStatus ? <div className="backup-actions"><Button variant="soft" icon={<RefreshCw size={17} />} onClick={refreshPushStatus} disabled={pushBusy}>{pushBusy ? 'Controllo…' : 'Verifica disponibilità'}</Button></div> : !pushStatus.supported ? <div className="callout">Questo browser non supporta Web Push. Su iPhone/iPad usa VerdoFamily installata nella schermata Home; su Android e computer usa un browser aggiornato.</div> : <>
           <div className={pushStatus.subscribed ? 'callout callout--success' : 'callout'}>{pushStatus.subscribed ? '✅ Push attive su questo dispositivo. Le categorie seguono le preferenze Avvisi qui sopra.' : pushStatus.permission === 'denied' ? '⚠️ Le notifiche sono bloccate dal browser. Riabilitale nelle impostazioni del sito/dispositivo e poi premi Verifica.' : 'Le push non sono ancora attive su questo dispositivo.'}</div>
+          <Field label="Dettagli notifiche" hint="Completi mostra titolo, ora e persona. Riservati mantiene un testo generico sulla schermata bloccata.">
+            <Segmented
+              value={prefs.notificationDetail || 'full'}
+              onChange={(notificationDetail: any) => updateCurrentPrefs({ notificationDetail })}
+              options={[{ value: 'full', label: 'Completi' }, { value: 'private', label: 'Riservati' }]}
+            />
+          </Field>
           <div className="backup-actions">
             {pushStatus.subscribed ? <><Button variant="soft" icon={<BellRing size={17} />} onClick={testPush} disabled={pushBusy}>{pushBusy ? 'Attendi…' : 'Invia notifica di prova'}</Button><Button variant="ghost" onClick={deactivatePush} disabled={pushBusy}>Disattiva su questo dispositivo</Button></> : <Button icon={<BellRing size={17} />} onClick={activatePush} disabled={pushBusy || pushStatus.permission === 'denied'}>{pushBusy ? 'Attivazione…' : 'Attiva notifiche push'}</Button>}
             <Button variant="ghost" icon={<RefreshCw size={16} />} onClick={refreshPushStatus} disabled={pushBusy}>Verifica</Button>

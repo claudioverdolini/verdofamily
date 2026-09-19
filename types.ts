@@ -23,6 +23,7 @@ export type UserPrefs = {
   bottomTabs: PageKey[]
   homeCards: Array<'today' | 'shopping' | 'deadlines' | 'wallets'>
   notificationCenterReadIds?: string[]
+  notificationDetail: 'full' | 'private'
   notifications: {
     calendar: boolean
     deadlines: boolean
