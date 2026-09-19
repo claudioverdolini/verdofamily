@@ -684,6 +684,12 @@ function AppShell() {
 
   const bottomTabs = useMemo(() => (prefs?.bottomTabs?.length ? prefs.bottomTabs : ['home', 'calendar', 'shopping', 'meals']).slice(0, 4), [prefs?.bottomTabs])
   const current = NAV.find(n => n.key === activePage)
+  const moreGroups = useMemo(() => ['Oggi', 'Casa', 'Famiglia', 'Gestione']
+    .map(group => ({
+      group,
+      items: NAV.filter(item => item.group === group && !bottomTabs.includes(item.key))
+    }))
+    .filter(section => section.items.length), [bottomTabs])
 
   function navigate(page: PageKey) {
     setActivePage(page)
@@ -713,7 +719,7 @@ function AppShell() {
 
     <VoiceAssistant />
 
-    {moreOpen ? <div className="mobile-more-layer" onMouseDown={e => { if (e.target === e.currentTarget) setMoreOpen(false) }}><div className="mobile-more"><div className="mobile-more__handle" /><div className="mobile-more__head"><strong>Altre sezioni</strong><IconButton label="Chiudi" onClick={() => setMoreOpen(false)}><X size={20} /></IconButton></div><div className="mobile-more__status"><SyncIndicator /></div><div className="mobile-more__grid">{NAV.filter(n => !bottomTabs.includes(n.key)).map(item => <button key={item.key} onClick={() => navigate(item.key)} className={activePage === item.key ? 'is-active' : ''}><span>{item.icon}</span><strong>{item.label}</strong></button>)}</div><button className="mobile-more__logout" onClick={() => logout()}><LogOut size={18} /> Esci</button></div></div> : null}
+    {moreOpen ? <div className="mobile-more-layer" onMouseDown={e => { if (e.target === e.currentTarget) setMoreOpen(false) }}><div className="mobile-more"><div className="mobile-more__handle" /><div className="mobile-more__head"><strong>Altre sezioni</strong><IconButton label="Chiudi" onClick={() => setMoreOpen(false)}><X size={20} /></IconButton></div><div className="mobile-more__status"><SyncIndicator /></div><div className="mobile-more__sections">{moreGroups.map(section => <section className="mobile-more__section" key={section.group}><div className="mobile-more__section-title">{section.group}</div><div className="mobile-more__grid">{section.items.map(item => <button key={item.key} onClick={() => navigate(item.key)} className={activePage === item.key ? 'is-active' : ''}><span>{item.icon}</span><strong>{item.label}</strong></button>)}</div></section>)}</div><button className="mobile-more__logout" onClick={() => logout()}><LogOut size={18} /> Esci</button></div></div> : null}
   </div>
 }
 

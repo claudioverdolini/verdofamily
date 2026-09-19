@@ -220,3 +220,20 @@ button.sync-indicator { cursor: pointer; }
   .invite-panel { align-items: stretch; }
   .invite-code { width: 100%; text-align: center; }
 }
+
+
+/* Readability refresh for cloud/auth surfaces */
+.auth-tabs button{min-height:42px;font-size:13px}
+.cloud-loader strong{font-size:19px}
+.cloud-loader>span:last-child{font-size:13px}
+.setup-hero h2{font-size:28px}
+.setup-hero p{font-size:14px}
+.toggle-row--boxed strong{font-size:14px}
+.toggle-row--boxed small{font-size:12px}
+.setup-logout{min-height:44px;font-size:13px}
+.sync-indicator{min-height:32px;font-size:11px}
+.invite-panel__copy strong{font-size:14px}
+.invite-panel__copy span{font-size:12px}
+@media(max-width:520px){
+  .setup-hero h2{font-size:26px}
+}

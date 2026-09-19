@@ -834,3 +834,234 @@ textarea,
   .image-source-grid { grid-template-columns: 1fr; }
   .image-source-option { min-height: 96px; }
 }
+
+
+/* =========================================================
+   Readability & information hierarchy refresh · Sep 2026
+   The app previously used many 7–11px labels that were too
+   small on phones. These rules intentionally favor clarity.
+   ========================================================= */
+body{font-size:15px;line-height:1.45}
+input,select,textarea{min-height:48px;padding:11px 13px;font-size:15px}
+input[type=checkbox]{width:20px;height:20px}
+.sidebar__head{height:58px}
+.sidebar__head strong{font-size:17px}
+.sidebar__head span,.login-brand span{font-size:12.5px}
+.sidebar__nav{gap:6px}
+.sidebar__nav>button{min-height:50px;border-radius:14px;padding:11px 13px}
+.sidebar__nav>button strong{font-size:15px}
+.sidebar__nav>button.is-active{box-shadow:inset 3px 0 0 var(--accent)}
+.nav-group-label{padding:17px 12px 6px;font-size:11px;letter-spacing:.08em}
+.profile-chip strong{font-size:14px}.profile-chip small{font-size:12px}
+.logout-btn{min-height:44px;font-size:13px}
+.topbar__left>div:last-child>span{font-size:16px}
+.topbar__left small{font-size:12px}
+.topbar-profile>span:last-child{font-size:13px}
+.content{padding-top:30px}
+.page-intro{margin-bottom:28px}
+.eyebrow{font-size:12px;letter-spacing:.09em}
+.page-intro h1{font-size:clamp(31px,3vw,44px);margin-top:6px}
+.page-intro p{font-size:16px;line-height:1.55}
+.card{padding:22px}
+.card-header{margin-bottom:20px}
+.card-header__copy h3{font-size:18px;line-height:1.2}
+.card-header__copy p{font-size:13.5px;line-height:1.45}
+.btn{min-height:46px;padding:0 17px;font-size:14px;border-radius:13px}
+.btn--sm{min-height:40px;padding:0 13px;font-size:13px}
+.icon-btn{width:42px;height:42px}
+.field{gap:7px}
+.field__label{font-size:13.5px}
+.field__hint{font-size:12px;line-height:1.4}
+.badge{min-height:27px;padding:4px 9px;font-size:11px}
+.text-link{font-size:13px}
+.empty-state__title{font-size:17px}
+.empty-state__text{font-size:13px}
+.segmented button{min-height:38px;padding:0 13px;font-size:13px}
+.list-row{min-height:66px;gap:13px;padding:10px 3px}
+.list-row__title{font-size:14.5px}
+.list-row__subtitle{font-size:12.5px;line-height:1.4}
+.callout{padding:12px 14px;font-size:13px;line-height:1.5}
+.toggle-row{font-size:13.5px}
+.chip{min-height:36px;padding:0 13px;font-size:12.5px}
+.search-box{min-height:46px}
+.filter-bar{font-size:13px}
+
+/* Home / dashboard */
+.quick-actions{gap:10px;margin-bottom:18px}
+.quick-actions button{min-height:46px;padding:0 14px;font-size:13px;border-radius:14px}
+.stats-grid{gap:14px;margin-bottom:14px}
+.stat-card{min-height:154px;padding:18px}
+.stat-card__icon{width:40px;height:40px;margin-bottom:16px}
+.stat-card__label{font-size:12px}
+.stat-card strong{font-size:29px}
+.stat-card small{font-size:12px;line-height:1.4}
+.dashboard-grid{gap:14px}
+.time-pill{font-size:12px}
+.date-chip strong{font-size:16px}.date-chip small{font-size:11px}
+.week-day__label{font-size:12px}
+.week-day__count{font-size:13px}
+.week-day__dish{font-size:12px;line-height:1.35}
+
+/* Calendar */
+.calendar-toolbar{padding:14px 16px}
+.calendar-toolbar__nav h2{font-size:18px}
+.today-btn{min-height:38px;font-size:12.5px}
+.month-head>div{font-size:11px;padding:9px 4px}
+.month-cell{min-height:126px;padding:8px}
+.month-cell__day{width:30px;height:30px;font-size:12px}
+.calendar-event{padding:5px 6px;gap:5px}
+.calendar-event span,.calendar-event strong{font-size:10.5px;line-height:1.25}
+.calendar-more{font-size:10.5px}
+.week-calendar__head span{font-size:11px}
+.week-calendar__head strong{font-size:18px}
+.week-event{padding:10px}
+.week-event__time{font-size:11px}
+.week-event strong{font-size:13.5px}
+.week-event>span:last-child{font-size:11px}
+.week-empty{font-size:11px}
+.agenda-row{min-height:66px}
+.agenda-date strong{font-size:20px}
+.agenda-date span,.agenda-time{font-size:12px}
+.agenda-copy strong{font-size:14px}
+.agenda-copy span{font-size:12px}
+.agenda-user{font-size:11px}
+
+/* Settings: turn section headers into strong landmarks */
+.settings-flow{gap:30px}
+.settings-section{gap:14px}
+.settings-section__head{padding:2px 4px 4px}
+.settings-section__head>div>span{font-size:12px}
+.settings-section__head h2{font-size:23px}
+.settings-section__head p{font-size:13.5px;line-height:1.5}
+.settings-unified-card{padding:22px}
+.settings-subsection{padding-top:8px;padding-bottom:12px}
+.settings-subsection__head{margin-bottom:16px}
+.settings-subsection__head strong{font-size:16px}
+.settings-subsection__head span{font-size:12.5px;line-height:1.4}
+.accent-swatch strong{font-size:12px}
+.settings-check-grid label{min-height:48px;padding:10px;font-size:13px}
+.sortable-list>div{min-height:44px;padding:8px 11px;font-size:13px}
+.settings-toggle-list label{min-height:62px}
+.settings-toggle-list strong{font-size:14px}
+.settings-toggle-list span{font-size:12px;line-height:1.35}
+.settings-toggle-list--grid>label{min-height:68px;padding:11px 12px}
+
+/* Notifications */
+.notification-panel__head strong{font-size:17px}
+.notification-panel__head span{font-size:12px}
+.notification-filter button{min-height:34px;font-size:12px}
+.notification-mark-all{font-size:12px}
+.notification-item{min-height:62px}
+.notification-item__title{font-size:13.5px}
+.notification-item__detail{font-size:12px}
+.notification-item__meta{font-size:11px}
+.notification-empty strong{font-size:15px}
+.notification-empty span{font-size:12px}
+
+/* Chores, routines, deadlines */
+.approval-banner strong{font-size:14px}
+.approval-banner span{font-size:12px}
+.chore-status{font-size:11.5px!important}
+.wallet-card__head small{font-size:12px}
+.routine-row__copy strong{font-size:14px}
+.routine-row__copy span,.routine-row__copy small{font-size:12px}
+.routine-row__copy em,.routine-due-item small{font-size:11px}
+.deadline-stat span{font-size:11.5px}
+.deadline-stat small{font-size:11.5px}
+.deadline-category-filter button{min-height:35px;font-size:11.5px}
+.deadline-copy--smart small,.deadline-copy--smart em{font-size:11.5px}
+.deadline-reminder-picker button{min-height:38px;font-size:12px}
+.deadline-last-completed{font-size:12px}
+.year-deadline-head span{font-size:11px}
+.year-month-card>header>span{font-size:13px}
+.year-month-list b{font-size:11.5px}
+.year-month-list small,.year-month-empty{font-size:10.5px}
+
+/* Utility modules that were also very small */
+.telegram-report-panel__head strong{font-size:14px}
+.telegram-report-panel__head span{font-size:12px}
+.telegram-day-chip span{font-size:12px}
+.telegram-section-option strong{font-size:13px}
+.telegram-section-option span{font-size:11.5px}
+.scan-mode-switch>span{font-size:12px}
+.vision-loading strong{font-size:15px}
+.vision-loading span,.vision-summary span{font-size:12px}
+.vision-summary strong{font-size:14px}
+.image-source-option strong{font-size:15px}
+.image-source-option span,.image-source-hint,.pantry-photo-preview span{font-size:12px}
+
+/* Mobile information architecture */
+@media(max-width:820px){
+  :root{--topbar:66px;--bottom:78px}
+  .content{padding-top:18px;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right));padding-bottom:calc(var(--bottom) + 24px + env(safe-area-inset-bottom))}
+  .topbar{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+  .topbar__left>div:last-child>span{font-size:16px}
+  .topbar__left small{font-size:11.5px}
+  .page-intro{margin-bottom:20px;gap:12px}
+  .page-intro h1{font-size:30px}
+  .page-intro p{font-size:14px;line-height:1.45;display:block}
+  .page-intro__actions .btn{width:46px;min-height:46px}
+  .card{padding:18px}
+  .card-header__copy h3{font-size:17px}
+  .card-header__copy p{font-size:13px}
+  .quick-actions{gap:9px;margin-bottom:14px}
+  .quick-actions button{min-height:50px;font-size:13px;padding:0 12px}
+  .stats-grid{gap:10px}
+  .stat-card{min-height:138px;padding:15px}
+  .stat-card strong{font-size:26px}
+  .stat-card__label{font-size:11.5px}
+  .stat-card small{font-size:11.5px}
+  .bottom-nav{height:calc(var(--bottom) + env(safe-area-inset-bottom));padding-top:7px}
+  .bottom-nav>button{min-height:58px;gap:3px}
+  .bottom-nav>button>span{width:38px;height:31px}
+  .bottom-nav small{font-size:11px;font-weight:750}
+  .sidebar{width:min(88vw,350px);padding-left:16px;padding-right:16px}
+  .sidebar__nav>button{min-height:52px}
+  .sidebar__nav>button strong{font-size:15px}
+  .mobile-more{max-height:min(82dvh,720px);overflow:auto;padding:8px 16px calc(20px + env(safe-area-inset-bottom))}
+  .mobile-more__head strong{font-size:19px}
+  .mobile-more__status{justify-content:flex-start;padding-left:2px}
+  .mobile-more__sections{display:grid;gap:16px}
+  .mobile-more__section{display:grid;gap:7px}
+  .mobile-more__section-title{padding:0 2px;font-size:11.5px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .mobile-more__grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  .mobile-more__grid button{min-height:76px;border-radius:16px;display:grid;grid-template-columns:38px minmax(0,1fr);align-items:center;justify-items:start;padding:12px;text-align:left}
+  .mobile-more__grid button span{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:color-mix(in srgb,var(--accent) 9%,var(--surface));color:var(--accent)}
+  .mobile-more__grid button strong{font-size:13.5px;text-align:left;line-height:1.25}
+  .mobile-more__grid button.is-active{border-color:color-mix(in srgb,var(--accent) 45%,var(--border));background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
+  .mobile-more__logout{min-height:48px;font-size:13px}
+  .settings-section__head h2{font-size:21px}
+  .settings-section__head p{font-size:13px}
+  .settings-subsection__head strong{font-size:15px}
+  .settings-subsection__head span{font-size:12px}
+  .month-head>div{font-size:10px}
+  .month-cell{min-height:92px;padding:4px 3px}
+  .month-cell__day{width:28px;height:28px;font-size:11px}
+  .calendar-event strong{font-size:9.5px;line-height:1.2}
+  .calendar-more{font-size:9.5px}
+  .calendar-toolbar__nav h2{font-size:15px}
+  .agenda-copy strong{font-size:13.5px}
+  .agenda-copy span,.agenda-date span,.agenda-time{font-size:11.5px}
+}
+@media(max-width:520px){
+  .content{padding-top:14px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+  .card{padding:16px}
+  .calendar-card{padding:0}
+  .page-intro{margin-bottom:17px}
+  .page-intro h1{font-size:28px}
+  .page-intro p{font-size:13.5px}
+  .quick-actions button{font-size:12.5px}
+  .stat-card{min-height:132px;padding:14px}
+  .month-head>div{font-size:9.5px}
+  .month-cell{min-height:86px}
+  .calendar-event strong,.calendar-more{font-size:9px}
+}
+@media(max-width:430px){
+  .page-intro h1{font-size:27px}
+  .month-head>div{font-size:9px}
+  .month-cell{min-height:82px}
+  .month-cell__day{width:26px;height:26px;font-size:10.5px}
+  .calendar-event strong,.calendar-more{font-size:8.5px}
+  .mobile-more__grid{grid-template-columns:minmax(0,1fr)}
+  .mobile-more__grid button{min-height:64px}
+}
