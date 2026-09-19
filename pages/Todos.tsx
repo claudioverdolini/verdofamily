@@ -144,7 +144,7 @@ export default function TodosPage() {
         : null}
     />
 
-    <div className="page-tabs-wrap">
+    <div className="page-tabs-wrap page-tabs-wrap--todos">
       <Segmented value={view} onChange={setView} options={tabs} />
     </div>
 

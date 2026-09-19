@@ -262,14 +262,14 @@ export default function MealsPage() {
         actions={<Button icon={<Plus size={18} />} onClick={() => tab === 'planner' ? openPlan(today, 'Pranzo') : tab === 'dishes' ? openDish() : tab === 'recipes' ? openRecipe() : setTab('smart')}>{tab === 'planner' ? 'Pianifica pasto' : tab === 'dishes' ? 'Nuovo piatto' : tab === 'recipes' ? 'Salva ricetta' : 'Trova un piatto'}</Button>}
       />
 
-      <div className="page-tabs-wrap">
+      <div className="page-tabs-wrap page-tabs-wrap--meals">
         <Segmented
           value={tab}
           onChange={setTab}
           options={[
-            { value: 'planner', label: 'Planner settimanale' },
-            { value: 'smart', label: 'Cosa cuciniamo?' },
-            { value: 'recipes', label: `Ricette link · ${linkedRecipes.length}` },
+            { value: 'planner', label: 'Planner' },
+            { value: 'smart', label: 'Idee' },
+            { value: 'recipes', label: `Ricette · ${linkedRecipes.length}` },
             { value: 'dishes', label: `Piatti · ${data.dishes.length}` }
           ]}
         />

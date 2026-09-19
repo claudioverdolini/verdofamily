@@ -293,14 +293,14 @@ export default function BoardPage() {
       <Card className="board-stat"><Camera size={17} /><span><strong>{photos.length}</strong><small>post con foto</small></span></Card>
     </div>
 
-    <div className="page-tabs-wrap">
+    <div className="page-tabs-wrap page-tabs-wrap--board">
       <Segmented
         value={view}
         onChange={setView}
         options={[
           { value: 'wall', label: 'In evidenza' },
-          { value: 'recent', label: `Tutta la bacheca · ${visible.length}` },
-          { value: 'mine', label: `I miei · ${mine.length}` }
+          { value: 'recent', label: `Tutti · ${visible.length}` },
+          { value: 'mine', label: `Miei · ${mine.length}` }
         ]}
       />
     </div>
