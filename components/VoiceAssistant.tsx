@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Mic, MicOff, Send, Volume2, X } from 'lucide-react'
 import { useFamily } from '../store'
 import { localDateISO, normalize } from '../utils'
@@ -29,9 +29,32 @@ export default function VoiceAssistant() {
   const [transcript, setTranscript] = useState('')
   const [reply, setReply] = useState('Ciao, sono ' + assistantName + '. Come posso aiutarti?')
   const recognitionRef = useRef<any>(null)
+  const silenceTimerRef = useRef<number | null>(null)
+  const commandHandledRef = useRef(false)
 
   const recognitionSupported = typeof window !== 'undefined'
     && Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+
+  function clearSilenceTimer() {
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+  }
+
+  function releaseRecognition(recognition?: any) {
+    clearSilenceTimer()
+    if (!recognition || recognitionRef.current === recognition) recognitionRef.current = null
+    setListening(false)
+  }
+
+  useEffect(() => {
+    return () => {
+      clearSilenceTimer()
+      try { recognitionRef.current?.abort?.() } catch {}
+      recognitionRef.current = null
+    }
+  }, [])
 
   function speak(text: string) {
     setReply(text)
@@ -172,42 +195,95 @@ export default function VoiceAssistant() {
       return
     }
 
+    try { recognitionRef.current?.abort?.() } catch {}
+    clearSilenceTimer()
+    commandHandledRef.current = false
+
     const recognition = new Recognition()
     recognitionRef.current = recognition
     recognition.lang = 'it-IT'
     recognition.continuous = false
     recognition.interimResults = true
     let finalText = ''
+    let bestText = ''
+
+    const finish = (value?: string) => {
+      if (commandHandledRef.current) return
+      const command = String(value || bestText || finalText || '').trim()
+      commandHandledRef.current = true
+      clearSilenceTimer()
+      releaseRecognition(recognition)
+      try { recognition.stop?.() } catch {}
+      if (command) execute(command)
+      else setReply('Non ho sentito nulla. Premi il microfono per riprovare.')
+    }
 
     recognition.onstart = () => {
       setOpen(true)
       setListening(true)
       setReply('Ti ascolto…')
     }
+
     recognition.onresult = (event: any) => {
       let interim = ''
+      let receivedFinal = false
+
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const value = event.results[index][0]?.transcript || ''
-        if (event.results[index].isFinal) finalText += value
-        else interim += value
+        if (event.results[index].isFinal) {
+          finalText += value
+          receivedFinal = true
+        } else {
+          interim += value
+        }
       }
-      setTranscript((finalText || interim).trim())
+
+      bestText = (finalText || interim).trim()
+      setTranscript(bestText)
+
+      clearSilenceTimer()
+
+      if (receivedFinal && finalText.trim()) {
+        finish(finalText)
+        return
+      }
+
+      if (bestText) {
+        // iOS/WebKit può lasciare la frase come "interim" anche dopo che
+        // l'utente ha finito di parlare. Un breve silenzio chiude la sessione.
+        silenceTimerRef.current = window.setTimeout(() => finish(bestText), 1100)
+      }
     }
+
     recognition.onerror = (event: any) => {
-      setListening(false)
+      clearSilenceTimer()
+      commandHandledRef.current = true
+      releaseRecognition(recognition)
       if (event?.error === 'not-allowed') speak('Per usare il microfono devi autorizzarlo nel browser.')
-      else if (event?.error !== 'no-speech') speak('Non sono riuscito ad ascoltare bene. Riprova.')
+      else if (event?.error !== 'no-speech' && event?.error !== 'aborted') speak('Non sono riuscito ad ascoltare bene. Riprova.')
+      else if (event?.error === 'no-speech') setReply('Non ho sentito nulla. Premi il microfono per riprovare.')
     }
+
     recognition.onend = () => {
-      setListening(false)
-      if (finalText.trim()) execute(finalText.trim())
+      if (!commandHandledRef.current) finish(finalText || bestText)
+      else releaseRecognition(recognition)
     }
-    recognition.start()
+
+    try {
+      recognition.start()
+    } catch {
+      releaseRecognition(recognition)
+      speak('Non sono riuscito ad avviare il microfono. Riprova.')
+    }
   }
 
   function stopListening() {
-    recognitionRef.current?.stop?.()
-    setListening(false)
+    const recognition = recognitionRef.current
+    clearSilenceTimer()
+    commandHandledRef.current = true
+    try { recognition?.stop?.() } catch {}
+    releaseRecognition(recognition)
+    setReply('Ascolto fermato. Premi il microfono quando vuoi parlare di nuovo.')
   }
 
   return <>
@@ -220,7 +296,7 @@ export default function VoiceAssistant() {
       <section className="voice-panel" role="dialog" aria-modal="true" aria-label={'Assistente ' + assistantName}>
         <header className="voice-panel__head">
           <div><span className="voice-panel__orb"><Mic size={20} /></span><div><strong>{assistantName}</strong><small>Assistente VerdoFamily</small></div></div>
-          <button className="voice-icon-btn" onClick={() => setOpen(false)} aria-label="Chiudi assistente"><X size={20} /></button>
+          <button className="voice-icon-btn" onClick={() => { clearSilenceTimer(); commandHandledRef.current = true; try { recognitionRef.current?.abort?.() } catch {}; recognitionRef.current = null; setListening(false); setOpen(false) }} aria-label="Chiudi assistente"><X size={20} /></button>
         </header>
         <div className={'voice-listen-state' + (listening ? ' is-listening' : '')}><span>{listening ? 'Ti ascolto…' : recognitionSupported ? 'Premi il microfono e parla' : 'Microfono non disponibile: usa il testo'}</span></div>
         <div className="voice-transcript">
