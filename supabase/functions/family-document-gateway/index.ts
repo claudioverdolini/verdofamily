@@ -12,6 +12,122 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json", ...cors }
 });
 
+async function notifyFamilyPush(admin: any, supabaseUrl: string, familyId: string, categories: string[], excludeUserId: string, details: any[] = []) {
+  if (!categories.length) return;
+  try {
+    const { data: secretRow } = await admin
+      .from("system_settings")
+      .select("value")
+      .eq("key", "push_cron_secret")
+      .maybeSingle();
+    if (!secretRow?.value) return;
+    const response = await fetch(`${supabaseUrl}/functions/v1/push-notifications`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-push-secret": String(secretRow.value)
+      },
+      body: JSON.stringify({
+        action: "notify-system",
+        familyId,
+        categories,
+        excludeUserId,
+        details
+      })
+    });
+    if (!response.ok) console.warn("push_notification_deferred", response.status);
+  } catch (error) {
+    console.warn("push_notification_deferred", error instanceof Error ? error.message : String(error));
+  }
+}
+
+function changedRecord(previous: any[], next: any[], key = "id") {
+  const before = new Map(array(previous).map((item: any) => [String(item?.[key] ?? ""), item]));
+  const added = array(next).find((item: any) => {
+    const id = String(item?.[key] ?? "");
+    return id && !before.has(id);
+  });
+  if (added) return { before: null, after: added };
+  const changed = array(next).find((item: any) => {
+    const id = String(item?.[key] ?? "");
+    return id && before.has(id) && JSON.stringify(before.get(id)) !== JSON.stringify(item);
+  });
+  return changed ? { before: before.get(String(changed?.[key] ?? "")), after: changed } : null;
+}
+
+function familyPushDetails(previous: any, next: any) {
+  const details: any[] = [];
+
+  const boardChange = changedRecord(previous?.boardPosts || [], next?.boardPosts || []);
+  if (boardChange?.after) {
+    const post = boardChange.after;
+    details.push({
+      category: "board",
+      id: String(post?.id || ""),
+      type: String(post?.type || "message"),
+      title: String(post?.title || ""),
+      preview: String(post?.body || "").replace(/\s+/g, " ").slice(0, 90),
+      authorUserId: n(post?.authorUserId)
+    });
+  }
+
+  const shoppingChange = changedRecord(previous?.shopping || [], next?.shopping || []);
+  if (shoppingChange?.after) {
+    const item = shoppingChange.after;
+    const action = !shoppingChange.before
+      ? "added"
+      : item?.taken === true && shoppingChange.before?.taken !== true
+        ? "taken"
+        : "updated";
+    details.push({
+      category: "shopping",
+      id: n(item?.id),
+      action,
+      item: String(item?.name || ""),
+      qty: item?.qty ?? "",
+      unit: String(item?.unit || "")
+    });
+  } else {
+    const pantryChange = changedRecord(previous?.pantry || [], next?.pantry || []);
+    if (pantryChange?.after) {
+      const item = pantryChange.after;
+      const beforeQty = Number(pantryChange.before?.qty ?? item?.qty ?? 0);
+      const afterQty = Number(item?.qty ?? 0);
+      const minQty = Number(item?.minQty ?? 0);
+      const action = !pantryChange.before
+        ? "pantry_added"
+        : minQty > 0 && afterQty <= minQty && afterQty < beforeQty
+          ? "pantry_low"
+          : "updated";
+      details.push({
+        category: "shopping",
+        id: n(item?.id),
+        action,
+        item: String(item?.name || ""),
+        qty: item?.qty ?? "",
+        unit: String(item?.unit || "")
+      });
+    }
+  }
+
+  return details;
+}
+
+function familyPushCategories(previous: any, next: any) {
+  const categories: string[] = [];
+  const changed = (a: any, b: any) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+  if (changed(previous?.calendarEvents || [], next?.calendarEvents || [])) categories.push("calendar");
+  if (changed(previous?.deadlines || [], next?.deadlines || [])) categories.push("deadlines");
+  if (changed(previous?.boardPosts || [], next?.boardPosts || [])) categories.push("board");
+  if (
+    changed(previous?.shopping || [], next?.shopping || []) ||
+    changed(previous?.pantry || [], next?.pantry || []) ||
+    changed(previous?.pantryMovements || [], next?.pantryMovements || [])
+  ) categories.push("shopping");
+  return categories;
+}
+
+
 const MAX_DOCUMENT_BYTES = 5 * 1024 * 1024;
 
 const array = (value: any) => Array.isArray(value) ? value : [];
@@ -564,6 +680,9 @@ Deno.serve(async (req) => {
         data: latestOutput
       });
     }
+
+    const pushCategories = familyPushCategories(fullData, nextData);
+    await notifyFamilyPush(admin, supabaseUrl, familyId, pushCategories, user.id, familyPushDetails(fullData, nextData));
 
     let normalizedData: any = undefined;
     if (role === "child") {

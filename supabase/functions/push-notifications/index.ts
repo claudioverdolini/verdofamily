@@ -14,6 +14,7 @@ const copy:any={
  shopping:["Spesa e dispensa aggiornate","Ci sono novità nella lista spesa o nelle scorte.","shopping"]
 };
 const topicPrefs=(v:any)=>Object.fromEntries(allowed.map(k=>[k,typeof v?.[k]==="boolean"?v[k]:true]));
+const buildPayload=(cats:any[])=>{const c:any=copy[cats[0] as any]||copy.board;return cats.length===1?{title:c[0],body:c[1],url:"/?page="+c[2],tag:"verdofamily-"+cats[0]}:{title:"VerdoFamily aggiornato",body:"Ci sono novità in più sezioni della famiglia.",url:"/?page="+c[2],tag:"verdofamily-family-update"}};
 const array=(v:any)=>Array.isArray(v)?v:[];
 const n=(v:any)=>Number(v||0);
 const reminderTiming=(minutes:number)=>{
@@ -45,6 +46,67 @@ const detailMode=(ctx:any,authUserId:string)=>{
  const user=ctx.users.find((u:any)=>n(u?.id)===n(legacy));
  return user?.prefs?.notificationDetail==="private"?"private":"full";
 };
+const userName=(ctx:any,userId:any)=>ctx.users.find((u:any)=>n(u?.id)===n(userId))?.name||"";
+const schoolTypeLabel=(type:any)=>({
+ homework:"Compito",test:"Verifica",oral:"Interrogazione",material:"Materiale",
+ circular:"Circolare",permission:"Autorizzazione",trip:"Uscita",payment:"Pagamento"
+} as any)[String(type||"")]||"Scuola";
+
+const systemPayload=(categories:any[],details:any[],authUserId:string,ctx:any)=>{
+ const cats=array(categories).filter((x:any)=>allowed.includes(String(x)));
+ const fallback=buildPayload(cats.length?cats:["board"]);
+ if(detailMode(ctx,authUserId)==="private") return fallback;
+ const usable=array(details).filter((d:any)=>d&&cats.includes(String(d.category||"")));
+ if(usable.length!==1) return fallback;
+ const d=usable[0];
+ const category=String(d.category||"");
+ if(category==="school"){
+  const person=userName(ctx,d.userId);
+  const subject=String(d.subject||"").trim();
+  const date=String(d.date||"").trim();
+  const meta=[schoolTypeLabel(d.type),subject,person,date?date.split("-").reverse().join("/"):""].filter(Boolean).join(" · ");
+  return {title:String(d.title||"Aggiornamento scuola"),body:meta||fallback.body,url:"/?page=school",tag:"verdofamily-school-"+String(d.id||"update")};
+ }
+ if(category==="chores"){
+  const person=userName(ctx,d.userId);
+  const kind=String(d.kind||"chore");
+  const amount=Number(d.amount||0);
+  if(kind==="transaction"){
+   const type=String(d.type||"");
+   const action=type==="payment"?"Pagamento":type==="reversal"?"Storno":"Accredito";
+   const meta=[action,person,amount?new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR"}).format(amount):""].filter(Boolean).join(" · ");
+   return {title:String(d.title||"Paghetta aggiornata"),body:meta||fallback.body,url:"/?page=chores",tag:"verdofamily-wallet-"+String(d.id||"update")};
+  }
+  const status=String(d.status||"");
+  const when=String(d.deadline||"");
+  const statusText=kind==="recurring"
+    ? (status==="new"?"Nuovo compito ricorrente":"Compito ricorrente aggiornato")
+    : status==="pending"?"Completato · in attesa di approvazione"
+      :status==="approved"?"Compito approvato"
+      :status==="new"?"Nuovo compito":"Compito aggiornato";
+  const reward=amount?new Intl.NumberFormat("it-IT",{style:"currency",currency:"EUR"}).format(amount):"";
+  const meta=[statusText,person,when?("entro "+when.split("-").reverse().join("/")):"",reward].filter(Boolean).join(" · ");
+  return {title:String(d.title||"Compiti e paghette"),body:meta||fallback.body,url:"/?page=chores",tag:"verdofamily-chore-"+String(d.id||"update")};
+ }
+ if(category==="board"){
+  const author=userName(ctx,d.authorUserId);
+  const kind=String(d.type||"message")==="reminder"?"Promemoria":String(d.type||"message")==="photo"?"Foto":String(d.type||"message")==="note"?"Nota":"Messaggio";
+  const heading=String(d.title||d.preview||"").trim().slice(0,90)||("Nuovo "+kind.toLowerCase());
+  const meta=[kind,author].filter(Boolean).join(" · ");
+  return {title:heading,body:meta||fallback.body,url:"/?page=board",tag:"verdofamily-board-"+String(d.id||"update")};
+ }
+ if(category==="shopping"){
+  const action=String(d.action||"updated");
+  const item=String(d.item||"").trim();
+  const qty=String(d.qty||"").trim();
+  const unit=String(d.unit||"").trim();
+  const label=action==="added"?"Aggiunto alla lista":action==="taken"?"Preso dalla lista":action==="pantry_low"?"Scorta da controllare":action==="pantry_added"?"Aggiunto in dispensa":"Spesa aggiornata";
+  const meta=[item,[qty,unit].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
+  return {title:label,body:meta||fallback.body,url:"/?page=shopping",tag:"verdofamily-shopping-"+String(d.id||"update")};
+ }
+ return fallback;
+};
+
 const scheduledPayload=(reminder:any,authUserId:string,ctx:any)=>{
  const generic={
   title:String(reminder.title||"Promemoria VerdoFamily"),
@@ -102,7 +164,6 @@ Deno.serve(async(req)=>{
    return {sent,stale};
   };
 
-  const buildPayload=(cats:any[])=>{const c:any=copy[cats[0] as any];return cats.length===1?{title:c[0],body:c[1],url:"/?page="+c[2],tag:"verdofamily-"+cats[0]}:{title:"VerdoFamily aggiornato",body:"Ci sono novità in più sezioni della famiglia.",url:"/?page="+c[2],tag:"verdofamily-family-update"}};
 
   if(b.action==="notify-system" || b.action==="process-scheduled"){
    const supplied=req.headers.get("x-push-secret")||"";
@@ -190,7 +251,14 @@ Deno.serve(async(req)=>{
    const exclude=String(b.excludeUserId||""); if(exclude) q=q.neq("user_id",exclude);
    const {data:rows,error}=await q; if(error) throw error;
    const targets=(rows||[]).filter((r:any)=>cats.some((c:any)=>topicPrefs(r.topics)[c]!==false));
-   return reply({ok:true,recipients:targets.length,...await send(targets,buildPayload(cats))});
+   const ctx=await getFamilyContext(sb,familyId);
+   let sent=0,stale=0;
+   for(const r of targets){
+    const payload=systemPayload(cats,array(b.details),String(r.user_id),ctx);
+    const outcome=await send([r],payload);
+    sent+=outcome.sent; stale+=outcome.stale;
+   }
+   return reply({ok:true,recipients:targets.length,sent,stale});
   }
 
   if(!familyId) return reply({ok:false,error:"family_id_required"},400);

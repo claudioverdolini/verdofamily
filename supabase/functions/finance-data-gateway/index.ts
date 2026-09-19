@@ -12,6 +12,36 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json", ...cors }
 });
 
+async function notifyFamilyPush(admin: any, supabaseUrl: string, familyId: string, categories: string[], excludeUserId: string, details: any[] = []) {
+  if (!categories.length) return;
+  try {
+    const { data: secretRow } = await admin
+      .from("system_settings")
+      .select("value")
+      .eq("key", "push_cron_secret")
+      .maybeSingle();
+    if (!secretRow?.value) return;
+    const response = await fetch(`${supabaseUrl}/functions/v1/push-notifications`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-push-secret": String(secretRow.value)
+      },
+      body: JSON.stringify({
+        action: "notify-system",
+        familyId,
+        categories,
+        excludeUserId,
+        details
+      })
+    });
+    if (!response.ok) console.warn("push_notification_deferred", response.status);
+  } catch (error) {
+    console.warn("push_notification_deferred", error instanceof Error ? error.message : String(error));
+  }
+}
+
+
 const arr = (value: any) => Array.isArray(value) ? value : [];
 const n = (value: any) => Number(value || 0);
 const s = (value: any) => String(value ?? "").trim();
@@ -55,6 +85,75 @@ async function audit(admin: any, event: {
     p_metadata: event.metadata || {}
   });
   if (error) console.warn("security_audit_failed", error.message);
+}
+
+function changedFinanceRecord(previous: any[], next: any[]) {
+  const before = new Map(arr(previous).map((item: any) => [String(item?.id ?? ""), item]));
+  const added = arr(next).find((item: any) => {
+    const id = String(item?.id ?? "");
+    return id && !before.has(id);
+  });
+  if (added) return { before: null, after: added };
+  const changed = arr(next).find((item: any) => {
+    const id = String(item?.id ?? "");
+    return id && before.has(id) && JSON.stringify(before.get(id)) !== JSON.stringify(item);
+  });
+  return changed ? { before: before.get(String(changed?.id ?? "")), after: changed } : null;
+}
+
+function financePushDetails(previous: any, next: any) {
+  const choreChange = changedFinanceRecord(previous?.chores || [], next?.chores || []);
+  if (choreChange?.after) {
+    const item = choreChange.after;
+    const before = choreChange.before;
+    const status = !before
+      ? "new"
+      : item?.completionStatus === "pending" && before?.completionStatus !== "pending"
+        ? "pending"
+        : item?.done === true && before?.done !== true
+          ? "approved"
+          : "updated";
+    return [{
+      category: "chores",
+      kind: "chore",
+      id: n(item?.id),
+      title: s(item?.title) || "Compito",
+      userId: n(item?.userId),
+      deadline: s(item?.deadline),
+      status,
+      amount: Number(item?.amount || 0)
+    }];
+  }
+
+  const recurringChange = changedFinanceRecord(previous?.recurringChores || [], next?.recurringChores || []);
+  if (recurringChange?.after) {
+    const item = recurringChange.after;
+    return [{
+      category: "chores",
+      kind: "recurring",
+      id: n(item?.id),
+      title: s(item?.title) || "Compito ricorrente",
+      userId: n(item?.userId),
+      status: recurringChange.before ? "updated" : "new",
+      amount: Number(item?.amount || 0)
+    }];
+  }
+
+  const txChange = changedFinanceRecord(previous?.transactions || [], next?.transactions || []);
+  if (txChange?.after && !txChange.before) {
+    const item = txChange.after;
+    return [{
+      category: "chores",
+      kind: "transaction",
+      id: n(item?.id),
+      title: s(item?.note) || "Paghetta aggiornata",
+      userId: n(item?.userId),
+      type: s(item?.type),
+      amount: Number(item?.amount || 0)
+    }];
+  }
+
+  return [];
 }
 
 function cleanWeekdays(value: any) {
@@ -423,6 +522,8 @@ Deno.serve(async (req) => {
         return json({ ok: false, error: "rate_limited" }, 429);
       }
 
+      const pushBefore = await readFinance(userClient, familyId);
+
       if (role === "child") await syncChildFinance(admin, familyId, user.id, body?.data || {});
       else if (["admin","adult"].includes(role)) await syncAdultFinance(admin, familyId, body?.data || {});
       else return json({ ok: false, error: "forbidden" }, 403);
@@ -439,6 +540,7 @@ Deno.serve(async (req) => {
       });
 
       const data = await readFinance(userClient, familyId);
+      await notifyFamilyPush(admin, supabaseUrl, familyId, ["chores"], user.id, financePushDetails(pushBefore, data));
       return json({ ok: true, role, ...data });
     }
 
