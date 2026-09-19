@@ -195,7 +195,7 @@ export default function SchoolPage() {
       <Card className="school-stat"><span>Materie domani</span><strong>{tomorrowLessons.length}</strong><small>lezioni previste</small></Card>
     </div>
 
-    <div className="page-tabs-wrap">
+    <div className="page-tabs-wrap page-tabs-wrap--school">
       <Segmented
         value={view}
         onChange={setView}

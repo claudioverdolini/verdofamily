@@ -1111,7 +1111,7 @@ input[type=checkbox]{width:20px;height:20px}
   .page-tabs-wrap>.segmented{
     width:100%;
     display:grid;
-    grid-template-columns:repeat(var(--tab-count,3),minmax(0,1fr));
+    grid-template-columns:repeat(auto-fit,minmax(90px,1fr));
     overflow:hidden;
     border:1px solid var(--border);
     box-shadow:0 5px 16px rgba(20,30,55,.05);
@@ -1127,6 +1127,7 @@ input[type=checkbox]{width:20px;height:20px}
   }
   .page-tabs-wrap--shopping{--tab-count:4}
   .page-tabs-wrap--chores{--tab-count:3}
+  .page-tabs-wrap--school{--tab-count:4}
   .settings-jump-nav{
     position:sticky;
     top:0;
@@ -1181,6 +1182,15 @@ input[type=checkbox]{width:20px;height:20px}
   }
   .page-tabs-wrap--chores>.segmented{
     grid-template-columns:repeat(3,minmax(0,1fr));
+  }
+  .page-tabs-wrap--school>.segmented{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:4px;
+    padding:4px;
+  }
+  .page-tabs-wrap--school>.segmented button{
+    min-height:42px;
+    border-radius:10px;
   }
   .settings-jump-nav{
     grid-template-columns:repeat(4,minmax(106px,1fr));
