@@ -16,7 +16,7 @@ import {
   WalletCards
 } from 'lucide-react'
 import { useFamily } from '../store'
-import { Card, CardHeader, EmptyState, ListRow, PageIntro, StatCard } from '../ui'
+import { Card, CardHeader, EmptyState, ListRow } from '../ui'
 import { addDays, dayLabel, localDateISO, money, pantryExpiryDays, pantryNeedsRestock, routineCompletedOn, routineDueOn, weekDates } from '../utils'
 import './dashboard-command-center.css'
 
@@ -172,67 +172,77 @@ export default function Dashboard() {
 
   return (
     <div className="page page--dashboard command-center">
-      <div className="command-center__topline">
-        <PageIntro
-          eyebrow={dayLabel(today, true)}
-          title={`Ciao ${authUser?.name || ''} 👋`}
-          description="Il centro operativo della famiglia: oggi, settimana e situazione di tutti in un solo posto."
-        />
+      <section className="familywall-hero">
+        <div className="familywall-hero__copy">
+          <span className="familywall-hero__date">{dayLabel(today, true)}</span>
+          <h1>Ciao {authUser?.name || ''} <span aria-hidden="true">👋</span></h1>
+          <p>Quello che serve alla famiglia, subito.</p>
+        </div>
         <div className="home-view-switch" role="tablist" aria-label="Vista Home">
           <button className={homeView === 'today' ? 'is-active' : ''} onClick={() => setHomeView('today')}>Oggi</button>
           <button className={homeView === 'week' ? 'is-active' : ''} onClick={() => setHomeView('week')}>Settimana</button>
           <button className={homeView === 'family' ? 'is-active' : ''} onClick={() => setHomeView('family')}>Famiglia</button>
         </div>
-      </div>
+      </section>
 
-      <div className="quick-actions" aria-label="Azioni rapide">
-        <button onClick={() => setActivePage('calendar')}><CalendarDays size={18} /><span>Nuovo impegno</span><Plus size={16} /></button>
-        <button onClick={() => setActivePage('shopping')}><ShoppingCart size={18} /><span>Aggiungi spesa</span><Plus size={16} /></button>
-        <button onClick={() => setActivePage('meals')}><Utensils size={18} /><span>Pianifica pasto</span><Plus size={16} /></button>
-        <button onClick={() => setActivePage('todos')}><ListTodo size={18} /><span>Da fare</span><Plus size={16} /></button>
-        <button onClick={() => setActivePage('school')}><GraduationCap size={18} /><span>Scuola</span><ChevronRight size={16} /></button>
-        <button onClick={() => setActivePage('board')}><Pin size={18} /><span>Bacheca</span><ChevronRight size={16} /></button>
+      <div className="home-quick-actions" aria-label="Azioni rapide">
+        <button className="home-quick-action home-quick-action--calendar" onClick={() => setActivePage('calendar')}><span><CalendarDays size={20} /></span><strong>Impegno</strong><Plus size={16} /></button>
+        <button className="home-quick-action home-quick-action--shopping" onClick={() => setActivePage('shopping')}><span><ShoppingCart size={20} /></span><strong>Spesa</strong><Plus size={16} /></button>
+        <button className="home-quick-action home-quick-action--meals" onClick={() => setActivePage('meals')}><span><Utensils size={20} /></span><strong>Pasto</strong><Plus size={16} /></button>
+        <button className="home-quick-action home-quick-action--todos" onClick={() => setActivePage('todos')}><span><ListTodo size={20} /></span><strong>Da fare</strong><Plus size={16} /></button>
       </div>
 
       {homeView === 'today' ? <>
-        <div className="stats-grid command-stats">
-          <StatCard icon={<Clock3 size={20} />} label="Impegni oggi" value={eventsToday.length} note={eventsToday[0] ? `${eventsToday[0].time || 'Tutto il giorno'} · ${eventsToday[0].title}` : 'Nessun impegno'} onClick={() => setActivePage('calendar')} />
-          <StatCard icon={<ShoppingCart size={20} />} label="Da comprare" value={pendingShopping.length} note={pendingShopping[0]?.name || 'Lista vuota'} onClick={() => setActivePage('shopping')} tone="mint" />
-          <StatCard icon={<ReceiptText size={20} />} label="Scadenze" value={nextDeadlines.length} note={nextDeadlines[0] ? `${shortDate(nextDeadlines[0].date)} · ${nextDeadlines[0].title}` : 'Tutto in ordine'} onClick={() => setActivePage('deadlines')} tone="amber" />
-          <StatCard icon={<WalletCards size={20} />} label="Paghette" value={showBalances ? money(totalBalance) : '••••'} note={authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? `${choresAwaitingApproval.length} da confermare · ${choresStillToDo.length} da fare` : `${choresStillToDo.length} compiti da completare`} onClick={() => setActivePage('chores')} tone="violet" />
+        <div className="home-glance" aria-label="Riepilogo rapido">
+          <button className="home-glance__item home-glance__item--calendar" onClick={() => setActivePage('calendar')}>
+            <span className="home-glance__icon"><Clock3 size={19} /></span>
+            <span><small>Oggi</small><strong>{eventsToday.length} {eventsToday.length === 1 ? 'impegno' : 'impegni'}</strong></span>
+          </button>
+          <button className="home-glance__item home-glance__item--shopping" onClick={() => setActivePage('shopping')}>
+            <span className="home-glance__icon"><ShoppingCart size={19} /></span>
+            <span><small>Spesa</small><strong>{pendingShopping.length} da comprare</strong></span>
+          </button>
+          <button className="home-glance__item home-glance__item--deadlines" onClick={() => setActivePage('deadlines')}>
+            <span className="home-glance__icon"><ReceiptText size={19} /></span>
+            <span><small>Scadenze</small><strong>{nextDeadlines.length} prossime</strong></span>
+          </button>
+          <button className="home-glance__item home-glance__item--chores" onClick={() => setActivePage('chores')}>
+            <span className="home-glance__icon"><WalletCards size={19} /></span>
+            <span><small>Paghette</small><strong>{showBalances ? money(totalBalance) : '••••'}</strong></span>
+          </button>
         </div>
 
         <div className="command-grid command-grid--today">
-          <Card className="command-panel command-panel--agenda">
+          <Card className="command-panel home-widget home-widget--calendar command-panel--agenda">
             <CardHeader title="Agenda di oggi" subtitle="Tutti gli impegni in ordine" action={<button className="text-link" onClick={() => setActivePage('calendar')}>Calendario <ChevronRight size={16} /></button>} />
             {eventsToday.length ? <div className="timeline-list">
-              {eventsToday.slice(0, 7).map(event => <ListRow key={event.id} leading={<span className="time-pill">{event.time || '—'}</span>} title={event.title} subtitle={participantNames(event)} trailing={<ChevronRight size={17} />} onClick={() => setActivePage('calendar')} />)}
+              {eventsToday.slice(0, 3).map(event => <ListRow key={event.id} leading={<span className="time-pill">{event.time || '—'}</span>} title={event.title} subtitle={participantNames(event)} trailing={<ChevronRight size={17} />} onClick={() => setActivePage('calendar')} />)}
             </div> : <EmptyState icon={<CalendarDays size={28} />} title="Giornata libera" text="Nessun impegno previsto per oggi." />}
           </Card>
 
-          <Card className="command-panel">
+          <Card className="command-panel home-widget home-widget--meals">
             <CardHeader title="Pasti di oggi" subtitle="Pranzo e cena pianificati" action={<button className="text-link" onClick={() => setActivePage('meals')}>Pasti <ChevronRight size={16} /></button>} />
             {(mealByDate[today] || []).length ? <div className="command-simple-list">{mealByDate[today].map((meal, index) => <button key={`${meal.slot}-${index}`} onClick={() => setActivePage('meals')}><Utensils size={17} /><span><strong>{meal.slot}</strong><small>{meal.name}</small></span></button>)}</div> : <EmptyState icon={<Utensils size={28} />} title="Pasti non pianificati" text="Puoi aggiungere pranzo e cena dal planner pasti." />}
           </Card>
 
-          <Card className="command-panel">
+          <Card className="command-panel home-widget home-widget--school">
             <CardHeader title="Scuola · domani" subtitle="Lezioni e cose da preparare" action={<button className="text-link" onClick={() => setActivePage('school')}>Scuola <ChevronRight size={16} /></button>} />
             {schoolTomorrow.length || schoolTomorrowLessons.length ? <div className="command-simple-list">
-              {schoolTomorrow.slice(0, 4).map(item => <button key={`school-${item.id}`} onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Scuola'}</small></span></button>)}
+              {schoolTomorrow.slice(0, 2).map(item => <button key={`school-${item.id}`} onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Scuola'}</small></span></button>)}
               {schoolTomorrow.length === 0 && schoolTomorrowLessons.length ? <button onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{schoolTomorrowLessons.length} lezioni previste</strong><small>Controlla orario e zaino</small></span></button> : null}
             </div> : <EmptyState icon={<GraduationCap size={28} />} title="Niente da preparare" text="Nessun impegno scolastico registrato per domani." />}
           </Card>
 
-          <Card className="command-panel command-panel--board">
+          <Card className="command-panel home-widget home-widget--board command-panel--board">
             <CardHeader title="Bacheca" subtitle="Messaggi fissati per la famiglia" action={<button className="text-link" onClick={() => setActivePage('board')}>Apri <ChevronRight size={16} /></button>} />
             {pinnedBoard.length ? <div className="home-board-list">
-              {pinnedBoard.slice(0, 3).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
+              {pinnedBoard.slice(0, 2).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
                 <Pin size={16} />
                 <span><strong>{post.title || post.body.slice(0, 55) || 'Contenuto fissato'}</strong><small>{post.body && post.title ? post.body.slice(0, 80) : post.type === 'reminder' && post.dueDate ? `Promemoria · ${shortDate(post.dueDate)}` : 'Bacheca familiare'}</small></span>
                 <ChevronRight size={15} />
               </button>)}
             </div> : boardDueSoon.length ? <div className="home-board-list">
-              {boardDueSoon.slice(0, 3).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
+              {boardDueSoon.slice(0, 2).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
                 <Pin size={16} />
                 <span><strong>{post.title || post.body.slice(0, 55) || 'Promemoria'}</strong><small>{post.dueDate ? `Per ${shortDate(post.dueDate)}` : 'Bacheca familiare'}</small></span>
                 <ChevronRight size={15} />
@@ -240,16 +250,16 @@ export default function Dashboard() {
             </div> : <EmptyState icon={<Pin size={28} />} title="Niente in evidenza" text="Fissa un messaggio o un promemoria per averlo sempre qui sul tablet." />}
           </Card>
 
-          <Card className="command-panel">
+          <Card className="command-panel home-widget home-widget--todos">
             <CardHeader title="Da fare" subtitle="Attività ancora aperte" action={<button className="text-link" onClick={() => setActivePage('todos')}>Tutte <ChevronRight size={16} /></button>} />
             {pendingTodos.length || dueRoutinesToday.length || pendingChores.length ? <div className="command-simple-list">
-              {dueRoutinesToday.slice(0, 2).map(item => <button key={`routine-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>Routine · {data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
-              {pendingTodos.slice(0, 2).map(item => <button key={`todo-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
-              {pendingChores.slice(0, 2).map(item => <button key={`chore-${item.id}`} onClick={() => setActivePage('chores')}><CheckCircle2 size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'} · entro {shortDate(item.deadline)}</small></span></button>)}
+              {dueRoutinesToday.slice(0, 1).map(item => <button key={`routine-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>Routine · {data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
+              {pendingTodos.slice(0, 1).map(item => <button key={`todo-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
+              {pendingChores.slice(0, 1).map(item => <button key={`chore-${item.id}`} onClick={() => setActivePage('chores')}><CheckCircle2 size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'} · entro {shortDate(item.deadline)}</small></span></button>)}
             </div> : <EmptyState icon={<CheckCircle2 size={28} />} title="Tutto fatto" text="Non risultano attività aperte." />}
           </Card>
 
-          <Card className="command-panel command-panel--alerts">
+          <Card className="command-panel home-widget home-widget--alerts command-panel--alerts">
             <CardHeader title="Avvisi" subtitle="Quello che richiede attenzione" />
             {familyAlerts.length ? <div className="command-alerts">{familyAlerts.map((alert, index) => <button key={index} onClick={() => setActivePage(alert.page)}><AlertTriangle size={17} /><span>{alert.label}</span><ChevronRight size={16} /></button>)}</div> : <EmptyState icon={<CheckCircle2 size={28} />} title="Nessun avviso" text="La situazione della famiglia è sotto controllo." />}
           </Card>
