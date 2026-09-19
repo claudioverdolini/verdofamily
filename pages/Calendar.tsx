@@ -19,7 +19,7 @@ const emptyEvent = (date: string, userId: number) => ({ id: undefined, title: ''
 export default function CalendarPage() {
   const { data, authUser, upsertCalendarEvent, deleteCalendarEvent } = useFamily()
   const today = localDateISO()
-  const [view, setView] = useState<'month' | 'week' | 'agenda'>('month')
+  const [view, setView] = useState<'month' | 'week' | 'agenda'>(() => window.matchMedia?.('(max-width: 820px)').matches ? 'agenda' : 'month')
   const [cursor, setCursor] = useState(today)
   const [editing, setEditing] = useState<any>(null)
 

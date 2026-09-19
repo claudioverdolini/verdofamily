@@ -523,8 +523,17 @@ export default function SettingsPage() {
   return <div className="page">
     <PageIntro eyebrow="Centro di controllo" title="Impostazioni" description="Poche aree chiare: il tuo spazio, l’uso quotidiano, le connessioni e la protezione dei dati." />
 
+    <nav className="settings-jump-nav" aria-label="Vai alla sezione">
+      {[
+        ['settings-profile', 'Profilo'],
+        ['settings-daily', 'Quotidiano'],
+        ['settings-connections', 'Connessioni'],
+        ['settings-data', 'Dati']
+      ].map(([id, label]) => <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{label}</button>)}
+    </nav>
+
     <div className="settings-flow">
-      <section className="settings-section">
+      <section id="settings-profile" className="settings-section">
         <div className="settings-section__head">
           <div><span>01</span><h2>Il tuo spazio</h2></div>
           <p>Profilo e aspetto: tutto ciò che riguarda come riconosci e visualizzi il tuo VerdoFamily.</p>
@@ -557,7 +566,7 @@ export default function SettingsPage() {
         </Card>
       </section>
 
-      <section className="settings-section">
+      <section id="settings-daily" className="settings-section">
         <div className="settings-section__head">
           <div><span>02</span><h2>Uso quotidiano</h2></div>
           <p>Decidi cosa mostrare sul tablet di casa, cosa tenere a portata di mano e quali avvisi vuoi ricevere.</p>
@@ -602,7 +611,7 @@ export default function SettingsPage() {
         </Card>
       </section>
 
-      <section className="settings-section">
+      <section id="settings-connections" className="settings-section">
         <div className="settings-section__head">
           <div><span>03</span><h2>Connessioni & automazioni</h2></div>
           <p>Servizi esterni che lavorano con VerdoFamily: calendario, report e notifiche automatiche.</p>
@@ -650,7 +659,7 @@ export default function SettingsPage() {
       <TelegramReportsCard />
       </section>
 
-      <section className="settings-section">
+      <section id="settings-data" className="settings-section">
         <div className="settings-section__head">
           <div><span>04</span><h2>Dati & recupero</h2></div>
           <p>Backup, cronologia e strumenti di emergenza raccolti in un unico punto.</p>

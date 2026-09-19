@@ -390,15 +390,15 @@ export default function ShoppingPantryPage() {
         actions={<Button icon={<Plus size={18} />} onClick={() => tab === 'pantry' ? openNewPantry() : setTab('shopping')}>{tab === 'pantry' ? 'Nuovo prodotto' : 'Aggiungi prodotto'}</Button>}
       />
 
-      <div className="page-tabs-wrap">
+      <div className="page-tabs-wrap page-tabs-wrap--shopping">
         <Segmented
           value={tab}
           onChange={setTab}
           options={[
-            { value: 'shopping', label: `Lista spesa · ${pending.length}` },
-            { value: 'pantry', label: `Inventario · ${data.pantry.length}` },
-            { value: 'insights', label: `Suggerimenti · ${restockSuggestions.length + expiringSoon.length}` },
-            { value: 'scan', label: 'Acquisisci' }
+            { value: 'shopping', label: `Spesa · ${pending.length}` },
+            { value: 'pantry', label: `Dispensa · ${data.pantry.length}` },
+            { value: 'insights', label: `Avvisi · ${restockSuggestions.length + expiringSoon.length}` },
+            { value: 'scan', label: 'Scansiona' }
           ]}
         />
       </div>

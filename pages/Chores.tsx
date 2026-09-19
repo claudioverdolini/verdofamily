@@ -128,13 +128,13 @@ export default function ChoresPage() {
 
   const tabs = isChild
     ? [
-        { value: 'chores', label: `I miei compiti · ${data.chores.filter(c => c.userId === authUser?.id && !c.done).length}` },
-        { value: 'wallets', label: 'La mia paghetta' }
+        { value: 'chores', label: `Da fare · ${data.chores.filter(c => c.userId === authUser?.id && !c.done).length}` },
+        { value: 'wallets', label: 'Paghetta' }
       ]
     : [
-        { value: 'chores', label: `Compiti · ${data.chores.filter(c => !c.done).length}${pendingApprovalCount ? ` · ${pendingApprovalCount} da confermare` : ''}` },
+        { value: 'chores', label: `Da fare · ${data.chores.filter(c => !c.done).length}` },
         { value: 'recurring', label: `Ricorrenti · ${data.recurringChores.filter(c => c.active).length}` },
-        { value: 'wallets', label: 'Paghette & movimenti' }
+        { value: 'wallets', label: 'Paghette' }
       ]
 
   return <div className="page">
@@ -155,7 +155,7 @@ export default function ChoresPage() {
       </div>
     </div> : null}
 
-    <div className="page-tabs-wrap">
+    <div className="page-tabs-wrap page-tabs-wrap--chores">
       <Segmented
         value={isChild && tab === 'recurring' ? 'chores' : tab}
         onChange={setTab}
