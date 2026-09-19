@@ -14,6 +14,74 @@ const copy:any={
  shopping:["Spesa e dispensa aggiornate","Ci sono novità nella lista spesa o nelle scorte.","shopping"]
 };
 const topicPrefs=(v:any)=>Object.fromEntries(allowed.map(k=>[k,typeof v?.[k]==="boolean"?v[k]:true]));
+const array=(v:any)=>Array.isArray(v)?v:[];
+const n=(v:any)=>Number(v||0);
+const reminderTiming=(minutes:number)=>{
+ if(minutes<=0) return "Adesso";
+ if(minutes<60) return `Tra ${minutes} minuti`;
+ if(minutes===60) return "Tra 1 ora";
+ if(minutes<1440 && minutes%60===0) return `Tra ${minutes/60} ore`;
+ if(minutes===1440) return "Tra 1 giorno";
+ if(minutes%1440===0) return `Tra ${minutes/1440} giorni`;
+ return "A breve";
+};
+const deadlineTiming=(days:number)=>days<=0?"Scade oggi":days===1?"Scade domani":`Scade tra ${days} giorni`;
+const familyContextCache=new Map<string,Promise<any>>();
+const getFamilyContext=(sb:any,familyId:string)=>{
+ if(!familyContextCache.has(familyId)) familyContextCache.set(familyId,(async()=>{
+  const [{data:doc},{data:people}]=await Promise.all([
+   sb.from("family_documents").select("data").eq("family_id",familyId).maybeSingle(),
+   sb.from("family_people").select("legacy_user_id,auth_user_id,display_name").eq("family_id",familyId)
+  ]);
+  const data=doc?.data||{};
+  const users=array(data.users);
+  const authToLegacy=new Map((people||[]).filter((p:any)=>p.auth_user_id).map((p:any)=>[String(p.auth_user_id),n(p.legacy_user_id)]));
+  return {data,users,authToLegacy};
+ })());
+ return familyContextCache.get(familyId)!;
+};
+const detailMode=(ctx:any,authUserId:string)=>{
+ const legacy=ctx.authToLegacy.get(String(authUserId));
+ const user=ctx.users.find((u:any)=>n(u?.id)===n(legacy));
+ return user?.prefs?.notificationDetail==="private"?"private":"full";
+};
+const scheduledPayload=(reminder:any,authUserId:string,ctx:any)=>{
+ const generic={
+  title:String(reminder.title||"Promemoria VerdoFamily"),
+  body:String(reminder.body||"Hai un promemoria in programma."),
+  url:String(reminder.url||"/"),
+  tag:String(reminder.tag||"verdofamily-reminder")
+ };
+ const key=String(reminder.notification_key||"");
+ const parts=key.split(":");
+ const itemId=n(parts[2]);
+ if(reminder.category==="calendar"){
+  generic.url=`/?page=calendar&event=${itemId}`;
+  if(detailMode(ctx,authUserId)==="private") return generic;
+  const event=array(ctx.data?.calendarEvents).find((item:any)=>n(item?.id)===itemId);
+  if(!event) return generic;
+  const minutes=n(parts[parts.length-1]);
+  const ids=event?.audience==="family"
+   ? []
+   : (array(event?.userIds).length?array(event.userIds).map(n):[n(event?.userId)]).filter(Boolean);
+  const people=event?.audience==="family"
+   ? "Famiglia"
+   : ids.map((id:number)=>ctx.users.find((u:any)=>n(u?.id)===id)?.name).filter(Boolean).join(", ");
+  const detail=[reminderTiming(minutes),event?.time?`ore ${event.time}`:"",people].filter(Boolean).join(" · ");
+  return {title:String(event?.title||"Impegno VerdoFamily"),body:detail||generic.body,url:generic.url,tag:generic.tag};
+ }
+ if(reminder.category==="deadlines"){
+  generic.url=`/?page=deadlines&deadline=${itemId}`;
+  if(detailMode(ctx,authUserId)==="private") return generic;
+  const deadline=array(ctx.data?.deadlines).find((item:any)=>n(item?.id)===itemId);
+  if(!deadline) return generic;
+  const days=n(parts[parts.length-1]);
+  const person=ctx.users.find((u:any)=>n(u?.id)===n(deadline?.userId))?.name;
+  const detail=[deadlineTiming(days),person].filter(Boolean).join(" · ");
+  return {title:String(deadline?.title||"Scadenza VerdoFamily"),body:detail||generic.body,url:generic.url,tag:generic.tag};
+ }
+ return generic;
+};
 
 Deno.serve(async(req)=>{
  if(req.method==="OPTIONS") return new Response("ok",{headers:CORS});
@@ -95,12 +163,7 @@ Deno.serve(async(req)=>{
       try{
        await webpush.sendNotification(
         {endpoint:r.endpoint,keys:{p256dh:r.p256dh,auth:r.auth}},
-        JSON.stringify({
-          title:String(reminder.title||"Promemoria VerdoFamily"),
-          body:String(reminder.body||"Hai un promemoria in programma."),
-          url:String(reminder.url||"/"),
-          tag:String(reminder.tag||"verdofamily-reminder")
-        }),
+        JSON.stringify(scheduledPayload(reminder,String(r.user_id),await getFamilyContext(sb,String(reminder.family_id)))),
         {TTL:900}
        );
        sent++;

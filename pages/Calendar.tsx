@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { CalendarPlus, ChevronLeft, ChevronRight, Clock3, Pencil, Trash2 } from 'lucide-react'
 import type { CalendarEvent } from '../types'
 import { useFamily } from '../store'
@@ -73,6 +73,18 @@ export default function CalendarPage() {
   function openEdit(event: CalendarEvent) {
     setEditing({ ...event, audience: event.audience || 'users', userIds: participantIds(event), reminderMinutes: [...(event.reminderMinutes || [60])] })
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const eventId = Number(params.get('event') || 0)
+    if (!eventId) return
+    const event = data.calendarEvents.find(item => item.id === eventId)
+    if (!event) return
+    openEdit(event)
+    params.delete('event')
+    const search = params.toString()
+    window.history.replaceState({}, '', window.location.pathname + (search ? '?' + search : ''))
+  }, [data.calendarEvents])
 
   function toggleParticipant(id: number) {
     if (!editing) return

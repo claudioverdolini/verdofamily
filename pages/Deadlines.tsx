@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Cake,
   CalendarDays,
@@ -72,6 +72,18 @@ export default function DeadlinesPage() {
 
   const filtered = deadlines.filter(item => category === 'all' || (item.category || 'other') === category)
   const upcoming = filtered.filter(item => !item.done)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const deadlineId = Number(params.get('deadline') || 0)
+    if (!deadlineId) return
+    const deadline = data.deadlines.find(item => item.id === deadlineId && (!item.kind || item.kind === 'general'))
+    if (!deadline) return
+    setEditing({ ...deadline, reminderDays: [...(deadline.reminderDays || [90, 30, 7])] })
+    params.delete('deadline')
+    const search = params.toString()
+    window.history.replaceState({}, '', window.location.pathname + (search ? '?' + search : ''))
+  }, [data.deadlines])
 
   function openNew() {
     setEditing({
