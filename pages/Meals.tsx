@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { BookOpen, ChevronLeft, ChevronRight, Clock3, ExternalLink, Filter, Link2, Pencil, Plus, ShoppingCart, Sparkles, Trash2, Utensils } from 'lucide-react'
 import { useFamily } from '../store'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
@@ -44,6 +44,7 @@ export default function MealsPage() {
   const today = localDateISO()
   const [tab, setTab] = useState<'planner' | 'smart' | 'dishes' | 'recipes'>('planner')
   const [cursor, setCursor] = useState(today)
+  const [selectedMobileDate, setSelectedMobileDate] = useState(today)
   const [typeFilter, setTypeFilter] = useState('Tutti')
   const [editingDish, setEditingDish] = useState<any>(null)
   const [dishEditorKind, setDishEditorKind] = useState<'dish' | 'recipe'>('dish')
@@ -55,6 +56,24 @@ export default function MealsPage() {
   const [smartMaxMinutes, setSmartMaxMinutes] = useState(30)
 
   const week = useMemo(() => weekDates(cursor), [cursor])
+
+  useEffect(() => {
+    if (!week.includes(selectedMobileDate)) {
+      setSelectedMobileDate(week.includes(today) ? today : week[0])
+    }
+  }, [week.join('|'), selectedMobileDate, today])
+
+  function movePlannerWeek(direction: -1 | 1) {
+    const nextCursor = addDays(cursor, 7 * direction)
+    const nextWeek = weekDates(nextCursor)
+    setCursor(nextCursor)
+    setSelectedMobileDate(nextWeek.includes(today) ? today : nextWeek[0])
+  }
+
+  function resetPlannerWeek() {
+    setCursor(today)
+    setSelectedMobileDate(today)
+  }
   const filteredDishes = useMemo(
     () => data.dishes
       .filter(d => typeFilter === 'Tutti' || d.type === typeFilter)
@@ -278,11 +297,11 @@ export default function MealsPage() {
       {tab === 'planner' ? (
         <Card className="meal-planner-card">
           <div className="planner-toolbar">
-            <div className="planner-toolbar__nav"><IconButton label="Settimana precedente" onClick={() => setCursor(addDays(cursor, -7))}><ChevronLeft size={20} /></IconButton><button className="today-btn" onClick={() => setCursor(today)}>Questa settimana</button><IconButton label="Settimana successiva" onClick={() => setCursor(addDays(cursor, 7))}><ChevronRight size={20} /></IconButton></div>
+            <div className="planner-toolbar__nav"><IconButton label="Settimana precedente" onClick={() => movePlannerWeek(-1)}><ChevronLeft size={20} /></IconButton><button className="today-btn" onClick={resetPlannerWeek}>Questa settimana</button><IconButton label="Settimana successiva" onClick={() => movePlannerWeek(1)}><ChevronRight size={20} /></IconButton></div>
             <strong>{dayLabel(week[0], true)} – {dayLabel(week[6], true)}</strong>
           </div>
 
-          <div className="meal-board">
+          <div className="meal-board meal-board--desktop">
             <div className="meal-board__corner" />
             {week.map(date => <div key={date} className={`meal-board__day ${date === today ? 'is-today' : ''}`}><strong>{dayLabel(date)}</strong><span>{date.slice(8, 10)}</span></div>)}
             {MEAL_SLOTS.map(slot => (
@@ -301,6 +320,66 @@ export default function MealsPage() {
                 })}
               </React.Fragment>
             ))}
+          </div>
+
+          <div className="meal-mobile-planner">
+            <div className="meal-mobile-week" role="tablist" aria-label="Giorni della settimana">
+              {week.map(date => <button
+                type="button"
+                role="tab"
+                aria-selected={selectedMobileDate === date}
+                key={date}
+                className={`${selectedMobileDate === date ? 'is-active' : ''} ${date === today ? 'is-today' : ''}`}
+                onClick={() => setSelectedMobileDate(date)}
+              >
+                <span>{dayLabel(date).slice(0, 3)}</span>
+                <strong>{date.slice(8, 10)}</strong>
+              </button>)}
+            </div>
+
+            <section className={`meal-mobile-day ${selectedMobileDate === today ? 'is-today' : ''}`}>
+              <header className="meal-mobile-day__head">
+                <div>
+                  <span>{selectedMobileDate === today ? 'Oggi' : dayLabel(selectedMobileDate, true)}</span>
+                  <strong>{new Date(`${selectedMobileDate}T12:00:00`).toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })}</strong>
+                </div>
+                <Button size="sm" variant="soft" icon={<Plus size={16} />} onClick={() => openPlan(selectedMobileDate, 'Pranzo')}>Pasto</Button>
+              </header>
+
+              <div className="meal-mobile-slots">
+                {MEAL_SLOTS.map(slot => {
+                  const list = plansByKey[`${selectedMobileDate}|${slot}`] || []
+                  return <div className="meal-mobile-slot" key={slot}>
+                    <div className="meal-mobile-slot__label">
+                      <span>{slot}</span>
+                      <button type="button" aria-label={`Aggiungi ${slot}`} onClick={() => openPlan(selectedMobileDate, slot)}><Plus size={17} /></button>
+                    </div>
+                    <div className="meal-mobile-slot__content">
+                      {list.length ? list.map(plan => {
+                        const dish = data.dishes.find(d => d.id === plan.dishId)
+                        const user = data.users.find(u => u.id === plan.userId)
+                        return <button
+                          key={plan.id}
+                          className="meal-mobile-plan"
+                          onClick={() => openPlan(selectedMobileDate, slot, plan)}
+                          style={{ '--meal-color': user?.color || '#5B5BD6' } as React.CSSProperties}
+                        >
+                          <span className="meal-mobile-plan__dot" />
+                          <span className="meal-mobile-plan__copy">
+                            <strong>{dish?.name || 'Piatto'}</strong>
+                            <small>{dish?.variant || dish?.sourceLabel || user?.name || 'Pasto pianificato'}</small>
+                          </span>
+                          {user ? <Avatar user={user} size="xs" /> : <ChevronRight size={17} />}
+                        </button>
+                      }) : <button className="meal-mobile-empty" onClick={() => openPlan(selectedMobileDate, slot)}>
+                        <Plus size={17} />
+                        <span>Aggiungi {slot.toLowerCase()}</span>
+                      </button>}
+                    </div>
+                  </div>
+                })}
+              </div>
+            </section>
           </div>
         </Card>
       ) : null}

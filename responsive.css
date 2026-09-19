@@ -1273,3 +1273,235 @@ input[type=checkbox]{width:20px;height:20px}
   .deadline-stat strong{font-size:22px}
   .deadline-stat small{display:none}
 }
+
+
+/* Mobile-first meal planner: one day at a time, no horizontal planner scroll */
+.meal-mobile-planner{display:none}
+@media(max-width:820px){
+  .meal-planner-card{
+    overflow:visible;
+    padding:14px;
+  }
+  .meal-board--desktop{
+    display:none;
+  }
+  .meal-mobile-planner{
+    display:grid;
+    gap:12px;
+  }
+  .planner-toolbar{
+    margin-bottom:12px;
+    gap:8px;
+  }
+  .planner-toolbar__nav{
+    width:100%;
+    display:grid;
+    grid-template-columns:42px minmax(0,1fr) 42px;
+    gap:6px;
+  }
+  .planner-toolbar__nav .icon-btn{
+    width:42px;
+    height:42px;
+  }
+  .planner-toolbar__nav .today-btn{
+    width:100%;
+    min-height:42px;
+  }
+  .planner-toolbar>strong{
+    width:100%;
+    text-align:center;
+    font-size:12px;
+  }
+  .meal-mobile-week{
+    display:grid;
+    grid-template-columns:repeat(7,minmax(0,1fr));
+    gap:5px;
+  }
+  .meal-mobile-week button{
+    min-width:0;
+    min-height:58px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background:var(--surface);
+    color:var(--muted);
+    display:grid;
+    place-items:center;
+    align-content:center;
+    gap:2px;
+    padding:5px 2px;
+  }
+  .meal-mobile-week button span{
+    font-size:10px;
+    font-weight:850;
+    text-transform:capitalize;
+  }
+  .meal-mobile-week button strong{
+    font-size:15px;
+    line-height:1;
+  }
+  .meal-mobile-week button.is-today{
+    color:var(--accent);
+  }
+  .meal-mobile-week button.is-active{
+    border-color:var(--accent);
+    background:color-mix(in srgb,var(--accent) 9%,var(--surface));
+    color:var(--accent);
+    box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent);
+  }
+  .meal-mobile-day{
+    border:1px solid var(--border);
+    border-radius:18px;
+    overflow:hidden;
+    background:var(--surface);
+  }
+  .meal-mobile-day.is-today{
+    border-color:color-mix(in srgb,var(--accent) 38%,var(--border));
+  }
+  .meal-mobile-day__head{
+    min-height:70px;
+    padding:13px 14px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    background:var(--surface2);
+    border-bottom:1px solid var(--border);
+  }
+  .meal-mobile-day__head>div{
+    display:grid;
+    gap:2px;
+  }
+  .meal-mobile-day__head span{
+    color:var(--accent);
+    font-size:11px;
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:.06em;
+  }
+  .meal-mobile-day__head strong{
+    font-size:17px;
+    text-transform:capitalize;
+  }
+  .meal-mobile-slots{
+    display:grid;
+  }
+  .meal-mobile-slot{
+    display:grid;
+    grid-template-columns:84px minmax(0,1fr);
+    min-height:76px;
+    border-bottom:1px solid var(--border);
+  }
+  .meal-mobile-slot:last-child{
+    border-bottom:0;
+  }
+  .meal-mobile-slot__label{
+    padding:12px 10px;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:flex-start;
+    gap:7px;
+    background:color-mix(in srgb,var(--surface2) 72%,var(--surface));
+    border-right:1px solid var(--border);
+  }
+  .meal-mobile-slot__label>span{
+    font-size:12px;
+    font-weight:900;
+  }
+  .meal-mobile-slot__label>button{
+    width:30px;
+    height:30px;
+    padding:0;
+    border:1px solid var(--border);
+    border-radius:9px;
+    background:var(--surface);
+    color:var(--accent);
+    display:grid;
+    place-items:center;
+  }
+  .meal-mobile-slot__content{
+    min-width:0;
+    padding:7px;
+    display:grid;
+    gap:6px;
+  }
+  .meal-mobile-plan{
+    width:100%;
+    min-height:58px;
+    padding:8px 9px;
+    border:0;
+    border-radius:12px;
+    background:color-mix(in srgb,var(--meal-color) 7%,var(--surface2));
+    display:grid;
+    grid-template-columns:5px minmax(0,1fr) auto;
+    gap:9px;
+    align-items:center;
+    text-align:left;
+    color:var(--text);
+  }
+  .meal-mobile-plan__dot{
+    width:5px;
+    align-self:stretch;
+    border-radius:999px;
+    background:var(--meal-color);
+  }
+  .meal-mobile-plan__copy{
+    min-width:0;
+    display:grid;
+    gap:2px;
+  }
+  .meal-mobile-plan__copy strong{
+    font-size:14px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .meal-mobile-plan__copy small{
+    font-size:11.5px;
+    color:var(--muted);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .meal-mobile-empty{
+    width:100%;
+    min-height:58px;
+    border:1px dashed var(--border2);
+    border-radius:12px;
+    background:transparent;
+    color:var(--muted);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    font-size:12px;
+    font-weight:800;
+  }
+}
+@media(max-width:430px){
+  .meal-planner-card{
+    padding:10px;
+  }
+  .meal-mobile-week{
+    gap:3px;
+  }
+  .meal-mobile-week button{
+    min-height:54px;
+    border-radius:10px;
+  }
+  .meal-mobile-week button span{
+    font-size:9px;
+  }
+  .meal-mobile-week button strong{
+    font-size:14px;
+  }
+  .meal-mobile-slot{
+    grid-template-columns:72px minmax(0,1fr);
+  }
+  .meal-mobile-slot__label{
+    padding:10px 8px;
+  }
+  .meal-mobile-slot__label>span{
+    font-size:11px;
+  }
+}
