@@ -5,7 +5,16 @@ import { useFamily } from '../store'
 import { Avatar, Button, Card, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { addDays, dayLabel, localDateISO, monthCells, monthTitle, parseISODate, weekDates } from '../utils'
 
-const emptyEvent = (date: string, userId: number) => ({ id: undefined, title: '', date, time: '', endTime: '', userId, userIds: [userId], audience: 'users', notes: '' })
+const REMINDER_PRESETS = [
+  { value: 1440, label: '1 giorno prima' },
+  { value: 120, label: '2 ore prima' },
+  { value: 60, label: '1 ora prima' },
+  { value: 30, label: '30 min prima' },
+  { value: 10, label: '10 min prima' },
+  { value: 0, label: "All'orario" }
+]
+
+const emptyEvent = (date: string, userId: number) => ({ id: undefined, title: '', date, time: '', endTime: '', reminderMinutes: [60], userId, userIds: [userId], audience: 'users', notes: '' })
 
 export default function CalendarPage() {
   const { data, authUser, upsertCalendarEvent, deleteCalendarEvent } = useFamily()
@@ -62,7 +71,7 @@ export default function CalendarPage() {
   }
 
   function openEdit(event: CalendarEvent) {
-    setEditing({ ...event, audience: event.audience || 'users', userIds: participantIds(event) })
+    setEditing({ ...event, audience: event.audience || 'users', userIds: participantIds(event), reminderMinutes: [...(event.reminderMinutes || [60])] })
   }
 
   function toggleParticipant(id: number) {
@@ -70,6 +79,15 @@ export default function CalendarPage() {
     const current = participantIds(editing)
     const next = current.includes(id) ? current.filter(item => item !== id) : [...current, id]
     setEditing({ ...editing, audience: 'users', userIds: next, userId: next[0] || editing.userId })
+  }
+
+  function toggleReminder(minutes: number) {
+    if (!editing) return
+    const current: number[] = Array.isArray(editing.reminderMinutes) ? editing.reminderMinutes : [60]
+    const next = current.includes(minutes)
+      ? current.filter(value => value !== minutes)
+      : [...current, minutes]
+    setEditing({ ...editing, reminderMinutes: Array.from(new Set(next)).sort((a, b) => b - a) })
   }
 
   function save() {
@@ -84,7 +102,8 @@ export default function CalendarPage() {
       userIds,
       audience,
       time: editing.time || '',
-      endTime: editing.endTime || ''
+      endTime: editing.endTime || '',
+      reminderMinutes: Array.from(new Set((editing.reminderMinutes || [60]).map(Number))).filter((value: number) => value >= 0 && value <= 10080).sort((a: number, b: number) => b - a)
     })
     setEditing(null)
   }
@@ -160,6 +179,18 @@ export default function CalendarPage() {
           <Field label="Data"><input type="date" value={editing.date} onChange={e => setEditing({ ...editing, date: e.target.value })} /></Field>
           <Field label="Ora inizio"><input type="time" value={editing.time || ''} onChange={e => setEditing({ ...editing, time: e.target.value })} /></Field>
           <Field label="Ora fine"><input type="time" value={editing.endTime || ''} onChange={e => setEditing({ ...editing, endTime: e.target.value })} /></Field>
+          <Field label="Promemoria" className="field--wide" hint="Puoi selezionare uno o più avvisi. Se non modifichi nulla, riceverai il promemoria 1 ora prima.">
+            <div className="deadline-reminder-picker">
+              {REMINDER_PRESETS.map(item => <button
+                type="button"
+                key={item.value}
+                className={(editing.reminderMinutes || [60]).includes(item.value) ? 'is-active' : ''}
+                onClick={() => toggleReminder(item.value)}
+              >
+                {item.label}
+              </button>)}
+            </div>
+          </Field>
           <Field label="Partecipanti" className="field--wide" hint="Famiglia include automaticamente tutti i membri attivi.">
             <label className="toggle-row"><input type="checkbox" checked={editing.audience === 'family'} onChange={e => setEditing({ ...editing, audience: e.target.checked ? 'family' : 'users', userIds: e.target.checked ? data.users.map(user => user.id) : participantIds(editing) })} /><span>Tutta la famiglia</span></label>
             {editing.audience !== 'family' ? <div className="settings-check-grid" style={{ marginTop: 10 }}>{data.users.map(user => { const selected = participantIds(editing).includes(user.id); return <label key={user.id} className={selected ? 'is-selected' : ''}><input type="checkbox" checked={selected} onChange={() => toggleParticipant(user.id)} /><span>{user.name}</span></label> })}</div> : <div className="callout" style={{ marginTop: 10 }}>Questo evento sarà visibile a tutti i membri della famiglia. Con Google Calendar potrà usare il calendario condiviso configurato nelle Impostazioni.</div>}

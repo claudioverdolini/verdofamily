@@ -51,6 +51,7 @@ export type CalendarEvent = {
   title: string
   date: string
   time: string
+  reminderMinutes?: number[]
   endTime?: string
   userId: number
   userIds?: number[]
