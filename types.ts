@@ -1,5 +1,6 @@
 export type Role = 'admin' | 'adulto' | 'bimbo'
 export type ThemeMode = 'system' | 'light' | 'dark'
+export type VisualStyle = 'violet' | 'ocean' | 'emerald' | 'sunset' | 'berry' | 'coral' | 'midnight' | 'electric' | 'custom'
 
 export type PageKey =
   | 'home'
@@ -18,6 +19,7 @@ export type PageKey =
 export type UserPrefs = {
   theme: ThemeMode
   accent: string
+  visualStyle: VisualStyle
   density: 'compact' | 'comfortable'
   showBalances: boolean
   bottomTabs: PageKey[]

@@ -41,6 +41,18 @@ import UsersPage from './pages/Users'
 import SettingsPage from './pages/Settings'
 import VoiceAssistant from './components/VoiceAssistant'
 
+const VISUAL_STYLE_TOKENS: Record<string, { secondary: string; glow: string }> = {
+  violet: { secondary: '#A855F7', glow: '#8B5CF6' },
+  ocean: { secondary: '#06B6D4', glow: '#38BDF8' },
+  emerald: { secondary: '#22C55E', glow: '#34D399' },
+  sunset: { secondary: '#F43F5E', glow: '#FB923C' },
+  berry: { secondary: '#7C3AED', glow: '#E879F9' },
+  coral: { secondary: '#FB7185', glow: '#FDA4AF' },
+  midnight: { secondary: '#6366F1', glow: '#818CF8' },
+  electric: { secondary: '#8B5CF6', glow: '#60A5FA' },
+  custom: { secondary: '', glow: '' }
+}
+
 const NAV: Array<{ key: PageKey; label: string; icon: React.ReactNode; group?: string }> = [
   { key: 'home', label: 'Home', icon: <Home size={20} />, group: 'Oggi' },
   { key: 'calendar', label: 'Calendario', icon: <CalendarDays size={20} />, group: 'Oggi' },
@@ -669,7 +681,12 @@ function AppShell() {
   useEffect(() => {
     if (!prefs) return
     const root = document.documentElement
-    root.style.setProperty('--accent', prefs.accent || '#5B5BD6')
+    const accent = prefs.accent || '#635BFF'
+    const style = VISUAL_STYLE_TOKENS[prefs.visualStyle || 'violet'] || VISUAL_STYLE_TOKENS.custom
+    root.style.setProperty('--accent', accent)
+    root.style.setProperty('--accent2', style.secondary || accent)
+    root.style.setProperty('--accent-glow', style.glow || accent)
+    root.dataset.visualStyle = prefs.visualStyle || 'violet'
     root.dataset.density = prefs.density || 'comfortable'
     const apply = () => {
       const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches
@@ -680,7 +697,7 @@ function AppShell() {
     const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
     mq?.addEventListener?.('change', apply)
     return () => mq?.removeEventListener?.('change', apply)
-  }, [prefs?.accent, prefs?.theme, prefs?.density])
+  }, [prefs?.accent, prefs?.visualStyle, prefs?.theme, prefs?.density])
 
   const bottomTabs = useMemo(() => (prefs?.bottomTabs?.length ? prefs.bottomTabs : ['home', 'calendar', 'shopping', 'meals']).slice(0, 4), [prefs?.bottomTabs])
   const current = NAV.find(n => n.key === activePage)
@@ -704,7 +721,7 @@ function AppShell() {
   return <div className={`app-shell ${drawerOpen ? 'is-drawer-open' : ''}`}>
     <aside className={`sidebar ${drawerOpen ? 'is-open' : ''}`}>
       <div className="sidebar__head"><div className="brand-mark"><span>V</span></div><div><strong>VerdoFamily</strong><span>{familyName || 'Family Hub'}</span></div><IconButton className="sidebar-close" label="Chiudi menu" onClick={() => setDrawerOpen(false)}><X size={20} /></IconButton></div>
-      <nav className="sidebar__nav">{NAV.map((item, index) => <React.Fragment key={item.key}>{item.group && NAV[index - 1]?.group !== item.group ? <div className="nav-group-label">{item.group}</div> : null}<button className={activePage === item.key ? 'is-active' : ''} onClick={() => navigate(item.key)}><span>{item.icon}</span><strong>{item.label}</strong></button></React.Fragment>)}</nav>
+      <nav className="sidebar__nav">{NAV.map((item, index) => <React.Fragment key={item.key}>{item.group && NAV[index - 1]?.group !== item.group ? <div className="nav-group-label">{item.group}</div> : null}<button className={activePage === item.key ? 'is-active' : ''} onClick={() => navigate(item.key)}><span data-page={item.key}>{item.icon}</span><strong>{item.label}</strong></button></React.Fragment>)}</nav>
       <div className="sidebar__footer"><SyncIndicator /><button className="profile-chip" onClick={() => navigate('settings')}><Avatar user={authUser} size="sm" /><span><strong>{authUser.name}</strong><small>{authUser.role}</small></span><ChevronRight size={17} /></button><button className="logout-btn" onClick={() => logout()}><LogOut size={18} /> Esci</button></div>
     </aside>
 
@@ -715,11 +732,11 @@ function AppShell() {
       <main className="content"><PageRenderer /></main>
     </div>
 
-    <nav className="bottom-nav" aria-label="Navigazione mobile">{bottomTabs.map(key => { const item = NAV.find(n => n.key === key); if (!item) return null; return <button key={key} className={activePage === key ? 'is-active' : ''} onClick={() => navigate(key)}><span>{item.icon}</span><small>{item.label.replace(' & Dispensa','').replace('Compiti & Paghette','Paghette')}</small></button> })}<button className={bottomTabs.includes(activePage) ? '' : 'is-active'} onClick={() => setMoreOpen(true)}><span><MoreHorizontal size={20} /></span><small>Altro</small></button></nav>
+    <nav className="bottom-nav" aria-label="Navigazione mobile">{bottomTabs.map(key => { const item = NAV.find(n => n.key === key); if (!item) return null; return <button key={key} className={activePage === key ? 'is-active' : ''} onClick={() => navigate(key)}><span data-page={item.key}>{item.icon}</span><small>{item.label.replace(' & Dispensa','').replace('Compiti & Paghette','Paghette')}</small></button> })}<button className={bottomTabs.includes(activePage) ? '' : 'is-active'} onClick={() => setMoreOpen(true)}><span data-page="more"><MoreHorizontal size={20} /></span><small>Altro</small></button></nav>
 
     <VoiceAssistant />
 
-    {moreOpen ? <div className="mobile-more-layer" onMouseDown={e => { if (e.target === e.currentTarget) setMoreOpen(false) }}><div className="mobile-more"><div className="mobile-more__handle" /><div className="mobile-more__head"><strong>Altre sezioni</strong><IconButton label="Chiudi" onClick={() => setMoreOpen(false)}><X size={20} /></IconButton></div><div className="mobile-more__status"><SyncIndicator /></div><div className="mobile-more__sections">{moreGroups.map(section => <section className="mobile-more__section" key={section.group}><div className="mobile-more__section-title">{section.group}</div><div className="mobile-more__grid">{section.items.map(item => <button key={item.key} onClick={() => navigate(item.key)} className={activePage === item.key ? 'is-active' : ''}><span>{item.icon}</span><strong>{item.label}</strong></button>)}</div></section>)}</div><button className="mobile-more__logout" onClick={() => logout()}><LogOut size={18} /> Esci</button></div></div> : null}
+    {moreOpen ? <div className="mobile-more-layer" onMouseDown={e => { if (e.target === e.currentTarget) setMoreOpen(false) }}><div className="mobile-more"><div className="mobile-more__handle" /><div className="mobile-more__head"><strong>Altre sezioni</strong><IconButton label="Chiudi" onClick={() => setMoreOpen(false)}><X size={20} /></IconButton></div><div className="mobile-more__status"><SyncIndicator /></div><div className="mobile-more__sections">{moreGroups.map(section => <section className="mobile-more__section" key={section.group}><div className="mobile-more__section-title">{section.group}</div><div className="mobile-more__grid">{section.items.map(item => <button key={item.key} onClick={() => navigate(item.key)} className={activePage === item.key ? 'is-active' : ''}><span data-page={item.key}>{item.icon}</span><strong>{item.label}</strong></button>)}</div></section>)}</div><button className="mobile-more__logout" onClick={() => logout()}><LogOut size={18} /> Esci</button></div></div> : null}
   </div>
 }
 

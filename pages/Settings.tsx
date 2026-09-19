@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { BellRing, CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Link2, RefreshCw, RotateCcw, Unlink, Upload } from 'lucide-react'
+import { BellRing, CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Flame, Heart, Leaf, Link2, Moon, RefreshCw, RotateCcw, Sparkles, Unlink, Upload, Waves, Zap } from 'lucide-react'
 import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
 import type { PageKey, ThemeMode } from '../types'
@@ -8,16 +8,18 @@ import TelegramReportsCard from '../components/TelegramReportsCard'
 import { imageFileToAvatarDataUrl } from '../utils'
 import { disablePush, enablePush, getPushStatus, sendPushTest, syncPushTopics, type PushStatus, type PushTopics } from '../pushNotifications'
 
-const ACCENTS = [
-  { name: 'Indigo', color: '#5B5BD6' },
-  { name: 'Ocean', color: '#0284C7' },
-  { name: 'Forest', color: '#059669' },
-  { name: 'Sunset', color: '#EA580C' },
-  { name: 'Berry', color: '#C026D3' },
-  { name: 'Rose', color: '#E11D48' }
-]
+const VISUAL_STYLES = [
+  { id: 'violet', name: 'Violet Pop', subtitle: 'Viola + lilla', primary: '#635BFF', secondary: '#A855F7', Icon: Sparkles },
+  { id: 'ocean', name: 'Oceano', subtitle: 'Blu + turchese', primary: '#0284C7', secondary: '#06B6D4', Icon: Waves },
+  { id: 'emerald', name: 'Smeraldo', subtitle: 'Verde + menta', primary: '#059669', secondary: '#22C55E', Icon: Leaf },
+  { id: 'sunset', name: 'Tramonto', subtitle: 'Arancio + corallo', primary: '#F97316', secondary: '#F43F5E', Icon: Flame },
+  { id: 'berry', name: 'Berry', subtitle: 'Fucsia + viola', primary: '#C026D3', secondary: '#7C3AED', Icon: Heart },
+  { id: 'coral', name: 'Corallo', subtitle: 'Rosso + rosa', primary: '#E11D48', secondary: '#FB7185', Icon: Heart },
+  { id: 'midnight', name: 'Notte', subtitle: 'Ardesia + indaco', primary: '#334155', secondary: '#6366F1', Icon: Moon },
+  { id: 'electric', name: 'Electric', subtitle: 'Blu + violetto', primary: '#2563EB', secondary: '#8B5CF6', Icon: Zap }
+] as const
 
-const TAB_OPTIONS: Array<{ key: PageKey; label: string }> = [
+const TAB_OPTIONSS: Array<{ key: PageKey; label: string }> = [
   { key: 'home', label: 'Home' },
   { key: 'calendar', label: 'Calendario' },
   { key: 'shopping', label: 'Spesa' },
@@ -555,11 +557,28 @@ export default function SettingsPage() {
 
             <section className="settings-subsection">
               <div className="settings-subsection__head"><div><strong>Aspetto</strong><span>Tema, colore e densità</span></div></div>
-              <Field label="Tema"><Segmented value={prefs.theme} onChange={setTheme} options={[{ value: 'system', label: 'Sistema' }, { value: 'light', label: 'Chiaro' }, { value: 'dark', label: 'Scuro' }]} /></Field>
-              <div className="accent-grid accent-grid--compact">{ACCENTS.map(item => <button key={item.color} className={`accent-swatch ${prefs.accent === item.color ? 'is-active' : ''}`} onClick={() => updateCurrentPrefs({ accent: item.color })}><span style={{ background: item.color }} /> <strong>{item.name}</strong>{prefs.accent === item.color ? <Check size={15} /> : null}</button>)}</div>
+              <Field label="Luminosità"><Segmented value={prefs.theme} onChange={setTheme} options={[{ value: 'system', label: 'Sistema' }, { value: 'light', label: 'Chiaro' }, { value: 'dark', label: 'Scuro' }]} /></Field>
+              <Field label="Stile colore" hint="Cambia il carattere visivo dell’app: icone, pulsanti attivi e dettagli grafici seguono la palette scelta.">
+                <div className="theme-preset-grid">
+                  {VISUAL_STYLES.map(item => {
+                    const Icon = item.Icon
+                    const selected = prefs.visualStyle === item.id
+                    return <button
+                      type="button"
+                      key={item.id}
+                      className={`theme-preset ${selected ? 'is-active' : ''}`}
+                      onClick={() => updateCurrentPrefs({ visualStyle: item.id as any, accent: item.primary })}
+                    >
+                      <span className="theme-preset__preview" style={{ '--theme-a': item.primary, '--theme-b': item.secondary } as React.CSSProperties}><Icon size={20} /></span>
+                      <span className="theme-preset__copy"><strong>{item.name}</strong><small>{item.subtitle}</small></span>
+                      {selected ? <Check size={16} /> : null}
+                    </button>
+                  })}
+                </div>
+              </Field>
               <div className="form-grid form-grid--2 settings-inline-fields">
-                <Field label="Colore libero"><input type="color" value={prefs.accent} onChange={e => updateCurrentPrefs({ accent: e.target.value })} /></Field>
-                <Field label="Densità"><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
+                <Field label="Colore personalizzato" hint="Se vuoi uscire dalle palette predefinite."><input type="color" value={prefs.accent} onChange={e => updateCurrentPrefs({ accent: e.target.value, visualStyle: 'custom' as any })} /></Field>
+                <Field label="Spaziatura"><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
               </div>
             </section>
           </div>

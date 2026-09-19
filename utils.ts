@@ -480,7 +480,8 @@ export function ingredientsToText(items: Array<{ name: string; qty: number; unit
 
 export const DEFAULT_PREFS: UserPrefs = {
   theme: 'system',
-  accent: '#5B5BD6',
+  accent: '#635BFF',
+  visualStyle: 'violet',
   density: 'comfortable',
   showBalances: true,
   bottomTabs: ['home', 'calendar', 'shopping', 'meals'],
@@ -489,10 +490,28 @@ export const DEFAULT_PREFS: UserPrefs = {
   notifications: { calendar: true, deadlines: true, chores: true, school: true, board: true, shopping: false, whatsapp: false }
 }
 
+function visualStyleFromAccent(accent?: string) {
+  const key = String(accent || '').toUpperCase()
+  const known: Record<string, UserPrefs['visualStyle']> = {
+    '#5B5BD6': 'violet',
+    '#635BFF': 'violet',
+    '#0284C7': 'ocean',
+    '#059669': 'emerald',
+    '#F97316': 'sunset',
+    '#EA580C': 'sunset',
+    '#C026D3': 'berry',
+    '#E11D48': 'coral',
+    '#334155': 'midnight',
+    '#2563EB': 'electric'
+  }
+  return known[key] || 'custom'
+}
+
 export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
   return {
     ...DEFAULT_PREFS,
     ...(input || {}),
+    visualStyle: input?.visualStyle || visualStyleFromAccent(input?.accent) || DEFAULT_PREFS.visualStyle,
     bottomTabs: input?.bottomTabs?.length ? input.bottomTabs : DEFAULT_PREFS.bottomTabs,
     homeCards: input?.homeCards?.length ? input.homeCards : DEFAULT_PREFS.homeCards,
     notifications: { ...DEFAULT_PREFS.notifications, ...(input?.notifications || {}) }
