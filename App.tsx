@@ -695,7 +695,7 @@ function AppShell() {
   if (cloudAuthenticated && needsFamilySetup) return <FamilySetupScreen />
   if (!authUser) return <LoginScreen />
 
-  return <div className="app-shell">
+  return <div className={`app-shell ${drawerOpen ? 'is-drawer-open' : ''}`}>
     <aside className={`sidebar ${drawerOpen ? 'is-open' : ''}`}>
       <div className="sidebar__head"><div className="brand-mark"><span>V</span></div><div><strong>VerdoFamily</strong><span>{familyName || 'Family Hub'}</span></div><IconButton className="sidebar-close" label="Chiudi menu" onClick={() => setDrawerOpen(false)}><X size={20} /></IconButton></div>
       <nav className="sidebar__nav">{NAV.map((item, index) => <React.Fragment key={item.key}>{item.group && NAV[index - 1]?.group !== item.group ? <div className="nav-group-label">{item.group}</div> : null}<button className={activePage === item.key ? 'is-active' : ''} onClick={() => navigate(item.key)}><span>{item.icon}</span><strong>{item.label}</strong></button></React.Fragment>)}</nav>
