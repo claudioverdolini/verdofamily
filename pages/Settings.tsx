@@ -19,7 +19,7 @@ const VISUAL_STYLES = [
   { id: 'electric', name: 'Electric', subtitle: 'Blu + violetto', primary: '#2563EB', secondary: '#8B5CF6', Icon: Zap }
 ] as const
 
-const TAB_OPTIONSS: Array<{ key: PageKey; label: string }> = [
+const TAB_OPTIONS: Array<{ key: PageKey; label: string }> = [
   { key: 'home', label: 'Home' },
   { key: 'calendar', label: 'Calendario' },
   { key: 'shopping', label: 'Spesa' },
