@@ -110,6 +110,7 @@ Deno.serve(async(req)=>{
    if(!supplied||!secretRow?.value||supplied!==secretRow.value) return reply({ok:false,error:"unauthorized"},401);
 
    if(b.action==="process-scheduled"){
+    familyContextCache.clear();
     const {data:due,error:dueErr}=await sb.rpc("push_due_scheduled_reminders",{p_now:new Date().toISOString()});
     if(dueErr) throw dueErr;
     let sent=0,duplicate=0,failed=0,stale=0,recipients=0;
