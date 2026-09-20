@@ -23,7 +23,7 @@ export type UserPrefs = {
   density: 'compact' | 'comfortable'
   showBalances: boolean
   bottomTabs: PageKey[]
-  homeCards: Array<'today' | 'shopping' | 'deadlines' | 'wallets'>
+  homeCards: Array<'today' | 'shopping' | 'meals' | 'school' | 'board' | 'deadlines' | 'todos' | 'wallets' | 'health'>
   notificationCenterReadIds?: string[]
   notificationDetail: 'full' | 'private'
   notifications: {

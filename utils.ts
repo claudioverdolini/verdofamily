@@ -485,7 +485,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   density: 'comfortable',
   showBalances: true,
   bottomTabs: ['home', 'calendar', 'shopping', 'meals'],
-  homeCards: ['today', 'shopping', 'deadlines', 'wallets'],
+  homeCards: ['today', 'shopping', 'meals', 'school', 'board', 'deadlines'],
   notificationDetail: 'full',
   notifications: { calendar: true, deadlines: true, chores: true, school: true, board: true, shopping: false, whatsapp: false }
 }
@@ -507,13 +507,22 @@ function visualStyleFromAccent(accent?: string) {
   return known[key] || 'custom'
 }
 
+function normalizeHomeCards(input?: UserPrefs['homeCards']) {
+  const current = Array.isArray(input) ? input : []
+  const legacyDefault = ['today', 'shopping', 'deadlines', 'wallets']
+  const isUntouchedLegacyDefault = current.length === legacyDefault.length
+    && legacyDefault.every(key => current.includes(key as any))
+  if (isUntouchedLegacyDefault) return DEFAULT_PREFS.homeCards
+  return current.length ? current : DEFAULT_PREFS.homeCards
+}
+
 export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
   return {
     ...DEFAULT_PREFS,
     ...(input || {}),
     visualStyle: input?.visualStyle || visualStyleFromAccent(input?.accent) || DEFAULT_PREFS.visualStyle,
     bottomTabs: input?.bottomTabs?.length ? input.bottomTabs : DEFAULT_PREFS.bottomTabs,
-    homeCards: input?.homeCards?.length ? input.homeCards : DEFAULT_PREFS.homeCards,
+    homeCards: normalizeHomeCards(input?.homeCards),
     notifications: { ...DEFAULT_PREFS.notifications, ...(input?.notifications || {}) }
   }
 }

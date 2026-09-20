@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import {
   AlertTriangle,
   CalendarDays,
+  HeartPulse,
   CheckCircle2,
   ChevronRight,
   Clock3,
@@ -10,6 +11,7 @@ import {
   Pin,
   Plus,
   ReceiptText,
+  ShoppingBasket,
   ShoppingCart,
   Users,
   Utensils,
@@ -46,6 +48,16 @@ export default function Dashboard() {
     [data.deadlines, today]
   )
 
+  const upcomingHealth = useMemo(
+    () => data.deadlines
+      .filter(d => ['visit', 'therapy', 'medicine', 'health-record'].includes(d.kind || ''))
+      .filter(d => !d.done && d.date >= today)
+      .filter(d => authUser?.role !== 'bimbo' || d.userId === authUser.id || d.userId === 0)
+      .sort((a, b) => `${a.date}${a.time || ''}`.localeCompare(`${b.date}${b.time || ''}`))
+      .slice(0, 3),
+    [data.deadlines, authUser?.id, authUser?.role, today]
+  )
+
   const tomorrow = addDays(today, 1)
   const schoolTomorrow = data.schoolItems
     .filter(item => !item.done && item.date === tomorrow)
@@ -61,6 +73,7 @@ export default function Dashboard() {
   const boardDueSoon = boardVisible.filter(post => post.type === 'reminder' && post.dueDate && post.dueDate >= today && post.dueDate <= tomorrow)
 
   const pendingShopping = data.shopping.filter(x => !x.taken)
+  const shoppingPreview = pendingShopping.slice(0, 4)
   const pendingChores = data.chores.filter(x => !x.done)
   const choresAwaitingApproval = data.chores.filter(x => !x.done && x.completionStatus === 'pending')
   const choresStillToDo = pendingChores.filter(x => x.completionStatus !== 'pending')
@@ -131,6 +144,10 @@ export default function Dashboard() {
 
   const showBalances = authUser?.prefs?.showBalances !== false
   const totalBalance = data.users.reduce((sum, u) => sum + Number(u.balance || 0), 0)
+  const visibleHomeCards = new Set(authUser?.prefs?.homeCards?.length
+    ? authUser.prefs.homeCards
+    : ['today', 'shopping', 'meals', 'school', 'board', 'deadlines'])
+  const showWidget = (key: string) => visibleHomeCards.has(key as any)
 
   function participantNames(event: any) {
     if (event.audience === 'family') return 'Famiglia'
@@ -213,28 +230,71 @@ export default function Dashboard() {
         </div>
 
         <div className="command-grid command-grid--today">
-          <Card className="command-panel home-widget home-widget--calendar command-panel--agenda">
-            <CardHeader title="Agenda di oggi" subtitle="Tutti gli impegni in ordine" action={<button className="text-link" onClick={() => setActivePage('calendar')}>Calendario <ChevronRight size={16} /></button>} />
+          {showWidget('today') ? <Card className="command-panel home-widget home-widget--calendar command-panel--agenda">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><CalendarDays size={20} /></span>
+              <div><small>Calendario</small><strong>Agenda di oggi</strong></div>
+              <span className="home-widget__count">{eventsToday.length}</span>
+              <button aria-label="Apri calendario" onClick={() => setActivePage('calendar')}><ChevronRight size={19} /></button>
+            </div>
             {eventsToday.length ? <div className="timeline-list">
               {eventsToday.slice(0, 3).map(event => <ListRow key={event.id} leading={<span className="time-pill">{event.time || '—'}</span>} title={event.title} subtitle={participantNames(event)} trailing={<ChevronRight size={17} />} onClick={() => setActivePage('calendar')} />)}
+              {eventsToday.length > 3 ? <button className="home-widget__more" onClick={() => setActivePage('calendar')}>+{eventsToday.length - 3} altri impegni</button> : null}
             </div> : <EmptyState icon={<CalendarDays size={28} />} title="Giornata libera" text="Nessun impegno previsto per oggi." />}
-          </Card>
+          </Card> : null}
 
-          <Card className="command-panel home-widget home-widget--meals">
-            <CardHeader title="Pasti di oggi" subtitle="Pranzo e cena pianificati" action={<button className="text-link" onClick={() => setActivePage('meals')}>Pasti <ChevronRight size={16} /></button>} />
-            {(mealByDate[today] || []).length ? <div className="command-simple-list">{mealByDate[today].map((meal, index) => <button key={`${meal.slot}-${index}`} onClick={() => setActivePage('meals')}><Utensils size={17} /><span><strong>{meal.slot}</strong><small>{meal.name}</small></span></button>)}</div> : <EmptyState icon={<Utensils size={28} />} title="Pasti non pianificati" text="Puoi aggiungere pranzo e cena dal planner pasti." />}
-          </Card>
+          {showWidget('shopping') ? <Card className="command-panel home-widget home-widget--shopping">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><ShoppingBasket size={20} /></span>
+              <div><small>Spesa</small><strong>Lista da comprare</strong></div>
+              <span className="home-widget__count">{pendingShopping.length}</span>
+              <button aria-label="Apri lista spesa" onClick={() => setActivePage('shopping')}><ChevronRight size={19} /></button>
+            </div>
+            {shoppingPreview.length ? <>
+              <div className="home-widget__chips">
+                {shoppingPreview.map(item => <button key={item.id} onClick={() => setActivePage('shopping')}><span>{item.name}</span><small>{item.qty} {item.unit}</small></button>)}
+              </div>
+              <div className="home-widget__footer">
+                <span>{lowStock.length ? `${lowStock.length} da reintegrare` : 'Dispensa sotto controllo'}</span>
+                {pendingShopping.length > shoppingPreview.length ? <strong>+{pendingShopping.length - shoppingPreview.length}</strong> : null}
+              </div>
+            </> : <EmptyState icon={<ShoppingCart size={28} />} title="Lista vuota" text="Non ci sono articoli da comprare." />}
+          </Card> : null}
 
-          <Card className="command-panel home-widget home-widget--school">
-            <CardHeader title="Scuola · domani" subtitle="Lezioni e cose da preparare" action={<button className="text-link" onClick={() => setActivePage('school')}>Scuola <ChevronRight size={16} /></button>} />
+          {showWidget('meals') ? <Card className="command-panel home-widget home-widget--meals">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><Utensils size={20} /></span>
+              <div><small>Pasti</small><strong>Oggi a tavola</strong></div>
+              <span className="home-widget__count">{(mealByDate[today] || []).length}</span>
+              <button aria-label="Apri pasti" onClick={() => setActivePage('meals')}><ChevronRight size={19} /></button>
+            </div>
+            {(mealByDate[today] || []).length ? <div className="home-meal-preview">{mealByDate[today].map((meal, index) =>
+              <button key={`${meal.slot}-${index}`} onClick={() => setActivePage('meals')}>
+                <span>{meal.slot}</span><strong>{meal.name}</strong>
+              </button>)}</div>
+              : <EmptyState icon={<Utensils size={28} />} title="Pasti non pianificati" text="Aggiungi pranzo e cena dal planner." />}
+          </Card> : null}
+
+          {showWidget('school') ? <Card className="command-panel home-widget home-widget--school">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><GraduationCap size={20} /></span>
+              <div><small>Scuola</small><strong>Domani</strong></div>
+              <span className="home-widget__count">{schoolTomorrow.length || schoolTomorrowLessons.length}</span>
+              <button aria-label="Apri scuola" onClick={() => setActivePage('school')}><ChevronRight size={19} /></button>
+            </div>
             {schoolTomorrow.length || schoolTomorrowLessons.length ? <div className="command-simple-list">
               {schoolTomorrow.slice(0, 2).map(item => <button key={`school-${item.id}`} onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Scuola'}</small></span></button>)}
               {schoolTomorrow.length === 0 && schoolTomorrowLessons.length ? <button onClick={() => setActivePage('school')}><GraduationCap size={17} /><span><strong>{schoolTomorrowLessons.length} lezioni previste</strong><small>Controlla orario e zaino</small></span></button> : null}
-            </div> : <EmptyState icon={<GraduationCap size={28} />} title="Niente da preparare" text="Nessun impegno scolastico registrato per domani." />}
-          </Card>
+            </div> : <EmptyState icon={<GraduationCap size={28} />} title="Niente da preparare" text="Nessun impegno scolastico per domani." />}
+          </Card> : null}
 
-          <Card className="command-panel home-widget home-widget--board command-panel--board">
-            <CardHeader title="Bacheca" subtitle="Messaggi fissati per la famiglia" action={<button className="text-link" onClick={() => setActivePage('board')}>Apri <ChevronRight size={16} /></button>} />
+          {showWidget('board') ? <Card className="command-panel home-widget home-widget--board command-panel--board">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><Pin size={20} /></span>
+              <div><small>Bacheca</small><strong>In evidenza</strong></div>
+              <span className="home-widget__count">{pinnedBoard.length || boardDueSoon.length}</span>
+              <button aria-label="Apri bacheca" onClick={() => setActivePage('board')}><ChevronRight size={19} /></button>
+            </div>
             {pinnedBoard.length ? <div className="home-board-list">
               {pinnedBoard.slice(0, 2).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
                 <Pin size={16} />
@@ -243,25 +303,77 @@ export default function Dashboard() {
               </button>)}
             </div> : boardDueSoon.length ? <div className="home-board-list">
               {boardDueSoon.slice(0, 2).map(post => <button key={post.id} onClick={() => setActivePage('board')}>
-                <Pin size={16} />
-                <span><strong>{post.title || post.body.slice(0, 55) || 'Promemoria'}</strong><small>{post.dueDate ? `Per ${shortDate(post.dueDate)}` : 'Bacheca familiare'}</small></span>
-                <ChevronRight size={15} />
+                <Pin size={16} /><span><strong>{post.title || post.body.slice(0, 55) || 'Promemoria'}</strong><small>{post.dueDate ? `Per ${shortDate(post.dueDate)}` : 'Bacheca familiare'}</small></span><ChevronRight size={15} />
               </button>)}
-            </div> : <EmptyState icon={<Pin size={28} />} title="Niente in evidenza" text="Fissa un messaggio o un promemoria per averlo sempre qui sul tablet." />}
-          </Card>
+            </div> : <EmptyState icon={<Pin size={28} />} title="Niente in evidenza" text="Fissa un messaggio per ritrovarlo subito qui." />}
+          </Card> : null}
 
-          <Card className="command-panel home-widget home-widget--todos">
-            <CardHeader title="Da fare" subtitle="Attività ancora aperte" action={<button className="text-link" onClick={() => setActivePage('todos')}>Tutte <ChevronRight size={16} /></button>} />
+          {showWidget('deadlines') ? <Card className="command-panel home-widget home-widget--deadlines">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><ReceiptText size={20} /></span>
+              <div><small>Scadenze</small><strong>Prossime</strong></div>
+              <span className="home-widget__count">{nextDeadlines.length}</span>
+              <button aria-label="Apri scadenze" onClick={() => setActivePage('deadlines')}><ChevronRight size={19} /></button>
+            </div>
+            {nextDeadlines.length ? <div className="home-deadline-list">
+              {nextDeadlines.slice(0, 3).map(item => <button key={item.id} onClick={() => setActivePage('deadlines')}>
+                <span className="home-date-chip"><strong>{item.date.slice(8,10)}</strong><small>{new Date(`${item.date}T12:00:00`).toLocaleDateString('it-IT',{month:'short'}).replace('.','')}</small></span>
+                <span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span>
+                <ChevronRight size={16} />
+              </button>)}
+            </div> : <EmptyState icon={<ReceiptText size={28} />} title="Nessuna scadenza vicina" text="Non risultano scadenze nei prossimi 15 giorni." />}
+          </Card> : null}
+
+          {showWidget('todos') ? <Card className="command-panel home-widget home-widget--todos">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><ListTodo size={20} /></span>
+              <div><small>Da fare</small><strong>Attività aperte</strong></div>
+              <span className="home-widget__count">{pendingTodos.length + dueRoutinesToday.length}</span>
+              <button aria-label="Apri da fare" onClick={() => setActivePage('todos')}><ChevronRight size={19} /></button>
+            </div>
             {pendingTodos.length || dueRoutinesToday.length || pendingChores.length ? <div className="command-simple-list">
               {dueRoutinesToday.slice(0, 1).map(item => <button key={`routine-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>Routine · {data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
-              {pendingTodos.slice(0, 1).map(item => <button key={`todo-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
-              {pendingChores.slice(0, 1).map(item => <button key={`chore-${item.id}`} onClick={() => setActivePage('chores')}><CheckCircle2 size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'} · entro {shortDate(item.deadline)}</small></span></button>)}
+              {pendingTodos.slice(0, 2).map(item => <button key={`todo-${item.id}`} onClick={() => setActivePage('todos')}><ListTodo size={17} /><span><strong>{item.title}</strong><small>{data.users.find(u => u.id === item.userId)?.name || 'Famiglia'}</small></span></button>)}
             </div> : <EmptyState icon={<CheckCircle2 size={28} />} title="Tutto fatto" text="Non risultano attività aperte." />}
-          </Card>
+          </Card> : null}
+
+          {showWidget('wallets') ? <Card className="command-panel home-widget home-widget--wallets">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><WalletCards size={20} /></span>
+              <div><small>Paghette</small><strong>Situazione</strong></div>
+              <span className="home-widget__count">{choresAwaitingApproval.length}</span>
+              <button aria-label="Apri paghette" onClick={() => setActivePage('chores')}><ChevronRight size={19} /></button>
+            </div>
+            <button className="home-wallet-summary" onClick={() => setActivePage('chores')}>
+              <span><small>Saldo famiglia</small><strong>{showBalances ? money(totalBalance) : '••••'}</strong></span>
+              <span><small>Da fare</small><strong>{choresStillToDo.length}</strong></span>
+              <span><small>Da confermare</small><strong>{choresAwaitingApproval.length}</strong></span>
+            </button>
+          </Card> : null}
+
+          {showWidget('health') ? <Card className="command-panel home-widget home-widget--health">
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><HeartPulse size={20} /></span>
+              <div><small>Salute</small><strong>Prossimi promemoria</strong></div>
+              <span className="home-widget__count">{upcomingHealth.length}</span>
+              <button aria-label="Apri salute" onClick={() => setActivePage('health')}><ChevronRight size={19} /></button>
+            </div>
+            {upcomingHealth.length ? <div className="home-deadline-list">
+              {upcomingHealth.slice(0, 2).map(item => <button key={item.id} onClick={() => setActivePage('health')}>
+                <span className="home-date-chip"><strong>{item.date.slice(8,10)}</strong><small>{new Date(`${item.date}T12:00:00`).toLocaleDateString('it-IT',{month:'short'}).replace('.','')}</small></span>
+                <span><strong>{item.title}</strong><small>{item.time || (item.kind === 'therapy' ? 'Terapia' : item.kind === 'medicine' ? 'Farmaco' : 'Salute')}</small></span>
+                <ChevronRight size={16} />
+              </button>)}
+            </div> : <EmptyState icon={<HeartPulse size={28} />} title="Nessun promemoria vicino" text="Non risultano attività salute future." />}
+          </Card> : null}
 
           <Card className="command-panel home-widget home-widget--alerts command-panel--alerts">
-            <CardHeader title="Avvisi" subtitle="Quello che richiede attenzione" />
-            {familyAlerts.length ? <div className="command-alerts">{familyAlerts.map((alert, index) => <button key={index} onClick={() => setActivePage(alert.page)}><AlertTriangle size={17} /><span>{alert.label}</span><ChevronRight size={16} /></button>)}</div> : <EmptyState icon={<CheckCircle2 size={28} />} title="Nessun avviso" text="La situazione della famiglia è sotto controllo." />}
+            <div className="home-widget__head">
+              <span className="home-widget__icon"><AlertTriangle size={20} /></span>
+              <div><small>Sistema</small><strong>Avvisi</strong></div>
+              <span className="home-widget__count">{familyAlerts.length}</span>
+            </div>
+            {familyAlerts.length ? <div className="command-alerts">{familyAlerts.slice(0, 5).map((alert, index) => <button key={index} onClick={() => setActivePage(alert.page)}><AlertTriangle size={17} /><span>{alert.label}</span><ChevronRight size={16} /></button>)}</div> : <EmptyState icon={<CheckCircle2 size={28} />} title="Nessun avviso" text="La situazione della famiglia è sotto controllo." />}
           </Card>
         </div>
       </> : null}

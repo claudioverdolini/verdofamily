@@ -33,10 +33,15 @@ const TAB_OPTIONS: Array<{ key: PageKey; label: string }> = [
 ]
 
 const HOME_CARDS = [
-  { key: 'today', label: 'Impegni di oggi' },
-  { key: 'shopping', label: 'Lista spesa' },
+  { key: 'today', label: 'Calendario' },
+  { key: 'shopping', label: 'Spesa' },
+  { key: 'meals', label: 'Pasti' },
+  { key: 'school', label: 'Scuola' },
+  { key: 'board', label: 'Bacheca' },
   { key: 'deadlines', label: 'Scadenze' },
-  { key: 'wallets', label: 'Paghette' }
+  { key: 'todos', label: 'Da fare' },
+  { key: 'wallets', label: 'Paghette' },
+  { key: 'health', label: 'Salute' }
 ] as const
 
 const BACKUP_MAX_AGE_MS = 24 * 60 * 60 * 1000
