@@ -506,6 +506,26 @@ Deno.serve(async (req) => {
     }
 
     if (action === "sync") {
+      const expectedRevision = body?.expectedRevision;
+      if (expectedRevision !== undefined && expectedRevision !== null) {
+        const revisionNumber = Number(expectedRevision);
+        if (!Number.isInteger(revisionNumber) || revisionNumber < 0) {
+          return json({ ok: false, error: "invalid_expected_revision" }, 400);
+        }
+        const { data: revisionRow, error: revisionError } = await admin
+          .from("family_documents")
+          .select("revision")
+          .eq("family_id", familyId)
+          .single();
+        if (revisionError || !revisionRow) return json({ ok: false, error: "family_document_not_found" }, 404);
+        if (Number(revisionRow.revision || 0) !== revisionNumber) {
+          return json({
+            ok: false,
+            error: "expected_revision_conflict",
+            revision: Number(revisionRow.revision || 0)
+          });
+        }
+      }
       const allowed = await rateLimit(
         admin,
         "finance_sync",

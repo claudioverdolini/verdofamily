@@ -113,6 +113,31 @@ function familyPushDetails(previous: any, next: any) {
   return details;
 }
 
+function familyChangeModules(previous: any, next: any) {
+  const changed = (a: any, b: any) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+  const modules: string[] = [];
+  const checks: Array<[string, any, any]> = [
+    ["profile", previous?.users, next?.users],
+    ["calendar", previous?.calendarEvents, next?.calendarEvents],
+    ["deadlines", previous?.deadlines, next?.deadlines],
+    ["categories", previous?.categories, next?.categories],
+    ["pantry", previous?.pantry, next?.pantry],
+    ["pantry", previous?.pantryMovements, next?.pantryMovements],
+    ["shopping", previous?.shopping, next?.shopping],
+    ["meals", previous?.dishes, next?.dishes],
+    ["meals", previous?.mealPlans, next?.mealPlans],
+    ["todos", previous?.todos, next?.todos],
+    ["routines", previous?.routines, next?.routines],
+    ["routines", previous?.routineCompletions, next?.routineCompletions],
+    ["board", previous?.boardPosts, next?.boardPosts],
+    ["settings", previous?.assistantName, next?.assistantName]
+  ];
+  for (const [module, before, after] of checks) {
+    if (changed(before, after) && !modules.includes(module)) modules.push(module);
+  }
+  return modules;
+}
+
 function familyPushCategories(previous: any, next: any) {
   const categories: string[] = [];
   const changed = (a: any, b: any) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
@@ -585,6 +610,19 @@ Deno.serve(async (req) => {
     }
 
     if (Number(document.revision || 0) !== expectedRevision) {
+      await securityAudit(admin, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "family_document_conflict",
+        success: false,
+        severity: "warning",
+        metadata: {
+          role,
+          expectedRevision,
+          currentRevision: Number(document.revision || 0),
+          schemaVersion: Number(incoming?.version || 0)
+        }
+      });
       let latest = role === "child" ? redactForChild(fullData, childId) : fullData;
       try {
         const finance = await callFinanceGateway(supabaseUrl, anonKey, authHeader, "read", familyId);
@@ -653,6 +691,20 @@ Deno.serve(async (req) => {
 
     if (updateError) throw updateError;
     if (!updated) {
+      await securityAudit(admin, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "family_document_conflict",
+        success: false,
+        severity: "warning",
+        metadata: {
+          role,
+          expectedRevision,
+          currentRevision: null,
+          schemaVersion: Number(incoming?.version || 0),
+          stage: "atomic_update"
+        }
+      });
       const { data: latest } = await admin
         .from("family_documents")
         .select("data,revision")
@@ -683,6 +735,22 @@ Deno.serve(async (req) => {
 
     const pushCategories = familyPushCategories(fullData, nextData);
     await notifyFamilyPush(admin, supabaseUrl, familyId, pushCategories, user.id, familyPushDetails(fullData, nextData));
+
+    await securityAudit(admin, {
+      actorUserId: user.id,
+      familyId,
+      eventType: "family_document_saved",
+      success: true,
+      severity: "info",
+      metadata: {
+        role,
+        fromRevision: expectedRevision,
+        toRevision: Number(updated.revision || nextRevision),
+        modules: familyChangeModules(fullData, nextData),
+        schemaVersion: Number(nextData?.version || 0),
+        storageModel: String(nextData?.storageModel || "")
+      }
+    });
 
     let normalizedData: any = undefined;
     if (role === "child") {
