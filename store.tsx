@@ -147,7 +147,7 @@ type StoreValue = {
   deleteDeadline: (id: number) => void
   addCategory: (name: string) => boolean
   renameCategory: (oldName: string, newName: string) => boolean
-  deleteCategory: (name: string) => boolean
+  deleteCategory: (name: string) => Promise<boolean>
   upsertPantryItem: (item: Omit<PantryItem, 'id'> & { id?: number }) => void
   deletePantryItem: (id: number) => void
   changePantryQty: (id: number, delta: number) => void
@@ -1107,9 +1107,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return renamed
   }
 
-  function deleteCategory(name: string) {
+  async function deleteCategory(name: string) {
     if (name === 'Generico') return false
     if (!confirmDeletion('la categoria “' + name + '”', 'I prodotti associati verranno spostati nella categoria Generico.')) return false
+    const affectedPantry = data.pantry.filter(item => item.category === name)
+    if (!await archiveDeletedItem('shopping', 'Categoria ' + name, { kind: 'category', item: name, affectedPantry })) return false
     setData(prev => ({ ...prev, categories: prev.categories.filter(c => c !== name), pantry: prev.pantry.map(p => p.category === name ? { ...p, category: 'Generico' } : p) }))
     return true
   }
@@ -1955,6 +1957,19 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const result = addUnique(next.boardPosts, item)
       return { next: { ...next, boardPosts: result.list }, applied: result.added }
     }
+    if (kind === 'category') {
+      const category = String(item || '').trim()
+      if (!category || next.categories.some(existing => normalize(existing) === normalize(category))) return { next, applied: false }
+      const affectedIds = new Set((Array.isArray(payload?.affectedPantry) ? payload.affectedPantry : []).map((entry: any) => String(entry.id)))
+      return {
+        next: {
+          ...next,
+          categories: [...next.categories, category],
+          pantry: next.pantry.map(entry => affectedIds.has(String(entry.id)) ? { ...entry, category } : entry)
+        },
+        applied: true
+      }
+    }
     return { next, applied: false }
   }
 
@@ -2029,8 +2044,18 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  function resetData() {
+  async function resetData() {
     if (!confirmDeletion('tutti i dati locali e ripristinare i dati demo', 'Questa operazione sostituisce completamente i dati presenti sul dispositivo.')) return
+    if (supabase && familyIdRef.current && cloudUserId) {
+      const { error } = await supabase.rpc('create_family_backup', {
+        p_family_id: familyIdRef.current,
+        p_reason: 'before_reset_to_demo'
+      })
+      if (error) {
+        window.alert('Non riesco a creare il backup di sicurezza. Per sicurezza il ripristino ai dati demo è stato annullato.')
+        return
+      }
+    }
     setData(deepClone(initialData))
     setSessionUserId(null)
     setActivePage('home')

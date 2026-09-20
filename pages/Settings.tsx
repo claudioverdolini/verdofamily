@@ -627,10 +627,20 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url)
   }
 
-  function doImport() {
+  async function doImport() {
     if (!importText.trim()) return
+    if (supabase && familyId && cloudAuthenticated) {
+      const { error } = await supabase.rpc('create_family_backup', {
+        p_family_id: familyId,
+        p_reason: 'before_manual_import'
+      })
+      if (error) {
+        setMessage('Non riesco a creare il backup di sicurezza: importazione annullata.')
+        return
+      }
+    }
     if (importData(importText)) {
-      setMessage('Backup importato correttamente.')
+      setMessage('Backup importato correttamente. La situazione precedente è stata salvata prima dell’importazione.')
       setImportText('')
     } else {
       setMessage('Il file/JSON non è valido.')
