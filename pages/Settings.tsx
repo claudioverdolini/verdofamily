@@ -62,6 +62,34 @@ type BackupHealth = {
   detail: string
 }
 
+type RecycleBinItem = {
+  id: string
+  module: string
+  label: string
+  payload: any
+  deleted_at: string
+  deleted_by?: string | null
+}
+
+type ConflictDraftItem = {
+  id: string
+  actor_user_id: string
+  base_revision: number
+  remote_revision: number
+  data: any
+  created_at: string
+}
+
+type ChangeHistoryItem = {
+  id: number
+  actor_user_id?: string | null
+  event_type: string
+  success: boolean
+  severity: string
+  metadata: Record<string, any>
+  created_at: string
+}
+
 type GoogleCalendarChoice = {
   id: string
   summary: string
@@ -149,7 +177,9 @@ export default function SettingsPage() {
     resetData,
     cloudAuthenticated,
     familyId,
-    syncNow
+    syncNow,
+    restoreRecycleItem,
+    recoverConflictDraft
   } = useFamily()
   const [importText, setImportText] = useState('')
   const [message, setMessage] = useState('')
@@ -166,6 +196,10 @@ export default function SettingsPage() {
   const [pushStatus, setPushStatus] = useState<PushStatus | null>(null)
   const [pushBusy, setPushBusy] = useState(false)
   const [pushMessage, setPushMessage] = useState('')
+  const [recycleItems, setRecycleItems] = useState<RecycleBinItem[]>([])
+  const [conflictDrafts, setConflictDrafts] = useState<ConflictDraftItem[]>([])
+  const [changeHistory, setChangeHistory] = useState<ChangeHistoryItem[]>([])
+  const [safetyBusy, setSafetyBusy] = useState<string | null>(null)
 
   const prefs = authUser?.prefs
   const pushTopics: PushTopics = {
@@ -194,6 +228,7 @@ export default function SettingsPage() {
   useEffect(() => {
     void refreshBackupStatus()
     void refreshGoogleCalendar()
+    void refreshSafetyData()
     const params = new URLSearchParams(window.location.search)
     const googleResult = params.get('googleCalendar')
     if (googleResult === 'connected') setGoogleMessage('Google Calendar collegato. Scegli ora dove sincronizzare gli eventi.')
@@ -216,6 +251,10 @@ export default function SettingsPage() {
     }
     void getPushStatus(familyId).then(setPushStatus).catch(() => setPushStatus(null))
   }, [familyId, cloudAuthenticated])
+
+  useEffect(() => {
+    void refreshSafetyData()
+  }, [familyId, cloudAuthenticated, authUser?.role])
 
   useEffect(() => {
     if (!familyId || !cloudAuthenticated || !pushStatus?.subscribed) return
@@ -491,6 +530,82 @@ export default function SettingsPage() {
     }
   }
 
+  function historyLabel(type: string) {
+    const labels: Record<string, string> = {
+      family_document_saved: 'Salvataggio famiglia',
+      family_document_conflict: 'Conflitto tra dispositivi',
+      family_backup_created: 'Backup creato',
+      family_backup_restored: 'Backup ripristinato',
+      recycle_item_archived: 'Elemento spostato nel Cestino',
+      recycle_item_restored: 'Elemento ripristinato dal Cestino',
+      recycle_item_purged: 'Elemento eliminato definitivamente',
+      family_conflict_draft_saved: 'Bozza conflitto salvata',
+      family_conflict_draft_resolved: 'Bozza conflitto recuperata'
+    }
+    return labels[type] || type.replaceAll('_', ' ')
+  }
+
+  async function refreshSafetyData() {
+    if (!supabase || !familyId || !cloudAuthenticated || authUser?.role === 'bimbo') {
+      setRecycleItems([])
+      setConflictDrafts([])
+      setChangeHistory([])
+      return
+    }
+    try {
+      const [trashResult, conflictResult, historyResult] = await Promise.all([
+        supabase.rpc('get_family_recycle_bin', { p_family_id: familyId, p_limit: 100 }),
+        supabase.rpc('get_family_conflict_drafts', { p_family_id: familyId, p_limit: 20 }),
+        supabase.rpc('get_family_change_history', { p_family_id: familyId, p_limit: 50 })
+      ])
+      if (!trashResult.error) setRecycleItems((trashResult.data || []) as RecycleBinItem[])
+      if (!conflictResult.error) setConflictDrafts((conflictResult.data || []) as ConflictDraftItem[])
+      if (!historyResult.error) setChangeHistory((historyResult.data || []) as ChangeHistoryItem[])
+    } catch (error) {
+      console.warn('refresh safety data', error)
+    }
+  }
+
+  async function restoreRecycle(item: RecycleBinItem) {
+    if (!confirm(`Ripristinare “${item.label}” dal Cestino?`)) return
+    setSafetyBusy(item.id)
+    try {
+      const ok = await restoreRecycleItem(item.id, item.payload)
+      setMessage(ok ? `“${item.label}” ripristinato.` : 'Ripristino non completato.')
+      await refreshSafetyData()
+    } finally {
+      setSafetyBusy(null)
+    }
+  }
+
+  async function purgeRecycle(item: RecycleBinItem) {
+    if (!supabase) return
+    if (!confirm(`Eliminare definitivamente “${item.label}” dal Cestino? Questa copia non sarà più recuperabile dal Cestino, ma resteranno disponibili le versioni complete di backup previste dalla politica di conservazione.`)) return
+    setSafetyBusy(item.id)
+    try {
+      const { error } = await supabase.rpc('purge_family_recycle_item', { p_id: item.id })
+      if (error) throw error
+      setMessage(`“${item.label}” eliminato definitivamente dal Cestino.`)
+      await refreshSafetyData()
+    } catch (error: any) {
+      setMessage(error?.message || 'Eliminazione definitiva non riuscita.')
+    } finally {
+      setSafetyBusy(null)
+    }
+  }
+
+  async function recoverConflict(item: ConflictDraftItem) {
+    if (!confirm(`Recuperare la bozza del ${formatDateTime(item.created_at)}? Prima verrà creato automaticamente un backup completo della situazione attuale. La bozza sostituirà i dati correnti con quelli che questo dispositivo stava tentando di salvare.`)) return
+    setSafetyBusy(item.id)
+    try {
+      const ok = await recoverConflictDraft(item.id, item.data)
+      setMessage(ok ? 'Bozza di conflitto recuperata. È stato creato anche un backup della situazione precedente.' : 'Recupero della bozza non completato.')
+      await Promise.all([refreshSafetyData(), refreshBackupStatus()])
+    } finally {
+      setSafetyBusy(null)
+    }
+  }
+
   async function copyBackup() {
     const text = exportData()
     try {
@@ -704,6 +819,47 @@ export default function SettingsPage() {
             <div className="sortable-list">{backupHistory.map(item => <div key={item.id}><span><strong>Rev. {item.revision}</strong> · {backupReason(item.reason)} · {formatDateTime(item.created_at)}</span><div><button disabled={backupBusy} onClick={() => restoreBackup(item)}>Ripristina</button></div></div>)}</div>
           </> : null}
         </> : <div className="callout">Accedi con il tuo account cloud per attivare backup automatici e cronologia ripristinabile.</div>}
+
+        {cloudAuthenticated && familyId && authUser.role !== 'bimbo' ? <>
+          <CardHeader title="Protezione multi-device" subtitle="Conflitti, Cestino e cronologia delle modifiche" />
+          <div className="callout callout--success">
+            <strong>Protezione dati attiva.</strong><br />
+            Ogni scrittura usa una revisione globale; Paghette, Scuola e Salute accettano modifiche solo dalla revisione corrente. In caso di conflitto, la copia locale viene salvata come bozza prima di ricaricare i dati più recenti.
+          </div>
+
+          {conflictDrafts.length ? <>
+            <div className="callout">
+              <strong>⚠️ {conflictDrafts.length} {conflictDrafts.length === 1 ? 'bozza di conflitto da verificare' : 'bozze di conflitto da verificare'}.</strong><br />
+              Sono copie locali salvate automaticamente quando due dispositivi hanno modificato dati quasi nello stesso momento.
+            </div>
+            <div className="sortable-list">
+              {conflictDrafts.map(item => <div key={item.id}>
+                <span><strong>Bozza protetta</strong> · {formatDateTime(item.created_at)} · rev. {item.base_revision} → {item.remote_revision}</span>
+                <div><button disabled={safetyBusy === item.id} onClick={() => recoverConflict(item)}>{safetyBusy === item.id ? 'Attendi…' : 'Recupera'}</button></div>
+              </div>)}
+            </div>
+          </> : null}
+
+          <CardHeader title="Cestino recuperabile" subtitle="Le eliminazioni vengono archiviate qui prima di essere applicate." />
+          {recycleItems.length ? <div className="sortable-list">
+            {recycleItems.map(item => <div key={item.id}>
+              <span><strong>{item.label}</strong> · {item.module} · {formatDateTime(item.deleted_at)}</span>
+              <div>
+                <button disabled={safetyBusy === item.id} onClick={() => restoreRecycle(item)}>Ripristina</button>
+                <button disabled={safetyBusy === item.id} onClick={() => purgeRecycle(item)}>Elimina definitivamente</button>
+              </div>
+            </div>)}
+          </div> : <div className="callout">Cestino vuoto. Le prossime eliminazioni protette compariranno qui.</div>}
+
+          <CardHeader title="Cronologia sicurezza" subtitle="Ultime operazioni rilevanti, senza contenuto privato dei dati." />
+          {changeHistory.length ? <div className="sortable-list">
+            {changeHistory.slice(0, 20).map(item => <div key={item.id}>
+              <span><strong>{historyLabel(item.event_type)}</strong> · {formatDateTime(item.created_at)}{Array.isArray(item.metadata?.modules) && item.metadata.modules.length ? ` · ${item.metadata.modules.join(', ')}` : ''}</span>
+              <div><span className="badge">{item.success ? 'OK' : 'Verifica'}</span></div>
+            </div>)}
+          </div> : <div className="callout">La cronologia inizierà a popolarsi con i prossimi salvataggi e operazioni di recupero.</div>}
+          <div className="backup-actions"><Button variant="ghost" icon={<RefreshCw size={17} />} onClick={refreshSafetyData}>Aggiorna sicurezza</Button></div>
+        </> : null}
 
         <CardHeader title="Copia manuale" subtitle="Una copia JSON resta utile anche fuori dal cloud." />
         <div className="backup-actions"><Button variant="soft" icon={<ClipboardCopy size={17} />} onClick={copyBackup}>Copia backup</Button><Button variant="soft" icon={<Download size={17} />} onClick={downloadBackup}>Scarica JSON</Button></div>
