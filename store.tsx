@@ -92,6 +92,10 @@ function schoolHash(value: FamilyData) {
   })
 }
 
+function healthHash(value: FamilyData) {
+  return JSON.stringify(value.deadlines.filter(item => isHealthDeadline(item)))
+}
+
 type PushCategory = keyof PushTopics
 
 const PAGE_KEYS: PageKey[] = ['home', 'calendar', 'shopping', 'meals', 'chores', 'school', 'board', 'health', 'deadlines', 'todos', 'users', 'settings']
@@ -279,7 +283,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   })
 
   const revisionRef = useRef(0)
+  const dataRef = useRef<FamilyData>(data)
   const familyIdRef = useRef<string | null>(null)
+  const syncInFlightRef = useRef(false)
+  const writeInFlightRef = useRef(false)
+  const pendingSyncSnapshotRef = useRef<FamilyData | null>(null)
+  const deferredRemoteRefreshRef = useRef(false)
   const suppressNextPushRef = useRef(false)
   const saveTimerRef = useRef<number | null>(null)
   const realtimeChannelRef = useRef<any>(null)
@@ -293,6 +302,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const pushCategoryHashesRef = useRef<Record<PushCategory, string> | null>(null)
 
   familyIdRef.current = familyId
+  dataRef.current = data
 
   useEffect(() => {
     if (isSupabaseConfigured) {
@@ -392,6 +402,30 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return result
   }
 
+  function hasUnsyncedChanges(snapshot: FamilyData) {
+    return JSON.stringify(cloudSafeData(snapshot)) !== familySyncHashRef.current
+      || financeHash(snapshot) !== financeSyncHashRef.current
+      || schoolHash(snapshot) !== schoolSyncHashRef.current
+      || healthHash(snapshot) !== healthSyncHashRef.current
+  }
+
+  async function saveConflictDraft(snapshot: FamilyData, baseRevision: number, remoteRevision: number) {
+    if (!supabase || !familyIdRef.current) return false
+    try {
+      const { error } = await supabase.rpc('save_family_conflict_draft', {
+        p_family_id: familyIdRef.current,
+        p_base_revision: baseRevision,
+        p_remote_revision: remoteRevision,
+        p_data: snapshot
+      })
+      if (error) throw error
+      return true
+    } catch (error) {
+      console.error('save conflict draft', error)
+      return false
+    }
+  }
+
   async function readFamilyDocument(targetFamilyId: string, profile: any, role: string) {
     if (!supabase) return
     const [result, healthResult, financeResult, schoolResult] = await Promise.all([
@@ -487,8 +521,17 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       .channel(`family-document-${targetFamilyId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'family_documents', filter: `family_id=eq.${targetFamilyId}` }, async (payload: any) => {
         const row = payload?.new
-        if (!row || Number(row.revision || 0) <= revisionRef.current) return
-        revisionRef.current = Number(row.revision || 0)
+        const remoteRevision = Number(row?.revision || 0)
+        if (!row || remoteRevision <= revisionRef.current) return
+        if (syncInFlightRef.current || writeInFlightRef.current) {
+          deferredRemoteRefreshRef.current = true
+          return
+        }
+        const localSnapshot = dataRef.current
+        if (hasUnsyncedChanges(localSnapshot)) {
+          await saveConflictDraft(localSnapshot, revisionRef.current, remoteRevision)
+        }
+        revisionRef.current = remoteRevision
         const user = currentCloudUserRef.current
         const profile = user ? await fetchProfile(user.id) : null
         const { data: membership } = user ? await supabase.from('family_members').select('role').eq('family_id', targetFamilyId).eq('user_id', user.id).maybeSingle() : { data: null }
@@ -591,92 +634,53 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  async function pushDocument(snapshot: FamilyData) {
-    if (!supabase || !familyIdRef.current || !cloudUserId) return
+  async function performPushDocument(snapshot: FamilyData): Promise<boolean> {
+    if (!supabase || !familyIdRef.current || !cloudUserId) return false
+
     const nextPushHashes = pushCategoryHashes(snapshot)
-    const previousPushHashes = pushCategoryHashesRef.current
-    const changedPushCategories = previousPushHashes
-      ? (Object.keys(nextPushHashes) as PushCategory[]).filter(key => previousPushHashes[key] !== nextPushHashes[key])
-      : []
-    const publishPushUpdates = () => {
-      pushCategoryHashesRef.current = nextPushHashes
-    }
-    setCloudStatus('saving')
+    const publishPushUpdates = () => { pushCategoryHashesRef.current = nextPushHashes }
     const expected = revisionRef.current
+
+    const familyPayload = cloudSafeData(snapshot)
+    const nextFamilyHash = JSON.stringify(familyPayload)
+    const nextFinanceHash = financeHash(snapshot)
+    const nextSchoolHash = schoolHash(snapshot)
+    const nextHealthHash = healthHash(snapshot)
+
+    const familyChanged = nextFamilyHash !== familySyncHashRef.current
+    const financeChanged = nextFinanceHash !== financeSyncHashRef.current
+    const schoolChanged = nextSchoolHash !== schoolSyncHashRef.current
+    const healthChanged = authUser?.role !== 'bimbo' && nextHealthHash !== healthSyncHashRef.current
+
+    if (!familyChanged && !financeChanged && !schoolChanged && !healthChanged) {
+      setCloudStatus('synced')
+      publishPushUpdates()
+      return true
+    }
+
+    setCloudStatus('saving')
     let financeResult: any = null
     let schoolResult: any = null
+    let writeRevision = expected
+
     try {
-      const nextFinanceHash = financeHash(snapshot)
-      if (nextFinanceHash !== financeSyncHashRef.current) {
-        financeResult = await callFinanceGateway('sync', familyIdRef.current, { data: snapshot })
-        const normalizedFinance = mergeFinanceData(snapshot, financeResult)
-        financeSyncHashRef.current = financeHash(normalizedFinance)
-      }
-
-      const nextSchoolHash = schoolHash(snapshot)
-      if (nextSchoolHash !== schoolSyncHashRef.current) {
-        schoolResult = await callSchoolGateway('sync', familyIdRef.current, { data: snapshot })
-        const normalizedSchool = mergeSchoolData(snapshot, schoolResult)
-        schoolSyncHashRef.current = schoolHash(normalizedSchool)
-      }
-
-      if (authUser?.role !== 'bimbo') {
-        const healthItems = snapshot.deadlines.filter(item => isHealthDeadline(item))
-        const healthHash = JSON.stringify(healthItems)
-        if (healthHash !== healthSyncHashRef.current) {
-          const healthResult = await callHealthGateway('sync', familyIdRef.current, { data: snapshot })
-          healthSyncHashRef.current = JSON.stringify(healthResult?.items || healthItems)
-        }
-      }
-
-      const familyPayload = cloudSafeData(snapshot)
-      const nextFamilyHash = JSON.stringify(familyPayload)
-      if (nextFamilyHash === familySyncHashRef.current) {
-        setCloudStatus('synced')
-        publishPushUpdates()
-        return
-      }
-
+      // Global optimistic lock FIRST. This also triggers the automatic
+      // full snapshot backup before any normalized module is changed.
+      writeInFlightRef.current = true
       const result = await callFamilyGateway('save', familyIdRef.current, {
         data: familyPayload,
         expectedRevision: expected
       })
 
-      if (result?.ok) {
-        familySyncHashRef.current = nextFamilyHash
-        revisionRef.current = Number(result.revision || expected + 1)
-        if (result.normalized && result.data) {
-          suppressNextPushRef.current = true
-          let familyOnly = migrateData(result.data, deepClone(initialData))
-          familyOnly = mergeHealthDeadlines(familyOnly, snapshot.deadlines.filter(item => isHealthDeadline(item)))
-          familyOnly = mergeFinanceData(familyOnly, financeResult || {
-            wallets: snapshot.users.map(user => ({ userId: user.id, balance: user.balance })),
-            chores: snapshot.chores,
-            recurringChores: snapshot.recurringChores,
-            transactions: snapshot.transactions
-          })
-          familyOnly = mergeSchoolData(familyOnly, schoolResult || {
-            schoolSubjects: snapshot.schoolSubjects,
-            schoolTimetable: snapshot.schoolTimetable,
-            schoolItems: snapshot.schoolItems
-          })
-          setData(familyOnly)
-        }
-        setCloudStatus('synced')
-        const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
-        if (calendarHash !== calendarSyncHashRef.current) {
-          calendarSyncHashRef.current = calendarHash
-          void supabase.functions.invoke('google-calendar-sync', { body: { action: 'sync-all', familyId: familyIdRef.current } }).then(({ error }) => {
-            if (error) console.warn('Google Calendar sync deferred:', error.message)
-          })
-        }
-        publishPushUpdates()
-        return
-      }
-
       if (result?.error === 'revision_conflict') {
+        const remoteRevision = Number(result.revision || expected)
+        const conflictSnapshot = pendingSyncSnapshotRef.current || snapshot
+        pendingSyncSnapshotRef.current = null
+        await saveConflictDraft(conflictSnapshot, expected, remoteRevision)
+        revisionRef.current = remoteRevision
+        writeInFlightRef.current = false
         setCloudStatus('conflict')
-        revisionRef.current = Number(result.revision || expected)
+
         if (result.data) {
           suppressNextPushRef.current = true
           let remote = migrateData(result.data, deepClone(initialData))
@@ -685,25 +689,125 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
             callFinanceGateway('read', familyIdRef.current).catch(() => null),
             callSchoolGateway('read', familyIdRef.current).catch(() => null)
           ])
-          if (healthResult?.items) {
-            remote = mergeHealthDeadlines(remote, healthResult.items)
-            healthSyncHashRef.current = JSON.stringify(healthResult.items)
-          }
+          if (healthResult?.items) remote = mergeHealthDeadlines(remote, healthResult.items)
           if (financeRemote) remote = mergeFinanceData(remote, financeRemote)
           if (schoolRemote) remote = mergeSchoolData(remote, schoolRemote)
+          healthSyncHashRef.current = healthHash(remote)
           financeSyncHashRef.current = financeHash(remote)
           schoolSyncHashRef.current = schoolHash(remote)
           familySyncHashRef.current = JSON.stringify(cloudSafeData(remote))
           pushCategoryHashesRef.current = pushCategoryHashes(remote)
           setData(remote)
         }
+        return false
+      }
+
+      if (!result?.ok) throw new Error(result?.error || 'Salvataggio non autorizzato.')
+
+      writeRevision = Number(result.revision || expected + 1)
+      revisionRef.current = writeRevision
+      familySyncHashRef.current = nextFamilyHash
+      writeInFlightRef.current = false
+
+      // Normalized modules use the new revision as a fencing token.
+      // A newer device save invalidates this token and blocks stale writes.
+      if (financeChanged) {
+        financeResult = await callFinanceGateway('sync', familyIdRef.current, {
+          data: snapshot,
+          expectedRevision: writeRevision
+        })
+        const normalizedFinance = mergeFinanceData(snapshot, financeResult)
+        financeSyncHashRef.current = financeHash(normalizedFinance)
+      }
+
+      if (schoolChanged) {
+        schoolResult = await callSchoolGateway('sync', familyIdRef.current, {
+          data: snapshot,
+          expectedRevision: writeRevision
+        })
+        const normalizedSchool = mergeSchoolData(snapshot, schoolResult)
+        schoolSyncHashRef.current = schoolHash(normalizedSchool)
+      }
+
+      if (healthChanged) {
+        const healthResult = await callHealthGateway('sync', familyIdRef.current, {
+          data: snapshot,
+          expectedRevision: writeRevision
+        })
+        healthSyncHashRef.current = JSON.stringify(healthResult?.items || snapshot.deadlines.filter(item => isHealthDeadline(item)))
+      }
+
+      if (result.normalized && result.data) {
+        suppressNextPushRef.current = true
+        let familyOnly = migrateData(result.data, deepClone(initialData))
+        familyOnly = mergeHealthDeadlines(familyOnly, snapshot.deadlines.filter(item => isHealthDeadline(item)))
+        familyOnly = mergeFinanceData(familyOnly, financeResult || {
+          wallets: snapshot.users.map(user => ({ userId: user.id, balance: user.balance })),
+          chores: snapshot.chores,
+          recurringChores: snapshot.recurringChores,
+          transactions: snapshot.transactions
+        })
+        familyOnly = mergeSchoolData(familyOnly, schoolResult || {
+          schoolSubjects: snapshot.schoolSubjects,
+          schoolTimetable: snapshot.schoolTimetable,
+          schoolItems: snapshot.schoolItems
+        })
+        setData(familyOnly)
+      }
+
+      setCloudStatus('synced')
+      const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
+      if (calendarHash !== calendarSyncHashRef.current) {
+        calendarSyncHashRef.current = calendarHash
+        void supabase.functions.invoke('google-calendar-sync', {
+          body: { action: 'sync-all', familyId: familyIdRef.current }
+        }).then(({ error }) => {
+          if (error) console.warn('Google Calendar sync deferred:', error.message)
+        })
+      }
+      publishPushUpdates()
+      return true
+    } catch (error: any) {
+      writeInFlightRef.current = false
+      const message = String(error?.message || '')
+      if (message.includes('expected_revision_conflict')) {
+        await saveConflictDraft(pendingSyncSnapshotRef.current || snapshot, expected, revisionRef.current)
+        pendingSyncSnapshotRef.current = null
+        setCloudStatus('conflict')
+      } else {
+        console.error('family-document-gateway save', error)
+        setCloudStatus('error')
+      }
+      return false
+    }
+  }
+
+  async function pushDocument(snapshot: FamilyData): Promise<boolean> {
+    if (!supabase || !familyIdRef.current || !cloudUserId) return false
+    if (syncInFlightRef.current) {
+      pendingSyncSnapshotRef.current = deepClone(snapshot)
+      return false
+    }
+
+    syncInFlightRef.current = true
+    let ok = false
+    try {
+      ok = await performPushDocument(snapshot)
+      return ok
+    } finally {
+      syncInFlightRef.current = false
+      const pending = pendingSyncSnapshotRef.current
+      pendingSyncSnapshotRef.current = null
+
+      if (deferredRemoteRefreshRef.current) {
+        deferredRemoteRefreshRef.current = false
+        void refreshChildSnapshot(familyIdRef.current)
         return
       }
 
-      throw new Error(result?.error || 'Salvataggio non autorizzato.')
-    } catch (error) {
-      console.error('family-document-gateway save', error)
-      setCloudStatus('error')
+      if (pending && ok) {
+        void pushDocument(pending)
+      }
     }
   }
 
