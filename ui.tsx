@@ -59,11 +59,28 @@ export function EmptyState({ icon, title, text, action }: any) {
   )
 }
 
-export function Modal({ open, title, subtitle, children, onClose, footer, size = 'md' }: any) {
+export function Modal({ open, title, subtitle, children, onClose, footer, size = 'md', className = '' }: any) {
+  React.useEffect(() => {
+    if (!open || typeof document === 'undefined') return
+    const root = document.documentElement
+    const current = Number(root.dataset.modalOpenCount || 0)
+    root.dataset.modalOpenCount = String(current + 1)
+    root.classList.add('has-modal-open')
+    return () => {
+      const next = Math.max(0, Number(root.dataset.modalOpenCount || 1) - 1)
+      if (next === 0) {
+        delete root.dataset.modalOpenCount
+        root.classList.remove('has-modal-open')
+      } else {
+        root.dataset.modalOpenCount = String(next)
+      }
+    }
+  }, [open])
+
   if (!open) return null
   return (
     <div className="modal-layer" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) onClose?.() }}>
-      <div className={`modal modal--${size}`} role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`modal modal--${size} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal__header">
           <div>
             <h2>{title}</h2>

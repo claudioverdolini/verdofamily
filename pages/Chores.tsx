@@ -356,6 +356,7 @@ export default function ChoresPage() {
       onClose={() => setRecurringEditing(null)}
       title={recurringEditing?.id ? 'Modifica compito ricorrente' : 'Nuovo compito ricorrente'}
       subtitle="L’importo viene accreditato solo dopo la conferma di un adulto."
+      className="modal--recurring-chore"
       footer={<div className="modal-actions"><span /><div className="modal-actions__right">
         <Button variant="ghost" onClick={() => setRecurringEditing(null)}>Annulla</Button>
         <Button onClick={saveRecurring} disabled={!recurringEditing?.weekdays?.length}>Salva</Button>
