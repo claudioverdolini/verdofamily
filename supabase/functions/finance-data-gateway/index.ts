@@ -134,6 +134,7 @@ function financePushDetails(previous: any, next: any) {
       id: n(item?.id),
       title: s(item?.title) || "Compito ricorrente",
       userId: n(item?.userId),
+      userIds: Array.from(new Set(arr(item?.userIds).map(n).filter((id: number) => id > 0))),
       status: recurringChange.before ? "updated" : "new",
       amount: Number(item?.amount || 0)
     }];
@@ -161,10 +162,11 @@ function cleanWeekdays(value: any) {
 }
 
 async function readFinance(client: any, familyId: string) {
-  const [peopleR, walletsR, recurringR, transactionsR, choresR] = await Promise.all([
+  const [peopleR, walletsR, recurringR, recurringAssigneesR, transactionsR, choresR] = await Promise.all([
     client.from("family_people").select("id,legacy_user_id").eq("family_id", familyId),
     client.from("finance_wallets").select("*").eq("family_id", familyId),
     client.from("finance_recurring_chores").select("*").eq("family_id", familyId),
+    client.from("finance_recurring_chore_assignees").select("recurring_chore_id,person_id").eq("family_id", familyId),
     client.from("finance_transactions").select("*").eq("family_id", familyId),
     client.from("finance_chores").select("*").eq("family_id", familyId)
   ]);
@@ -173,6 +175,7 @@ async function readFinance(client: any, familyId: string) {
     ["people", peopleR],
     ["wallets", walletsR],
     ["recurring chores", recurringR],
+    ["recurring chore assignees", recurringAssigneesR],
     ["transactions", transactionsR],
     ["chores", choresR]
   ] as const) dbError(result.error, label);
@@ -181,6 +184,15 @@ async function readFinance(client: any, familyId: string) {
   const personLegacy = new Map(people.map((row: any) => [String(row.id), Number(row.legacy_user_id)]));
   const txLegacy = new Map((transactionsR.data || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
   const recurringLegacy = new Map((recurringR.data || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
+  const recurringAssignees = new Map<string, number[]>();
+  for (const row of recurringAssigneesR.data || []) {
+    const recurringId = String(row.recurring_chore_id || "");
+    const legacyUserId = personLegacy.get(String(row.person_id)) || 0;
+    if (!recurringId || legacyUserId <= 0) continue;
+    const current = recurringAssignees.get(recurringId) || [];
+    if (!current.includes(legacyUserId)) current.push(legacyUserId);
+    recurringAssignees.set(recurringId, current);
+  }
 
   const wallets = (walletsR.data || []).map((row: any) => ({
     userId: personLegacy.get(String(row.person_id)) || 0,
@@ -188,16 +200,24 @@ async function readFinance(client: any, familyId: string) {
     currency: row.currency || "EUR"
   })).filter((row: any) => row.userId > 0);
 
-  const recurringChores = (recurringR.data || []).map((row: any) => ({
-    id: Number(row.legacy_id),
-    title: String(row.title || "Compito ricorrente"),
-    userId: personLegacy.get(String(row.person_id)) || 0,
-    amount: Number(row.amount || 0),
-    weekdays: arr(row.weekdays).map(Number),
-    active: row.active !== false,
-    startDate: row.start_date,
-    endDate: row.end_date || undefined
-  })).filter((row: any) => row.userId > 0);
+  const recurringChores = (recurringR.data || []).map((row: any) => {
+    const primaryUserId = personLegacy.get(String(row.person_id)) || 0;
+    const userIds = Array.from(new Set([
+      ...(recurringAssignees.get(String(row.id)) || []),
+      ...(primaryUserId > 0 ? [primaryUserId] : [])
+    ])).filter(id => id > 0);
+    return {
+      id: Number(row.legacy_id),
+      title: String(row.title || "Compito ricorrente"),
+      userId: userIds[0] || primaryUserId,
+      userIds,
+      amount: Number(row.amount || 0),
+      weekdays: arr(row.weekdays).map(Number),
+      active: row.active !== false,
+      startDate: row.start_date,
+      endDate: row.end_date || undefined
+    };
+  }).filter((row: any) => row.userId > 0 && row.userIds.length);
 
   const transactions = (transactionsR.data || []).map((row: any) => ({
     id: Number(row.legacy_id),
@@ -280,18 +300,30 @@ async function syncAdultFinance(admin: any, familyId: string, snapshot: any) {
     dbError(error, "sync wallets");
   }
 
-  const recurringRows = recurring.map((item: any) => ({
-    family_id: familyId,
-    legacy_id: n(item.id),
-    person_id: personByLegacy.get(n(item.userId)),
-    title: s(item.title) || "Compito ricorrente",
-    amount: Math.max(0, n(item.amount)),
-    weekdays: cleanWeekdays(item.weekdays),
-    active: item.active !== false,
-    start_date: s(item.startDate) || new Date().toISOString().slice(0,10),
-    end_date: s(item.endDate) || null,
-    updated_at: now
-  })).filter((row: any) => row.legacy_id > 0 && row.person_id && row.weekdays.length);
+  const recurringAssignments = new Map<number, string[]>();
+  const recurringRows = recurring.map((item: any) => {
+    const legacyId = n(item.id);
+    const requestedUserIds = Array.from(new Set([
+      ...arr(item.userIds).map(n),
+      ...(n(item.userId) > 0 ? [n(item.userId)] : [])
+    ])).filter((id: number) => id > 0);
+    const personIds = requestedUserIds
+      .map((legacyUserId: number) => personByLegacy.get(legacyUserId))
+      .filter((value: any): value is string => Boolean(value));
+    if (legacyId > 0 && personIds.length) recurringAssignments.set(legacyId, Array.from(new Set(personIds)));
+    return {
+      family_id: familyId,
+      legacy_id: legacyId,
+      person_id: personIds[0],
+      title: s(item.title) || "Compito ricorrente",
+      amount: Math.max(0, n(item.amount)),
+      weekdays: cleanWeekdays(item.weekdays),
+      active: item.active !== false,
+      start_date: s(item.startDate) || new Date().toISOString().slice(0,10),
+      end_date: s(item.endDate) || null,
+      updated_at: now
+    };
+  }).filter((row: any) => row.legacy_id > 0 && row.person_id && row.weekdays.length);
 
   if (recurringRows.length) {
     const { error } = await admin.from("finance_recurring_chores").upsert(recurringRows, { onConflict: "family_id,legacy_id" });
@@ -323,6 +355,44 @@ async function syncAdultFinance(admin: any, familyId: string, snapshot: any) {
   dbError(txError, "read transactions");
   const recurringByLegacy = new Map((recurringDb || []).map((row: any) => [Number(row.legacy_id), String(row.id)]));
   const txByLegacy = new Map((txDb || []).map((row: any) => [Number(row.legacy_id), String(row.id)]));
+
+  const assigneeRows: any[] = [];
+  for (const [legacyId, personIds] of recurringAssignments.entries()) {
+    const recurringId = recurringByLegacy.get(legacyId);
+    if (!recurringId) continue;
+    for (const personId of personIds) {
+      assigneeRows.push({
+        family_id: familyId,
+        recurring_chore_id: recurringId,
+        person_id: personId
+      });
+    }
+  }
+
+  if (assigneeRows.length) {
+    const { error } = await admin
+      .from("finance_recurring_chore_assignees")
+      .upsert(assigneeRows, { onConflict: "recurring_chore_id,person_id" });
+    dbError(error, "sync recurring chore assignees");
+  }
+
+  const { data: currentAssignees, error: currentAssigneesError } = await admin
+    .from("finance_recurring_chore_assignees")
+    .select("recurring_chore_id,person_id")
+    .eq("family_id", familyId);
+  dbError(currentAssigneesError, "read recurring chore assignees");
+  const keepAssignees = new Set(assigneeRows.map((row: any) => `${row.recurring_chore_id}:${row.person_id}`));
+  for (const row of currentAssignees || []) {
+    const key = `${row.recurring_chore_id}:${row.person_id}`;
+    if (!keepAssignees.has(key)) {
+      const { error } = await admin
+        .from("finance_recurring_chore_assignees")
+        .delete()
+        .eq("recurring_chore_id", row.recurring_chore_id)
+        .eq("person_id", row.person_id);
+      dbError(error, "delete recurring chore assignee");
+    }
+  }
 
   const choreRows = chores.map((item: any) => ({
     family_id: familyId,
