@@ -771,8 +771,15 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       writeInFlightRef.current = false
       const message = String(error?.message || '')
       if (message.includes('expected_revision_conflict')) {
-        await saveConflictDraft(pendingSyncSnapshotRef.current || snapshot, expected, revisionRef.current)
+        let remoteRevision = revisionRef.current
+        try {
+          const latest = await callFamilyGateway('read', familyIdRef.current)
+          remoteRevision = Number(latest?.revision || remoteRevision)
+        } catch {}
+        await saveConflictDraft(pendingSyncSnapshotRef.current || snapshot, expected, remoteRevision)
         pendingSyncSnapshotRef.current = null
+        revisionRef.current = remoteRevision
+        deferredRemoteRefreshRef.current = true
         setCloudStatus('conflict')
       } else {
         console.error('family-document-gateway save', error)
@@ -802,10 +809,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       if (deferredRemoteRefreshRef.current) {
         deferredRemoteRefreshRef.current = false
         void refreshChildSnapshot(familyIdRef.current)
-        return
-      }
-
-      if (pending && ok) {
+      } else if (pending && ok) {
         void pushDocument(pending)
       }
     }
