@@ -2231,3 +2231,149 @@ html.has-modal-open .content{
     grid-template-columns:minmax(0,1fr);
   }
 }
+
+
+/* Pantry product technical sheets */
+.product-enrichment-message{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  margin-top:9px;
+  padding:9px 11px;
+  border-radius:12px;
+  background:color-mix(in srgb,#0EA5E9 7%,var(--surface2));
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.35;
+}
+.product-enrichment-message svg{flex:0 0 auto;color:#0EA5E9;margin-top:1px}
+
+.product-tech-card{
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:12px;
+  background:color-mix(in srgb,#0EA5E9 3%,var(--surface));
+  display:grid;
+  gap:11px;
+}
+.product-tech-card__head{
+  display:grid;
+  grid-template-columns:64px minmax(0,1fr) auto;
+  gap:11px;
+  align-items:center;
+}
+.product-tech-card__head img,
+.product-tech-card__placeholder{
+  width:64px;
+  height:64px;
+  border-radius:13px;
+  object-fit:contain;
+  background:var(--surface2);
+}
+.product-tech-card__placeholder{
+  display:grid;
+  place-items:center;
+  color:#0EA5E9;
+}
+.product-tech-card__head>div:nth-child(2){
+  min-width:0;
+  display:grid;
+  gap:2px;
+}
+.product-tech-card__head>div:nth-child(2)>span{
+  color:#0EA5E9;
+  font-size:10.5px;
+  font-weight:900;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+.product-tech-card__head strong{
+  min-width:0;
+  font-size:14.5px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.product-tech-card__head small{
+  color:var(--muted);
+  font-size:11.5px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.product-tech-badges{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+.product-tech-section{
+  display:grid;
+  gap:4px;
+  padding-top:9px;
+  border-top:1px solid var(--border);
+}
+.product-tech-section>strong{
+  font-size:12px;
+}
+.product-tech-section>span,
+.product-tech-section>p{
+  margin:0;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.45;
+}
+.product-tech-nutrition{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:6px;
+}
+.product-tech-nutrition>span{
+  min-width:0;
+  padding:8px;
+  border-radius:10px;
+  background:var(--surface2);
+  display:grid;
+  gap:2px;
+}
+.product-tech-nutrition small{font-size:9.5px;color:var(--muted)}
+.product-tech-nutrition b{font-size:11.5px;white-space:nowrap}
+.product-tech-source{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  color:var(--muted);
+  font-size:10.5px;
+}
+.product-tech-source a{color:#0EA5E9;font-weight:800}
+.product-tech-empty{
+  padding:10px;
+  border-radius:11px;
+  background:var(--surface2);
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.4;
+}
+
+@media(max-width:520px){
+  .product-tech-card__head{
+    grid-template-columns:52px minmax(0,1fr);
+  }
+  .product-tech-card__head img,
+  .product-tech-card__placeholder{
+    width:52px;
+    height:52px;
+  }
+  .product-tech-card__head>.btn{
+    grid-column:1/-1;
+    width:100%;
+  }
+  .product-tech-nutrition{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .product-tech-source{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:4px;
+  }
+}

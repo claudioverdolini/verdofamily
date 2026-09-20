@@ -145,6 +145,35 @@ export type Deadline = {
 
 export type PantryLocation = 'pantry' | 'fridge' | 'freezer'
 
+export type PantryProductTechnicalInfo = {
+  source: 'openfoodfacts'
+  sourceUrl?: string
+  retrievedAt: string
+  confidence: number
+  barcode?: string
+  displayName?: string
+  brand?: string
+  imageUrl?: string
+  packageQuantity?: string
+  ingredients?: string
+  allergens?: string[]
+  categories?: string[]
+  labels?: string[]
+  nutriScore?: string
+  novaGroup?: number
+  ecoScore?: string
+  nutriments?: {
+    energyKcal100g?: number
+    fat100g?: number
+    saturatedFat100g?: number
+    carbohydrates100g?: number
+    sugars100g?: number
+    fiber100g?: number
+    proteins100g?: number
+    salt100g?: number
+  }
+}
+
 export type PantryItem = {
   id: number
   name: string
@@ -155,6 +184,7 @@ export type PantryItem = {
   location?: PantryLocation
   expiryDate?: string
   autoRestock?: boolean
+  productInfo?: PantryProductTechnicalInfo
 }
 
 export type PantryMovement = {

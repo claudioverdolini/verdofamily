@@ -651,7 +651,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 14,
+    version: 15,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -688,7 +688,35 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       minQty: item.minQty === undefined || item.minQty === null ? 0 : Math.max(0, Number(item.minQty) || 0),
       location: ['pantry','fridge','freezer'].includes(String(item.location)) ? item.location : 'pantry',
       expiryDate: item.expiryDate || undefined,
-      autoRestock: item.autoRestock !== false
+      autoRestock: item.autoRestock !== false,
+      productInfo: item.productInfo && typeof item.productInfo === 'object' ? {
+        source: 'openfoodfacts',
+        sourceUrl: /^https?:\/\//i.test(String(item.productInfo.sourceUrl || '')) ? String(item.productInfo.sourceUrl) : undefined,
+        retrievedAt: item.productInfo.retrievedAt || new Date().toISOString(),
+        confidence: Math.max(0, Math.min(1, Number(item.productInfo.confidence) || 0)),
+        barcode: /^\d{8,14}$/.test(String(item.productInfo.barcode || '')) ? String(item.productInfo.barcode) : undefined,
+        displayName: item.productInfo.displayName ? String(item.productInfo.displayName).slice(0, 200) : undefined,
+        brand: item.productInfo.brand ? String(item.productInfo.brand).slice(0, 160) : undefined,
+        imageUrl: /^https?:\/\//i.test(String(item.productInfo.imageUrl || '')) ? String(item.productInfo.imageUrl) : undefined,
+        packageQuantity: item.productInfo.packageQuantity ? String(item.productInfo.packageQuantity).slice(0, 100) : undefined,
+        ingredients: item.productInfo.ingredients ? String(item.productInfo.ingredients).slice(0, 4000) : undefined,
+        allergens: Array.isArray(item.productInfo.allergens) ? item.productInfo.allergens.map(String).slice(0, 20) : [],
+        categories: Array.isArray(item.productInfo.categories) ? item.productInfo.categories.map(String).slice(0, 20) : [],
+        labels: Array.isArray(item.productInfo.labels) ? item.productInfo.labels.map(String).slice(0, 20) : [],
+        nutriScore: item.productInfo.nutriScore ? String(item.productInfo.nutriScore).slice(0, 4) : undefined,
+        novaGroup: item.productInfo.novaGroup === undefined ? undefined : Number(item.productInfo.novaGroup),
+        ecoScore: item.productInfo.ecoScore ? String(item.productInfo.ecoScore).slice(0, 4) : undefined,
+        nutriments: item.productInfo.nutriments && typeof item.productInfo.nutriments === 'object' ? {
+          energyKcal100g: Number.isFinite(Number(item.productInfo.nutriments.energyKcal100g)) ? Number(item.productInfo.nutriments.energyKcal100g) : undefined,
+          fat100g: Number.isFinite(Number(item.productInfo.nutriments.fat100g)) ? Number(item.productInfo.nutriments.fat100g) : undefined,
+          saturatedFat100g: Number.isFinite(Number(item.productInfo.nutriments.saturatedFat100g)) ? Number(item.productInfo.nutriments.saturatedFat100g) : undefined,
+          carbohydrates100g: Number.isFinite(Number(item.productInfo.nutriments.carbohydrates100g)) ? Number(item.productInfo.nutriments.carbohydrates100g) : undefined,
+          sugars100g: Number.isFinite(Number(item.productInfo.nutriments.sugars100g)) ? Number(item.productInfo.nutriments.sugars100g) : undefined,
+          fiber100g: Number.isFinite(Number(item.productInfo.nutriments.fiber100g)) ? Number(item.productInfo.nutriments.fiber100g) : undefined,
+          proteins100g: Number.isFinite(Number(item.productInfo.nutriments.proteins100g)) ? Number(item.productInfo.nutriments.proteins100g) : undefined,
+          salt100g: Number.isFinite(Number(item.productInfo.nutriments.salt100g)) ? Number(item.productInfo.nutriments.salt100g) : undefined
+        } : undefined
+      } : undefined
     })) : [],
     pantryMovements: Array.isArray(source.pantryMovements) ? source.pantryMovements.map((movement: any): PantryMovement => ({
       id: Number(movement.id),

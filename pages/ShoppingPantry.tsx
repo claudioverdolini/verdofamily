@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Camera, Check, ChevronRight, PackageOpen, Plus, Refrigerator, ScanLine, Search, ShoppingBasket, Snowflake, Sparkles, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, Camera, Check, ChevronRight, Globe2, PackageOpen, Plus, Refrigerator, RefreshCw, ScanLine, Search, ShoppingBasket, Snowflake, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { localDateISO, normalize, pantryAverageDailyUse, pantryDaysRemaining, pantryExpiryDays, pantryNeedsRestock, parseReceiptLines, similarity } from '../utils'
@@ -51,6 +51,8 @@ export default function ShoppingPantryPage() {
   const [photoPreview, setPhotoPreview] = useState('')
   const [photoPayload, setPhotoPayload] = useState<{ imageData: string; mimeType: string } | null>(null)
   const [photoRows, setPhotoRows] = useState<any[]>([])
+  const [enrichmentBusy, setEnrichmentBusy] = useState(false)
+  const [enrichmentMessage, setEnrichmentMessage] = useState('')
 
   useEffect(() => {
     if (scanMode !== 'pantry-photo' || !cloudAuthenticated || !familyId || !supabase) return
@@ -70,6 +72,117 @@ export default function ShoppingPantryPage() {
     }
     if (result?.error) throw new Error(result.error)
     return result
+  }
+
+  async function callProductEnrichment(action: 'lookup' | 'batch', extra: Record<string, any> = {}) {
+    if (!supabase || !familyId || !cloudAuthenticated) throw new Error('Cloud non disponibile.')
+    const { data: result, error } = await supabase.functions.invoke('product-enrichment', {
+      body: { action, familyId, ...extra }
+    })
+    if (error) throw new Error(error.message || 'Ricerca informazioni prodotto non disponibile.')
+    if (result?.error) throw new Error(result.error)
+    return result
+  }
+
+  async function enrichImportedItems(items: any[]) {
+    if (!cloudAuthenticated || !familyId || !supabase || !items.length) return items
+
+    const withExisting = items.map(item => {
+      const existing = data.pantry.find(pantryItem =>
+        normalize(pantryItem.name) === normalize(item.name) && !!pantryItem.productInfo
+      )
+      return existing?.productInfo ? { ...item, productInfo: existing.productInfo } : item
+    })
+
+    const requests = withExisting
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => !item.productInfo && item.name)
+      .sort((a, b) => Number(!!b.item.barcode) - Number(!!a.item.barcode))
+      .slice(0, 6)
+      .map(({ item, index }) => ({
+        key: String(index),
+        name: item.name,
+        brand: item.brand || '',
+        barcode: item.barcode || '',
+        observedText: item.observedText || ''
+      }))
+
+    if (!requests.length) return withExisting
+
+    setEnrichmentBusy(true)
+    setEnrichmentMessage('Cerco automaticamente le schede tecniche disponibili…')
+    try {
+      const response = await callProductEnrichment('batch', { items: requests })
+      const byKey = new Map((response?.results || []).map((row: any) => [String(row.key), row]))
+      let enriched = 0
+      const next = withExisting.map((item, index) => {
+        const result: any = byKey.get(String(index))
+        if (!result?.autoApply || !result?.match) return item
+        enriched += 1
+        return { ...item, productInfo: result.match }
+      })
+      setEnrichmentMessage(enriched
+        ? `${enriched} ${enriched === 1 ? 'scheda tecnica trovata' : 'schede tecniche trovate'} e collegate automaticamente.`
+        : 'Nessuna corrispondenza online abbastanza sicura: i prodotti verranno comunque caricati normalmente.')
+      return next
+    } catch {
+      setEnrichmentMessage('I prodotti verranno caricati normalmente; il recupero delle schede online non è disponibile in questo momento.')
+      return withExisting
+    } finally {
+      setEnrichmentBusy(false)
+    }
+  }
+
+  async function refreshEditingProductInfo() {
+    if (!editingPantry?.name?.trim() || enrichmentBusy) return
+    setEnrichmentBusy(true)
+    setEnrichmentMessage('Cerco informazioni online…')
+    try {
+      const response = await callProductEnrichment('lookup', {
+        item: {
+          key: 'manual',
+          name: editingPantry.name.trim(),
+          barcode: editingPantry.productInfo?.barcode || '',
+          brand: editingPantry.productInfo?.brand || ''
+        }
+      })
+      const result = response?.result
+      const match = result?.match
+      if (!match) {
+        setEnrichmentMessage('Non ho trovato una scheda online sufficientemente pertinente.')
+        return
+      }
+
+      if (!result?.autoApply) {
+        const label = [match.brand, match.displayName].filter(Boolean).join(' · ') || 'prodotto trovato'
+        const confidence = Math.round(Number(result?.confidence || 0) * 100)
+        if (!window.confirm(`Ho trovato “${label}” con una corrispondenza del ${confidence}%. Vuoi collegare questa scheda?`)) {
+          setEnrichmentMessage('Scheda non collegata.')
+          return
+        }
+      }
+
+      setEditingPantry((current: any) => current ? { ...current, productInfo: match } : current)
+      setEnrichmentMessage('Scheda tecnica aggiornata.')
+    } catch {
+      setEnrichmentMessage('Ricerca online non disponibile in questo momento.')
+    } finally {
+      setEnrichmentBusy(false)
+    }
+  }
+
+  function nutrientRows(info: any) {
+    const n = info?.nutriments || {}
+    return [
+      ['Energia', n.energyKcal100g, 'kcal'],
+      ['Grassi', n.fat100g, 'g'],
+      ['Saturi', n.saturatedFat100g, 'g'],
+      ['Carboidrati', n.carbohydrates100g, 'g'],
+      ['Zuccheri', n.sugars100g, 'g'],
+      ['Fibre', n.fiber100g, 'g'],
+      ['Proteine', n.proteins100g, 'g'],
+      ['Sale', n.salt100g, 'g']
+    ].filter(([, value]) => value !== undefined && value !== null && Number.isFinite(Number(value)))
   }
 
   async function refreshVisionStatus() {
@@ -172,6 +285,8 @@ export default function ShoppingPantryPage() {
           id: `photo-${Date.now()}-${index}`,
           raw: String(item.detectedName || '').trim(),
           observedText: String(item.observedText || '').trim(),
+          brand: String(item.brand || '').trim(),
+          barcode: String(item.barcode || '').replace(/\D/g, ''),
           notes: String(item.notes || '').trim(),
           confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
           include: true,
@@ -194,17 +309,21 @@ export default function ShoppingPantryPage() {
     }
   }
 
-  function importPhotoRecognition() {
+  async function importPhotoRecognition() {
     const selected = photoRows.filter(x => x.include && x.name.trim()).map(x => ({
       name: x.name.trim(),
       qty: Math.max(1, Number(x.qty) || 1),
       unit: x.unit || 'pz',
       category: x.category || 'Generico',
       location: inventoryDestination,
-      expiryDate: x.expiryDate || undefined
+      expiryDate: x.expiryDate || undefined,
+      brand: x.brand || '',
+      barcode: x.barcode || '',
+      observedText: x.observedText || ''
     }))
     if (!selected.length) return
-    importReceiptItems(selected, removeFromShopping, inventoryDestination)
+    const enriched = await enrichImportedItems(selected)
+    importReceiptItems(enriched, removeFromShopping, inventoryDestination)
     setPhotoRows([])
     setPhotoPreview('')
     setPhotoPayload(null)
@@ -219,7 +338,15 @@ export default function ShoppingPantryPage() {
     return data.pantry.filter(item => {
       if (categoryFilter !== 'Tutte' && item.category !== categoryFilter) return false
       if (locationFilter !== 'all' && (item.location || 'pantry') !== locationFilter) return false
-      if (q && !normalize(item.name).includes(q)) return false
+      if (q) {
+        const searchable = normalize([
+          item.name,
+          item.productInfo?.brand,
+          item.productInfo?.displayName,
+          item.productInfo?.barcode
+        ].filter(Boolean).join(' '))
+        if (!searchable.includes(q)) return false
+      }
       return true
     }).sort((a, b) => `${a.location || 'pantry'}${a.category}${a.name}`.localeCompare(`${b.location || 'pantry'}${b.category}${b.name}`))
   }, [data.pantry, query, categoryFilter, locationFilter])
@@ -255,6 +382,7 @@ export default function ShoppingPantryPage() {
   }
 
   function openNewPantry() {
+    setEnrichmentMessage('')
     setEditingPantry({ id: undefined, name: '', qty: 1, unit: 'pz', category: data.categories[0] || 'Generico', minQty: 0, location: locationFilter === 'all' ? 'pantry' : locationFilter, expiryDate: '', autoRestock: true })
   }
 
@@ -366,16 +494,18 @@ export default function ShoppingPantryPage() {
     setReceiptRows(rows)
   }
 
-  function importReceipt() {
+  async function importReceipt() {
     const selected = receiptRows.filter(x => x.include && x.name.trim()).map(x => ({
       name: x.name.trim(),
       qty: Math.max(0, Number(x.qty) || 1),
       unit: x.unit || 'pz',
       category: x.category || 'Generico',
-      location: inventoryDestination
+      location: inventoryDestination,
+      observedText: x.raw || x.name
     }))
     if (!selected.length) return
-    importReceiptItems(selected, removeFromShopping, inventoryDestination)
+    const enriched = await enrichImportedItems(selected)
+    importReceiptItems(enriched, removeFromShopping, inventoryDestination)
     setReceiptRows([])
     setReceiptText('')
     setTab('pantry')
@@ -481,9 +611,9 @@ export default function ShoppingPantryPage() {
                 const expiryDays = status?.expiryDays
                 const expiring = expiryDays !== null && expiryDays !== undefined && expiryDays <= 7
                 return (
-                  <Card key={item.id} className="pantry-item-card" onClick={() => setEditingPantry({ ...item })}>
+                  <Card key={item.id} className="pantry-item-card" onClick={() => { setEnrichmentMessage(''); setEditingPantry({ ...item }) }}>
                     <div className="pantry-item-card__top">
-                      <div className="inventory-badges"><Badge>{locationLabel(item.location)}</Badge><Badge>{item.category}</Badge></div>
+                      <div className="inventory-badges"><Badge>{locationLabel(item.location)}</Badge><Badge>{item.category}</Badge>{item.productInfo ? <Badge tone="success">{item.productInfo.nutriScore ? `Nutri-Score ${item.productInfo.nutriScore}` : 'Scheda online'}</Badge> : null}</div>
                       <div className="inventory-badges">{expiring ? <Badge tone="warning">{expiryDays! < 0 ? 'Scaduto' : expiryDays === 0 ? 'Scade oggi' : `Scade tra ${expiryDays}g`}</Badge> : null}{low ? <Badge tone="danger">Da ricomprare</Badge> : null}</div>
                     </div>
                     <strong>{item.name}</strong>
@@ -544,7 +674,7 @@ export default function ShoppingPantryPage() {
                   <span>{locationLabel(item.location)} · {item.qty} {item.unit}</span>
                   <small>{expiryDays! < 0 ? `Scaduto da ${Math.abs(expiryDays!)} giorni` : expiryDays === 0 ? 'Scade oggi' : `Scade tra ${expiryDays} giorni`} · {item.expiryDate}</small>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => { setEditingPantry({ ...item }); setTab('pantry') }}>Apri</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setEnrichmentMessage(''); setEditingPantry({ ...item }); setTab('pantry') }}>Apri</Button>
               </div>)}
             </div> : <EmptyState icon={<Check size={28} />} title="Nessuna scadenza vicina" text="Non risultano prodotti in scadenza nei prossimi 7 giorni." />}
           </Card>
@@ -624,7 +754,8 @@ export default function ShoppingPantryPage() {
                   </div>
                 ))}
                 <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se il prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
-                <Button icon={<PackageOpen size={18} />} onClick={importReceipt}>Importa in dispensa</Button>
+                <Button icon={<PackageOpen size={18} />} disabled={enrichmentBusy} onClick={importReceipt}>{enrichmentBusy ? 'Cerco informazioni…' : 'Importa in dispensa'}</Button>
+                {enrichmentMessage ? <div className="product-enrichment-message"><Globe2 size={16} /><span>{enrichmentMessage}</span></div> : null}
               </div>
             ) : (
               <EmptyState icon={<ScanLine size={30} />} title="In attesa dello scontrino" text="Dopo l'analisi compariranno qui i prodotti da confermare." />
@@ -663,7 +794,7 @@ export default function ShoppingPantryPage() {
                 <div className="vision-summary"><strong>{photoRows.length} {photoRows.length === 1 ? 'prodotto riconosciuto' : 'prodotti riconosciuti'}</strong><span>Controlla soprattutto le righe con confidenza più bassa.</span></div>
                 {photoRows.map(row => <div key={row.id} className="receipt-match">
                   <div className="receipt-match__head">
-                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.observedText ? <small> · letto: {row.observedText}</small> : null}</span></label>
+                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.brand ? <small> · {row.brand}</small> : null}{row.barcode ? <small> · EAN {row.barcode}</small> : row.observedText ? <small> · letto: {row.observedText}</small> : null}</span></label>
                     <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge>
                   </div>
                   {row.include ? <div className="receipt-match__grid">
@@ -676,7 +807,8 @@ export default function ShoppingPantryPage() {
                   </div> : null}
                 </div>)}
                 <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se un prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
-                <Button icon={<PackageOpen size={18} />} onClick={importPhotoRecognition}>Conferma e carica in dispensa</Button>
+                <Button icon={<PackageOpen size={18} />} disabled={enrichmentBusy} onClick={importPhotoRecognition}>{enrichmentBusy ? 'Cerco informazioni…' : 'Conferma e carica in dispensa'}</Button>
+                {enrichmentMessage ? <div className="product-enrichment-message"><Globe2 size={16} /><span>{enrichmentMessage}</span></div> : null}
               </div> : <EmptyState icon={<Camera size={30} />} title="In attesa della foto" text="Dopo il riconoscimento vedrai qui i prodotti, le quantità stimate e le associazioni da confermare." />}
             </Card>
           </div> : null}
@@ -697,6 +829,46 @@ export default function ShoppingPantryPage() {
           <Field label="Posizione"><select value={editingPantry.location || 'pantry'} onChange={e => setEditingPantry({ ...editingPantry, location: e.target.value as PantryLocation })}><option value="pantry">Dispensa</option><option value="fridge">Frigo</option><option value="freezer">Freezer</option></select></Field>
           <Field label="Scadenza" hint="Facoltativa"><input type="date" value={editingPantry.expiryDate || ''} onChange={e => setEditingPantry({ ...editingPantry, expiryDate: e.target.value })} /></Field>
           <Field label="Soglia minima" hint="0 = solo previsione consumo"><input type="number" min="0" value={editingPantry.minQty || 0} onChange={e => setEditingPantry({ ...editingPantry, minQty: Number(e.target.value) })} /></Field>
+          <div className="product-tech-card field--wide">
+            <div className="product-tech-card__head">
+              {editingPantry.productInfo?.imageUrl ? <img src={editingPantry.productInfo.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <div className="product-tech-card__placeholder"><Globe2 size={24} /></div>}
+              <div>
+                <span>Scheda tecnica online</span>
+                <strong>{editingPantry.productInfo?.brand || editingPantry.productInfo?.displayName || 'Informazioni prodotto'}</strong>
+                {editingPantry.productInfo?.displayName && editingPantry.productInfo?.brand ? <small>{editingPantry.productInfo.displayName}</small> : null}
+              </div>
+              <Button variant="soft" size="sm" icon={<RefreshCw size={15} />} disabled={enrichmentBusy || !editingPantry.name?.trim()} onClick={refreshEditingProductInfo}>
+                {editingPantry.productInfo ? 'Aggiorna' : 'Cerca online'}
+              </Button>
+            </div>
+
+            {editingPantry.productInfo ? <>
+              <div className="product-tech-badges">
+                {editingPantry.productInfo.barcode ? <Badge>EAN {editingPantry.productInfo.barcode}</Badge> : null}
+                {editingPantry.productInfo.packageQuantity ? <Badge>{editingPantry.productInfo.packageQuantity}</Badge> : null}
+                {editingPantry.productInfo.nutriScore ? <Badge tone="success">Nutri-Score {editingPantry.productInfo.nutriScore}</Badge> : null}
+                {editingPantry.productInfo.novaGroup ? <Badge>NOVA {editingPantry.productInfo.novaGroup}</Badge> : null}
+                {editingPantry.productInfo.ecoScore ? <Badge>Eco-Score {editingPantry.productInfo.ecoScore}</Badge> : null}
+              </div>
+
+              {editingPantry.productInfo.allergens?.length ? <div className="product-tech-section"><strong>Allergeni</strong><span>{editingPantry.productInfo.allergens.join(', ')}</span></div> : null}
+              {editingPantry.productInfo.ingredients ? <div className="product-tech-section"><strong>Ingredienti</strong><p>{editingPantry.productInfo.ingredients}</p></div> : null}
+
+              {nutrientRows(editingPantry.productInfo).length ? <div className="product-tech-section">
+                <strong>Valori nutrizionali per 100 g/ml</strong>
+                <div className="product-tech-nutrition">{nutrientRows(editingPantry.productInfo).map(([label, value, unit]: any) => <span key={label}><small>{label}</small><b>{Number(value).toLocaleString('it-IT', { maximumFractionDigits: 2 })} {unit}</b></span>)}</div>
+              </div> : null}
+
+              {editingPantry.productInfo.labels?.length ? <div className="product-tech-section"><strong>Etichette</strong><span>{editingPantry.productInfo.labels.slice(0, 8).join(' · ')}</span></div> : null}
+              <div className="product-tech-source">
+                <span>Dati esterni · aggiornati {new Date(editingPantry.productInfo.retrievedAt).toLocaleDateString('it-IT')}</span>
+                {editingPantry.productInfo.sourceUrl ? <a href={editingPantry.productInfo.sourceUrl} target="_blank" rel="noreferrer">Apri fonte</a> : null}
+              </div>
+            </> : <div className="product-tech-empty">
+              <span>Se il prodotto è presente nei cataloghi pubblici posso recuperare automaticamente marca, foto, ingredienti, allergeni e valori nutrizionali.</span>
+            </div>}
+            {enrichmentMessage ? <div className="product-enrichment-message"><Globe2 size={16} /><span>{enrichmentMessage}</span></div> : null}
+          </div>
           <label className="toggle-row field--wide"><input type="checkbox" checked={editingPantry.autoRestock !== false} onChange={e => setEditingPantry({ ...editingPantry, autoRestock: e.target.checked })} /><span><strong>Suggerimenti automatici di riacquisto</strong><small>Usa soglia minima e consumo medio per avvisarti prima che finisca.</small></span></label>
         </div> : null}
       </Modal>

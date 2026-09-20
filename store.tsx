@@ -155,7 +155,7 @@ type StoreValue = {
   toggleShoppingItem: (id: number) => void
   deleteShoppingItem: (id: number) => void
   moveTakenShoppingToPantry: (location?: PantryLocation) => void
-  importReceiptItems: (items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string }>, removeFromShopping: boolean, defaultLocation?: PantryLocation) => void
+  importReceiptItems: (items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; productInfo?: PantryItem['productInfo'] }>, removeFromShopping: boolean, defaultLocation?: PantryLocation) => void
   upsertDish: (dish: Omit<Dish, 'id'> & { id?: number }) => void
   deleteDish: (id: number) => void
   upsertMealPlan: (plan: Omit<MealPlan, 'id'> & { id?: number }) => void
@@ -1212,7 +1212,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function mergeIntoPantry(
     pantry: PantryItem[],
     movements: PantryMovement[],
-    items: Array<{ name: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string }>,
+    items: Array<{ name: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; productInfo?: PantryItem['productInfo'] }>,
     reason: PantryMovement['reason'],
     defaultLocation: PantryLocation = 'pantry'
   ) {
@@ -1230,7 +1230,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const qty = Math.max(0, Number(item.qty || 0))
       if (idx >= 0) {
         const current = next[idx]
-        next[idx] = { ...current, qty: Number(current.qty || 0) + qty }
+        const incomingInfo = item.productInfo
+        const currentInfo = current.productInfo
+        const productInfo = incomingInfo && (!currentInfo || Number(incomingInfo.confidence || 0) >= Number(currentInfo.confidence || 0))
+          ? incomingInfo
+          : currentInfo
+        next[idx] = { ...current, qty: Number(current.qty || 0) + qty, productInfo }
         nextMovements = movement(nextMovements, current.id, qty, reason)
       } else {
         const id = nextId(next)
@@ -1243,7 +1248,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           minQty: 0,
           location,
           expiryDate,
-          autoRestock: true
+          autoRestock: true,
+          productInfo: item.productInfo
         })
         nextMovements = movement(nextMovements, id, qty, reason)
       }
@@ -1271,7 +1277,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function importReceiptItems(
-    items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string }>,
+    items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; productInfo?: PantryItem['productInfo'] }>,
     removeFromShopping: boolean,
     defaultLocation: PantryLocation = 'pantry'
   ) {
