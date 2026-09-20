@@ -721,7 +721,7 @@ export default function ShoppingPantryPage() {
                     <div className="pantry-item-card__qty"><span>{item.qty}</span><small>{item.unit}</small></div>
                     <div className="inventory-card-meta">
                       {item.packageState === 'opened' ? <span className="inventory-residual-line">Confezione aperta · {residualLabel(item)}</span> : null}
-                      {item.expiryDate ? <span>Scadenza {item.expiryDate.slice(8,10)}/{item.expiryDate.slice(5,7)}</span> : <span>Nessuna scadenza</span>
+                      {item.expiryDate ? <span>Scadenza {item.expiryDate.slice(8,10)}/{item.expiryDate.slice(5,7)}</span> : <span>Nessuna scadenza</span>}
                       {status?.averageDailyUse ? <span>Consumo medio {status.averageDailyUse < 1 ? status.averageDailyUse.toFixed(2) : status.averageDailyUse.toFixed(1)} {item.unit}/g</span> : <span>Consumo in apprendimento</span>}
                       {status?.daysRemaining !== null && status?.daysRemaining !== undefined ? <span>Autonomia ~{Math.max(0, Math.ceil(status.daysRemaining))} giorni</span> : null}
                     </div>
