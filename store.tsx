@@ -190,6 +190,8 @@ type StoreValue = {
   deleteBoardPost: (id: string) => void
   addBoardAttachment: (postId: string, attachment: BoardAttachment) => void
   removeBoardAttachment: (postId: string, attachmentId: string) => void
+  restoreRecycleItem: (id: string, payload: any) => Promise<boolean>
+  recoverConflictDraft: (id: string, snapshot: any) => Promise<boolean>
   exportData: () => string
   importData: (raw: string) => boolean
   resetData: () => void
@@ -1854,6 +1856,169 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     })
   }
 
+  function applyRecyclePayload(base: FamilyData, payload: any): { next: FamilyData; applied: boolean } {
+    const kind = String(payload?.kind || '')
+    const item = payload?.item
+    let next = deepClone(base)
+
+    const addUnique = (list: any[], value: any) => {
+      if (!value || value.id === undefined || list.some(existing => String(existing.id) === String(value.id))) return { list, added: false }
+      return { list: [...list, value], added: true }
+    }
+
+    if (kind === 'user') {
+      const result = addUnique(next.users, item)
+      return { next: { ...next, users: result.list }, applied: result.added }
+    }
+    if (kind === 'calendarEvent') {
+      const result = addUnique(next.calendarEvents, item)
+      return { next: { ...next, calendarEvents: result.list }, applied: result.added }
+    }
+    if (kind === 'deadline') {
+      const result = addUnique(next.deadlines, item)
+      return { next: { ...next, deadlines: result.list }, applied: result.added }
+    }
+    if (kind === 'pantryItem') {
+      const result = addUnique(next.pantry, item)
+      if (!result.added) return { next, applied: false }
+      let movements = [...next.pantryMovements]
+      for (const movementItem of Array.isArray(payload?.movements) ? payload.movements : []) {
+        if (!movements.some(existing => String(existing.id) === String(movementItem.id))) movements.push(movementItem)
+      }
+      return { next: { ...next, pantry: result.list, pantryMovements: movements }, applied: true }
+    }
+    if (kind === 'shoppingItem') {
+      const result = addUnique(next.shopping, item)
+      return { next: { ...next, shopping: result.list }, applied: result.added }
+    }
+    if (kind === 'dish') {
+      const result = addUnique(next.dishes, item)
+      if (!result.added) return { next, applied: false }
+      let plans = [...next.mealPlans]
+      for (const plan of Array.isArray(payload?.mealPlans) ? payload.mealPlans : []) {
+        if (!plans.some(existing => String(existing.id) === String(plan.id))) plans.push(plan)
+      }
+      return { next: { ...next, dishes: result.list, mealPlans: plans }, applied: true }
+    }
+    if (kind === 'mealPlan') {
+      if (!item || next.mealPlans.some(plan => String(plan.id) === String(item.id))) return { next, applied: false }
+      if (!next.dishes.some(dish => Number(dish.id) === Number(item.dishId))) return { next, applied: false }
+      const consumed = adjustIngredients(next, Number(item.dishId), -1)
+      return {
+        next: { ...next, pantry: consumed.pantry, pantryMovements: consumed.pantryMovements, mealPlans: [...next.mealPlans, item] },
+        applied: true
+      }
+    }
+    if (kind === 'chore') {
+      const result = addUnique(next.chores, item)
+      return { next: { ...next, chores: result.list }, applied: result.added }
+    }
+    if (kind === 'recurringChore') {
+      const result = addUnique(next.recurringChores, item)
+      return { next: { ...next, recurringChores: result.list }, applied: result.added }
+    }
+    if (kind === 'todo') {
+      const result = addUnique(next.todos, item)
+      return { next: { ...next, todos: result.list }, applied: result.added }
+    }
+    if (kind === 'routine') {
+      const result = addUnique(next.routines, item)
+      if (!result.added) return { next, applied: false }
+      let completions = [...next.routineCompletions]
+      for (const completion of Array.isArray(payload?.completions) ? payload.completions : []) {
+        if (!completions.some(existing => String(existing.id) === String(completion.id))) completions.push(completion)
+      }
+      return { next: { ...next, routines: result.list, routineCompletions: completions }, applied: true }
+    }
+    if (kind === 'schoolSubject') {
+      const result = addUnique(next.schoolSubjects, item)
+      if (!result.added) return { next, applied: false }
+      let timetable = [...next.schoolTimetable]
+      for (const entry of Array.isArray(payload?.timetable) ? payload.timetable : []) {
+        if (!timetable.some(existing => String(existing.id) === String(entry.id))) timetable.push(entry)
+      }
+      const affectedIds = new Set((Array.isArray(payload?.affectedItems) ? payload.affectedItems : []).map((entry: any) => String(entry.id)))
+      const schoolItems = next.schoolItems.map(existing =>
+        affectedIds.has(String(existing.id)) ? { ...existing, subjectId: Number(item.id) } : existing
+      )
+      return { next: { ...next, schoolSubjects: result.list, schoolTimetable: timetable, schoolItems }, applied: true }
+    }
+    if (kind === 'schoolTimetable') {
+      const result = addUnique(next.schoolTimetable, item)
+      return { next: { ...next, schoolTimetable: result.list }, applied: result.added }
+    }
+    if (kind === 'schoolItem') {
+      const result = addUnique(next.schoolItems, item)
+      return { next: { ...next, schoolItems: result.list }, applied: result.added }
+    }
+    if (kind === 'boardPost') {
+      const result = addUnique(next.boardPosts, item)
+      return { next: { ...next, boardPosts: result.list }, applied: result.added }
+    }
+    return { next, applied: false }
+  }
+
+  async function restoreRecycleItem(id: string, payload: any) {
+    if (!authUser || authUser.role === 'bimbo') return false
+    if (syncInFlightRef.current) {
+      window.alert('È in corso una sincronizzazione. Attendi qualche secondo e riprova.')
+      return false
+    }
+    const { next, applied } = applyRecyclePayload(dataRef.current, payload)
+    if (!applied) {
+      window.alert('Non posso ripristinare automaticamente questo elemento perché esiste già un elemento con lo stesso identificativo o manca un dato collegato.')
+      return false
+    }
+
+    suppressNextPushRef.current = true
+    setData(next)
+
+    if (supabase && familyIdRef.current && cloudUserId) {
+      const ok = await pushDocument(next)
+      if (!ok) {
+        await refreshChildSnapshot(familyIdRef.current)
+        return false
+      }
+      const { error } = await supabase.rpc('mark_family_recycle_restored', { p_id: id })
+      if (error) {
+        console.error('mark recycle restored', error)
+        window.alert('Il dato è stato ripristinato, ma non sono riuscito ad aggiornare il Cestino. Potrebbe comparire ancora nell’elenco.')
+      }
+    }
+    return true
+  }
+
+  async function recoverConflictDraft(id: string, snapshot: any) {
+    if (!authUser || authUser.role === 'bimbo' || !supabase || !familyIdRef.current || !cloudUserId) return false
+    if (syncInFlightRef.current) {
+      window.alert('È in corso una sincronizzazione. Attendi qualche secondo e riprova.')
+      return false
+    }
+
+    const { error: backupError } = await supabase.rpc('create_family_backup', {
+      p_family_id: familyIdRef.current,
+      p_reason: 'before_conflict_recovery'
+    })
+    if (backupError) {
+      console.error('pre conflict recovery backup', backupError)
+      window.alert('Non riesco a creare il backup di sicurezza. La bozza non è stata applicata.')
+      return false
+    }
+
+    const next = migrateData(snapshot, deepClone(initialData))
+    suppressNextPushRef.current = true
+    setData(next)
+    const ok = await pushDocument(next)
+    if (!ok) {
+      await refreshChildSnapshot(familyIdRef.current)
+      return false
+    }
+
+    const { error } = await supabase.rpc('mark_family_conflict_resolved', { p_id: id })
+    if (error) console.error('mark conflict resolved', error)
+    return true
+  }
+
   function exportData() { return JSON.stringify(data, null, 2) }
   function importData(raw: string) {
     try {
@@ -1891,6 +2056,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
     upsertBoardPost, toggleBoardPin, deleteBoardPost, addBoardAttachment, removeBoardAttachment,
+    restoreRecycleItem, recoverConflictDraft,
     exportData, importData, resetData
   }
 
