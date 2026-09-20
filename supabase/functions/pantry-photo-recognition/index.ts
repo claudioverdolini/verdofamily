@@ -97,15 +97,22 @@ Deno.serve(async (req) => {
       return json({ ok: true, configured: !!geminiKey, model: geminiKey ? geminiModel : null, fallbackModels: geminiKey ? geminiModels : [] });
     }
 
-    if (body?.action !== "analyze") return json({ ok: false, error: "unknown_action" }, 400);
+    const action = String(body?.action || "");
+    if (!["analyze", "estimate-residual"].includes(action)) return json({ ok: false, error: "unknown_action" }, 400);
     if (!geminiKey) return json({ ok: false, error: "vision_not_configured" }, 503);
 
-    const allowed = await rateLimit(client, "pantry_vision_analyze", `${user.id}:${familyId}`, 20, 3600);
+    const allowed = await rateLimit(
+      client,
+      action === "estimate-residual" ? "pantry_vision_residual" : "pantry_vision_analyze",
+      `${user.id}:${familyId}`,
+      action === "estimate-residual" ? 30 : 20,
+      3600
+    );
     if (!allowed) {
       await audit(client, {
         actorUserId: user.id,
         familyId,
-        eventType: "pantry_vision_rate_limited",
+        eventType: action === "estimate-residual" ? "pantry_residual_rate_limited" : "pantry_vision_rate_limited",
         success: false,
         severity: "warning"
       });
@@ -116,6 +123,121 @@ Deno.serve(async (req) => {
     const mimeType = String(body?.mimeType || "image/jpeg").toLowerCase();
     if (!SUPPORTED_MIME.has(mimeType)) return json({ ok: false, error: "unsupported_image_type" }, 400);
     if (!imageData || imageData.length > MAX_BASE64_CHARS) return json({ ok: false, error: "image_too_large" }, 413);
+
+    if (action === "estimate-residual") {
+      const productName = String(body?.productName || "prodotto").trim().slice(0, 160);
+      const packageHint = String(body?.packageHint || "").trim().slice(0, 100);
+      const residualPrompt = `Analizza questa foto come seconda foto di una confezione GIÀ APERTA di "${productName}".
+L'obiettivo è stimare esclusivamente quanto prodotto rimane dentro la confezione.
+
+Regole:
+- Considera solo il contenuto realmente visibile.
+- percentRemaining deve essere una stima da 0 a 100 del contenuto residuo rispetto a una confezione piena.
+- Se dalla foto o dal suggerimento formato puoi stimare anche una quantità fisica, usa estimatedQuantity e unit (g, kg, ml, l o pz).
+- Se la quantità fisica non è affidabile, estimatedQuantity deve essere 0 e unit stringa vuota: in questo caso il percentuale residua è comunque utile.
+- confidence è tra 0 e 1.
+- Non inventare pesi o volumi non deducibili.
+- note deve spiegare in pochissime parole su cosa si basa la stima.
+${packageHint ? `Formato noto/indicato: ${packageHint}` : ""}
+
+Restituisci esclusivamente il JSON conforme allo schema.`;
+
+      const residualSchema = {
+        type: "OBJECT",
+        properties: {
+          percentRemaining: { type: "NUMBER" },
+          estimatedQuantity: { type: "NUMBER" },
+          unit: { type: "STRING" },
+          confidence: { type: "NUMBER" },
+          note: { type: "STRING" }
+        },
+        required: ["percentRemaining", "estimatedQuantity", "unit", "confidence", "note"]
+      };
+
+      const residualRequest = JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: imageData } },
+            { text: residualPrompt }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: residualSchema
+        }
+      });
+
+      let residualResult: any = null;
+      let residualModel = "";
+      let residualLastStatus = 0;
+      let residualLastMessage = "";
+
+      for (const model of geminiModels) {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": geminiKey
+          },
+          body: residualRequest
+        });
+        const candidate = await response.json().catch(() => ({}));
+        if (response.ok) {
+          residualResult = candidate;
+          residualModel = model;
+          break;
+        }
+        residualLastStatus = response.status;
+        residualLastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
+        const lower = residualLastMessage.toLowerCase();
+        const retryable = [404, 429, 500, 502, 503, 504].includes(response.status)
+          || lower.includes("high demand")
+          || lower.includes("overloaded")
+          || lower.includes("temporarily")
+          || lower.includes("unavailable");
+        if (!retryable) return json({ ok: false, error: residualLastMessage }, response.status >= 500 ? 502 : 400);
+      }
+
+      if (!residualResult || !residualModel) {
+        return json({
+          ok: false,
+          error: "La stima del residuo non è disponibile in questo momento.",
+          code: "ai_temporarily_unavailable",
+          lastStatus: residualLastStatus,
+          lastMessage: residualLastMessage
+        }, 503);
+      }
+
+      const residualOutput = textPart(residualResult);
+      if (!residualOutput) return json({ ok: false, error: "empty_residual_response" }, 502);
+
+      let residualParsed: any;
+      try { residualParsed = JSON.parse(residualOutput); } catch { return json({ ok: false, error: "invalid_residual_response" }, 502); }
+
+      const percentRemaining = Math.max(0, Math.min(100, Number(residualParsed?.percentRemaining) || 0));
+      const estimatedQuantity = Math.max(0, Number(residualParsed?.estimatedQuantity) || 0);
+      const residualUnit = ["g","kg","ml","l","pz"].includes(String(residualParsed?.unit || "")) ? String(residualParsed.unit) : "";
+      const confidence = Math.max(0, Math.min(1, Number(residualParsed?.confidence) || 0));
+      const note = String(residualParsed?.note || "").trim().slice(0, 300);
+
+      await audit(client, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "pantry_residual_estimated",
+        metadata: { model: residualModel, confidence, hasQuantity: estimatedQuantity > 0 }
+      });
+
+      return json({
+        ok: true,
+        model: residualModel,
+        percentRemaining,
+        estimatedQuantity,
+        unit: residualUnit,
+        confidence,
+        note
+      });
+    }
 
     const { data: doc, error: docError } = await client
       .from("family_documents")
@@ -155,10 +277,12 @@ Deno.serve(async (req) => {
               observedText: { type: "STRING" },
               brand: { type: "STRING" },
               barcode: { type: "STRING" },
+              packageState: { type: "STRING", enum: ["sealed", "opened", "possibly_opened", "unknown"] },
+              openReason: { type: "STRING" },
               expiryDate: { type: "STRING" },
               notes: { type: "STRING" }
             },
-            required: ["detectedName", "matchName", "qty", "unit", "category", "confidence", "observedText", "brand", "barcode", "expiryDate", "notes"]
+            required: ["detectedName", "matchName", "qty", "unit", "category", "confidence", "observedText", "brand", "barcode", "packageState", "openReason", "expiryDate", "notes"]
           }
         }
       },
@@ -242,6 +366,8 @@ Deno.serve(async (req) => {
       observedText: String(item?.observedText || "").trim(),
       brand: String(item?.brand || "").trim().slice(0, 100),
       barcode: /^\d{8,14}$/.test(String(item?.barcode || "").replace(/\D/g, "")) ? String(item.barcode).replace(/\D/g, "") : "",
+      packageState: ["sealed", "opened", "possibly_opened", "unknown"].includes(String(item?.packageState || "")) ? String(item.packageState) : "unknown",
+      openReason: String(item?.openReason || "").trim().slice(0, 240),
       expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item?.expiryDate || "")) ? String(item.expiryDate) : "",
       notes: String(item?.notes || "").trim()
     })).filter((item: any) => item.detectedName);
