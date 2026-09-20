@@ -293,20 +293,32 @@ export function materializeRecurringChores(data: FamilyData, dateStr = localDate
 
   for (const template of templates) {
     if (!recurringChoreDueOn(template, dateStr)) continue
-    const alreadyExists = chores.some(chore => Number(chore.recurringChoreId || 0) === Number(template.id) && chore.deadline === dateStr)
-    if (alreadyExists) continue
+    const assigneeIds = Array.from(new Set(
+      (Array.isArray(template.userIds) && template.userIds.length ? template.userIds : [template.userId])
+        .map(Number)
+        .filter(id => id > 0)
+    ))
 
-    chores = [...chores, {
-      id: nextId(chores),
-      title: template.title,
-      deadline: dateStr,
-      userId: Number(template.userId),
-      amount: Math.max(0, Number(template.amount) || 0),
-      done: false,
-      completionStatus: 'open',
-      recurringChoreId: Number(template.id)
-    }]
-    changed = true
+    for (const userId of assigneeIds) {
+      const alreadyExists = chores.some(chore =>
+        Number(chore.recurringChoreId || 0) === Number(template.id)
+        && chore.deadline === dateStr
+        && Number(chore.userId) === userId
+      )
+      if (alreadyExists) continue
+
+      chores = [...chores, {
+        id: nextId(chores),
+        title: template.title,
+        deadline: dateStr,
+        userId,
+        amount: Math.max(0, Number(template.amount) || 0),
+        done: false,
+        completionStatus: 'open',
+        recurringChoreId: Number(template.id)
+      }]
+      changed = true
+    }
   }
 
   return changed ? { ...data, chores } : data
@@ -639,7 +651,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 13,
+    version: 14,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -720,16 +732,25 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       approvedByUserId: chore.approvedByUserId ? Number(chore.approvedByUserId) : undefined,
       recurringChoreId: chore.recurringChoreId ? Number(chore.recurringChoreId) : undefined
     })) : [],
-    recurringChores: Array.isArray(source.recurringChores) ? source.recurringChores.map((chore: any): RecurringChore => ({
-      id: Number(chore.id),
-      title: String(chore.title || 'Compito ricorrente'),
-      userId: Number(chore.userId || 0),
-      amount: Math.max(0, Number(chore.amount) || 0),
-      weekdays: Array.from(new Set((Array.isArray(chore.weekdays) ? chore.weekdays : [1, 2, 3, 4, 5, 6, 7]).map(Number).filter((day: number) => day >= 1 && day <= 7))).sort(),
-      active: chore.active !== false,
-      startDate: chore.startDate || localDateISO(),
-      endDate: chore.endDate || undefined
-    })) : [],
+    recurringChores: Array.isArray(source.recurringChores) ? source.recurringChores.map((chore: any): RecurringChore => {
+      const legacyUserId = Number(chore.userId || 0)
+      const userIds = Array.from(new Set(
+        (Array.isArray(chore.userIds) && chore.userIds.length ? chore.userIds : [legacyUserId])
+          .map(Number)
+          .filter((id: number) => id > 0)
+      ))
+      return {
+        id: Number(chore.id),
+        title: String(chore.title || 'Compito ricorrente'),
+        userId: userIds[0] || legacyUserId,
+        userIds,
+        amount: Math.max(0, Number(chore.amount) || 0),
+        weekdays: Array.from(new Set((Array.isArray(chore.weekdays) ? chore.weekdays : [1, 2, 3, 4, 5, 6, 7]).map(Number).filter((day: number) => day >= 1 && day <= 7))).sort(),
+        active: chore.active !== false,
+        startDate: chore.startDate || localDateISO(),
+        endDate: chore.endDate || undefined
+      }
+    }) : [],
     transactions: Array.isArray(source.transactions) ? source.transactions : [],
     todos: Array.isArray(source.todos) ? source.todos.map((t: any) => ({ ...t, createdAt: t.createdAt || localDateISO() })) : [],
     routines: Array.isArray(source.routines) ? source.routines.map((routine: any): Routine => ({

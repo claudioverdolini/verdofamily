@@ -220,6 +220,7 @@ export type RecurringChore = {
   id: number
   title: string
   userId: number
+  userIds?: number[]
   amount: number
   weekdays: number[]
   active: boolean

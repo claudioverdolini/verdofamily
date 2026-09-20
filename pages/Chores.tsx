@@ -63,11 +63,21 @@ export default function ChoresPage() {
 
   function openRecurring(item?: any) {
     if (isChild) return
+    const defaultUserId = data.users.find(user => user.role === 'bimbo')?.id || data.users[0]?.id || 1
     setRecurringEditing(item
-      ? { ...item, weekdays: [...(item.weekdays || [])] }
+      ? {
+          ...item,
+          userIds: Array.from(new Set(
+            (Array.isArray(item.userIds) && item.userIds.length ? item.userIds : [item.userId])
+              .map(Number)
+              .filter((id: number) => id > 0)
+          )),
+          weekdays: [...(item.weekdays || [])]
+        }
       : {
           title: '',
-          userId: data.users[0]?.id || 1,
+          userId: defaultUserId,
+          userIds: [defaultUserId],
           amount: 1,
           weekdays: [1, 2, 3, 4, 5, 6, 7],
           active: true,
@@ -88,11 +98,17 @@ export default function ChoresPage() {
   }
 
   function saveRecurring() {
-    if (isChild || !recurringEditing?.title?.trim() || !recurringEditing?.weekdays?.length) return
+    const userIds = Array.from(new Set(
+      (Array.isArray(recurringEditing?.userIds) ? recurringEditing.userIds : [])
+        .map(Number)
+        .filter((id: number) => id > 0)
+    ))
+    if (isChild || !recurringEditing?.title?.trim() || !recurringEditing?.weekdays?.length || !userIds.length) return
     upsertRecurringChore({
       id: recurringEditing.id,
       title: recurringEditing.title.trim(),
-      userId: Number(recurringEditing.userId),
+      userId: userIds[0],
+      userIds,
       amount: Math.max(0, Number(recurringEditing.amount) || 0),
       weekdays: recurringEditing.weekdays.map(Number),
       active: recurringEditing.active !== false,
@@ -100,6 +116,19 @@ export default function ChoresPage() {
       endDate: recurringEditing.endDate || undefined
     })
     setRecurringEditing(null)
+  }
+
+  function toggleRecurringAssignee(userId: number) {
+    if (!recurringEditing || isChild) return
+    const current = Array.isArray(recurringEditing.userIds) ? recurringEditing.userIds.map(Number) : []
+    const userIds = current.includes(userId)
+      ? current.filter((id: number) => id !== userId)
+      : [...current, userId]
+    setRecurringEditing({
+      ...recurringEditing,
+      userIds,
+      userId: userIds[0] || 0
+    })
   }
 
   function toggleRecurringDay(day: number) {
@@ -244,39 +273,47 @@ export default function ChoresPage() {
       </Card>
     })}</div> : null}
 
-    {!isChild && tab === 'recurring' ? <div className="recurring-grid">
-      {data.users.map(user => {
-        const recurring = data.recurringChores.filter(item => item.userId === user.id)
-        return <Card key={user.id}>
-          <CardHeader
-            title={<span className="user-heading"><Avatar user={user} size="sm" />{user.name}</span>}
-            subtitle={`${recurring.filter(item => item.active).length} attivi`}
-          />
-          {recurring.length ? <div className="recurring-list">
-            {recurring.map(item => <div key={item.id} className={`recurring-row ${item.active ? '' : 'is-disabled'}`}>
-              <label className="recurring-switch" title={item.active ? 'Disattiva' : 'Attiva'}>
-                <input type="checkbox" checked={item.active} onChange={() => toggleRecurringChore(item.id)} />
-              </label>
-              <button className="recurring-row__copy" onClick={() => openRecurring(item)}>
-                <strong>{item.title}</strong>
-                <span>{recurringLabel(item.weekdays)} · {money(item.amount)} per completamento</span>
-                {(item.startDate || item.endDate) ? <small>
-                  Dal {item.startDate || '—'}{item.endDate ? ` al ${item.endDate}` : ''}
-                </small> : null}
-              </button>
-              <Badge tone={item.active ? 'success' : 'neutral'}>{item.active ? 'Attivo' : 'Pausa'}</Badge>
-              <IconButton label="Modifica" onClick={() => openRecurring(item)}><Pencil size={16} /></IconButton>
-              <IconButton label="Elimina ricorrenza" onClick={() => deleteRecurringChore(item.id)}><Trash2 size={16} /></IconButton>
-            </div>)}
-          </div> : <EmptyState
-            icon={<Repeat2 size={28} />}
-            title="Nessun compito ricorrente"
-            text="Crea attività abituali come apparecchiare, rifare il letto o sistemare la camera e assegna una paghetta fissa."
-            action={<Button variant="soft" onClick={() => openRecurring()}>Crea il primo</Button>}
-          />}
-        </Card>
-      })}
-    </div> : null}
+    {!isChild && tab === 'recurring' ? <Card className="recurring-master-card">
+      <CardHeader
+        title="Compiti ricorrenti"
+        subtitle={`${data.recurringChores.filter(item => item.active).length} attivi · ogni attività può essere assegnata a più persone`}
+        action={<Button variant="soft" icon={<Repeat2 size={17} />} onClick={() => openRecurring()}>Nuovo</Button>}
+      />
+      {data.recurringChores.length ? <div className="recurring-list">
+        {data.recurringChores.map(item => {
+          const userIds = Array.from(new Set(
+            (Array.isArray(item.userIds) && item.userIds.length ? item.userIds : [item.userId])
+              .map(Number)
+              .filter((id: number) => id > 0)
+          ))
+          const assignees = userIds.map((id: number) => data.users.find(user => user.id === id)).filter(Boolean)
+          return <div key={item.id} className={`recurring-row recurring-row--multi ${item.active ? '' : 'is-disabled'}`}>
+            <label className="recurring-switch" title={item.active ? 'Disattiva' : 'Attiva'}>
+              <input type="checkbox" checked={item.active} onChange={() => toggleRecurringChore(item.id)} />
+            </label>
+            <button className="recurring-row__copy" onClick={() => openRecurring(item)}>
+              <strong>{item.title}</strong>
+              <span>{recurringLabel(item.weekdays)} · {money(item.amount)} per persona</span>
+              <span className="recurring-row__people">
+                <span className="recurring-row__avatars">{assignees.slice(0, 4).map((user: any) => <Avatar key={user.id} user={user} size="xs" />)}</span>
+                <small>{assignees.map((user: any) => user.name).join(', ') || 'Nessun assegnatario'}</small>
+              </span>
+              {(item.startDate || item.endDate) ? <small>
+                Dal {item.startDate || '—'}{item.endDate ? ` al ${item.endDate}` : ''}
+              </small> : null}
+            </button>
+            <Badge tone={item.active ? 'success' : 'neutral'}>{item.active ? 'Attivo' : 'Pausa'}</Badge>
+            <IconButton label="Modifica" onClick={() => openRecurring(item)}><Pencil size={16} /></IconButton>
+            <IconButton label="Elimina ricorrenza" onClick={() => deleteRecurringChore(item.id)}><Trash2 size={16} /></IconButton>
+          </div>
+        })}
+      </div> : <EmptyState
+        icon={<Repeat2 size={28} />}
+        title="Nessun compito ricorrente"
+        text="Crea attività abituali come apparecchiare, rifare il letto o sistemare la camera e assegnale a una o più persone."
+        action={<Button variant="soft" onClick={() => openRecurring()}>Crea il primo</Button>}
+      />}
+    </Card> : null}
 
     {tab === 'wallets' ? <div className="wallet-layout">
       <div className="wallet-grid">{walletUsers.map(user => <Card key={user.id} className="wallet-card">
@@ -359,7 +396,7 @@ export default function ChoresPage() {
       className="modal--recurring-chore"
       footer={<div className="modal-actions"><span /><div className="modal-actions__right">
         <Button variant="ghost" onClick={() => setRecurringEditing(null)}>Annulla</Button>
-        <Button onClick={saveRecurring} disabled={!recurringEditing?.weekdays?.length}>Salva</Button>
+        <Button onClick={saveRecurring} disabled={!recurringEditing?.weekdays?.length || !recurringEditing?.userIds?.length}>Salva</Button>
       </div></div>}
     >
       {recurringEditing ? <div className="form-grid form-grid--2">
@@ -371,10 +408,32 @@ export default function ChoresPage() {
             placeholder="Es. Apparecchiare"
           />
         </Field>
-        <Field label="Assegna a">
-          <select value={recurringEditing.userId} onChange={e => setRecurringEditing({ ...recurringEditing, userId: Number(e.target.value) })}>
-            {data.users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+        <Field label="Assegna a" className="field--wide" hint="Puoi selezionare una o più persone. Ognuno avrà il proprio completamento e accredito.">
+          <div className="recurring-assignee-picker">
+            {data.users.map(user => {
+              const selected = recurringEditing.userIds?.includes(user.id)
+              return <button
+                type="button"
+                key={user.id}
+                className={selected ? 'is-selected' : ''}
+                onClick={() => toggleRecurringAssignee(user.id)}
+              >
+                <Avatar user={user} size="sm" />
+                <span><strong>{user.name}</strong><small>{user.role === 'bimbo' ? 'Bambino' : user.role === 'admin' ? 'Admin' : 'Adulto'}</small></span>
+                <span className="recurring-assignee-picker__check">{selected ? <CheckCircle2 size={18} /> : null}</span>
+              </button>
+            })}
+          </div>
+          <div className="recurring-assignee-shortcuts">
+            <button type="button" onClick={() => {
+              const ids = data.users.filter(user => user.role === 'bimbo').map(user => user.id)
+              setRecurringEditing({ ...recurringEditing, userIds: ids, userId: ids[0] || 0 })
+            }}>Tutti i bambini</button>
+            <button type="button" onClick={() => {
+              const ids = data.users.map(user => user.id)
+              setRecurringEditing({ ...recurringEditing, userIds: ids, userId: ids[0] || 0 })
+            }}>Tutta la famiglia</button>
+          </div>
         </Field>
         <Field label="Paghetta dopo approvazione">
           <input

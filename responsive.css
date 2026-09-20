@@ -2127,3 +2127,107 @@ html.has-modal-open .content{
     grid-column:auto;
   }
 }
+
+
+/* Multi-assignee recurring chores */
+.recurring-master-card{min-width:0}
+.recurring-row__people{
+  display:flex!important;
+  align-items:center!important;
+  gap:8px!important;
+  margin-top:5px!important;
+  min-width:0;
+}
+.recurring-row__avatars{
+  display:flex!important;
+  flex:0 0 auto;
+  gap:0!important;
+}
+.recurring-row__avatars .avatar+.avatar{margin-left:-7px}
+.recurring-row__people>small{
+  min-width:0;
+  font-size:11.5px!important;
+  color:var(--muted);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.recurring-assignee-picker{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.recurring-assignee-picker>button{
+  min-width:0;
+  min-height:58px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:var(--surface);
+  color:var(--text);
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) 24px;
+  align-items:center;
+  gap:9px;
+  padding:8px 10px;
+  text-align:left;
+}
+.recurring-assignee-picker>button>span:nth-child(2){
+  min-width:0;
+  display:grid;
+  gap:2px;
+}
+.recurring-assignee-picker>button strong{
+  font-size:13px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.recurring-assignee-picker>button small{
+  font-size:10.5px;
+  color:var(--muted);
+}
+.recurring-assignee-picker>button.is-selected{
+  border-color:var(--accent);
+  background:color-mix(in srgb,var(--accent) 8%,var(--surface));
+}
+.recurring-assignee-picker__check{
+  width:24px;
+  height:24px;
+  display:grid;
+  place-items:center;
+  color:var(--accent);
+}
+.recurring-assignee-shortcuts{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+.recurring-assignee-shortcuts button{
+  min-height:32px;
+  border:0;
+  border-radius:999px;
+  background:var(--surface2);
+  color:var(--muted);
+  padding:0 10px;
+  font-size:11px;
+  font-weight:800;
+}
+
+@media(max-width:520px){
+  .modal--recurring-chore .recurring-assignee-picker{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .modal--recurring-chore .recurring-assignee-picker>button{
+    min-height:54px;
+    padding:7px 8px;
+  }
+  .recurring-row--multi{
+    grid-template-columns:auto minmax(0,1fr) auto auto;
+  }
+  .recurring-row--multi>.badge{display:none}
+}
+@media(max-width:370px){
+  .modal--recurring-chore .recurring-assignee-picker{
+    grid-template-columns:minmax(0,1fr);
+  }
+}

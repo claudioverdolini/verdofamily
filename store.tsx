@@ -1375,17 +1375,23 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function upsertRecurringChore(chore: Omit<RecurringChore, 'id'> & { id?: number }) {
     if (authUser?.role === 'bimbo') return
     setData(prev => {
+      const userIds = Array.from(new Set(
+        (Array.isArray(chore.userIds) && chore.userIds.length ? chore.userIds : [chore.userId])
+          .map(Number)
+          .filter(id => id > 0 && prev.users.some(user => user.id === id))
+      ))
       const clean: RecurringChore = {
         id: chore.id || nextId(prev.recurringChores),
         title: chore.title.trim(),
-        userId: Number(chore.userId),
+        userId: userIds[0] || 0,
+        userIds,
         amount: Math.max(0, Number(chore.amount) || 0),
         weekdays: Array.from(new Set((chore.weekdays || []).map(Number).filter(day => day >= 1 && day <= 7))).sort(),
         active: chore.active !== false,
         startDate: chore.startDate || localDateISO(),
         endDate: chore.endDate || undefined
       }
-      if (!clean.title || !clean.weekdays.length) return prev
+      if (!clean.title || !clean.weekdays.length || !clean.userIds?.length) return prev
 
       let next: FamilyData = {
         ...prev,
@@ -1395,13 +1401,25 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       }
 
       const today = localDateISO()
+      const selected = new Set(clean.userIds)
       next = {
         ...next,
-        chores: next.chores.map(item =>
-          item.recurringChoreId === clean.id && item.deadline === today && !item.done
-            ? { ...item, title: clean.title, userId: clean.userId, amount: clean.amount }
-            : item
-        )
+        chores: next.chores
+          .filter(item => !(
+            item.recurringChoreId === clean.id
+            && item.deadline === today
+            && !item.done
+            && (item.completionStatus || 'open') === 'open'
+            && !selected.has(Number(item.userId))
+          ))
+          .map(item =>
+            item.recurringChoreId === clean.id
+            && item.deadline === today
+            && !item.done
+            && selected.has(Number(item.userId))
+              ? { ...item, title: clean.title, amount: clean.amount }
+              : item
+          )
       }
       return materializeRecurringChores(next, today)
     })
