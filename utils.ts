@@ -630,7 +630,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 12,
+    version: 13,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
