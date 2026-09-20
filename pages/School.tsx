@@ -273,9 +273,13 @@ export default function SchoolPage() {
               <strong>{item.title}</strong>
               <small>{dateText(item.date)}{item.notes ? ` · ${item.notes}` : ''}</small>
             </div>
-            {item.type === 'payment' && item.amount !== undefined ? <Badge tone="warning">{money(item.amount)}</Badge> : <Badge>{info.label}</Badge>}
-            <IconButton label="Modifica" onClick={() => openItem(item)}><Pencil size={16} /></IconButton>
-            <IconButton label="Elimina" onClick={() => deleteSchoolItem(item.id)}><Trash2 size={16} /></IconButton>
+            <div className="school-agenda-row__meta">
+              {item.type === 'payment' && item.amount !== undefined ? <Badge tone="warning">{money(item.amount)}</Badge> : <Badge>{info.label}</Badge>}
+              <div className="school-agenda-row__actions">
+                <IconButton label="Modifica" onClick={() => openItem(item)}><Pencil size={16} /></IconButton>
+                <IconButton label="Elimina" onClick={() => deleteSchoolItem(item.id)}><Trash2 size={16} /></IconButton>
+              </div>
+            </div>
           </div>
         })}
       </div> : <EmptyState icon={<GraduationCap size={28} />} title="Agenda vuota" text="Non ci sono attività scolastiche future." />}

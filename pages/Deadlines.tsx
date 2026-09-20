@@ -196,9 +196,13 @@ export default function DeadlinesPage() {
             <small>{info.label} · Avvisi: {reminderLabel(item.reminderDays || [90, 30, 7])}{item.repeatYearly ? ' · Annuale' : ''}</small>
             {item.notes ? <em>{item.notes}</em> : null}
           </div>
-          <Badge tone={status === 'overdue' || status === 'today' ? 'warning' : item.done ? 'success' : 'neutral'}>{statusText}</Badge>
-          <IconButton label="Modifica" onClick={() => setEditing({ ...item, reminderDays: [...(item.reminderDays || [90, 30, 7])] })}><Pencil size={17} /></IconButton>
-          <IconButton label="Elimina" onClick={() => deleteDeadline(item.id)}><Trash2 size={17} /></IconButton>
+          <div className="deadline-row__meta">
+            <Badge tone={status === 'overdue' || status === 'today' ? 'warning' : item.done ? 'success' : 'neutral'}>{statusText}</Badge>
+            <div className="deadline-row__actions">
+              <IconButton label="Modifica" onClick={() => setEditing({ ...item, reminderDays: [...(item.reminderDays || [90, 30, 7])] })}><Pencil size={17} /></IconButton>
+              <IconButton label="Elimina" onClick={() => deleteDeadline(item.id)}><Trash2 size={17} /></IconButton>
+            </div>
+          </div>
         </div>
       })}</div> : <EmptyState title="Nessuna scadenza" text="Aggiungi la prima data importante." action={<Button onClick={openNew}>Aggiungi scadenza</Button>} />}
     </Card> : null}
