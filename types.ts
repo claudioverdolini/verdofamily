@@ -184,6 +184,11 @@ export type PantryItem = {
   location?: PantryLocation
   expiryDate?: string
   autoRestock?: boolean
+  packageState?: 'sealed' | 'opened'
+  remainingQty?: number
+  remainingUnit?: string
+  residualPercent?: number
+  residualSource?: 'manual' | 'photo'
   productInfo?: PantryProductTechnicalInfo
 }
 

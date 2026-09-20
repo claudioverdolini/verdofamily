@@ -651,7 +651,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 15,
+    version: 16,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -689,6 +689,11 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       location: ['pantry','fridge','freezer'].includes(String(item.location)) ? item.location : 'pantry',
       expiryDate: item.expiryDate || undefined,
       autoRestock: item.autoRestock !== false,
+      packageState: item.packageState === 'opened' ? 'opened' : 'sealed',
+      remainingQty: item.packageState === 'opened' && Number.isFinite(Number(item.remainingQty)) ? Math.max(0, Number(item.remainingQty)) : undefined,
+      remainingUnit: item.packageState === 'opened' && item.remainingUnit ? String(item.remainingUnit) : undefined,
+      residualPercent: item.packageState === 'opened' && Number.isFinite(Number(item.residualPercent)) ? Math.max(0, Math.min(100, Number(item.residualPercent))) : undefined,
+      residualSource: item.packageState === 'opened' && ['manual','photo'].includes(String(item.residualSource || '')) ? item.residualSource : undefined,
       productInfo: item.productInfo && typeof item.productInfo === 'object' ? {
         source: 'openfoodfacts',
         sourceUrl: /^https?:\/\//i.test(String(item.productInfo.sourceUrl || '')) ? String(item.productInfo.sourceUrl) : undefined,

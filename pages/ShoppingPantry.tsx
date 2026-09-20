@@ -53,6 +53,7 @@ export default function ShoppingPantryPage() {
   const [photoRows, setPhotoRows] = useState<any[]>([])
   const [enrichmentBusy, setEnrichmentBusy] = useState(false)
   const [enrichmentMessage, setEnrichmentMessage] = useState('')
+  const [residualBusyId, setResidualBusyId] = useState<string | null>(null)
 
   useEffect(() => {
     if (scanMode !== 'pantry-photo' || !cloudAuthenticated || !familyId || !supabase) return
@@ -185,6 +186,67 @@ export default function ShoppingPantryPage() {
     ].filter(([, value]) => value !== undefined && value !== null && Number.isFinite(Number(value)))
   }
 
+  function rowNeedsResidual(row: any) {
+    return row.include
+      && ['opened','possibly_opened'].includes(row.detectedPackageState || row.packageState)
+      && !row.confirmedClosed
+      && !(Number(row.remainingQty) > 0)
+      && !(Number(row.residualPercent) > 0)
+  }
+
+  function residualLabel(item: any) {
+    if ((item.packageState || 'sealed') !== 'opened') return ''
+    if (Number.isFinite(Number(item.remainingQty)) && item.remainingUnit) {
+      return `${Number(item.remainingQty).toLocaleString('it-IT', { maximumFractionDigits: 2 })} ${item.remainingUnit} residui`
+    }
+    if (Number.isFinite(Number(item.residualPercent))) return `~${Math.round(Number(item.residualPercent))}% residuo`
+    return 'Residuo non indicato'
+  }
+
+  async function estimateResidualFromPhoto(rowId: string, file: File) {
+    setPhotoError('')
+    setResidualBusyId(rowId)
+    try {
+      const prepared = await preparePantryPhoto(file)
+      const row = photoRows.find(item => item.id === rowId)
+      if (!row) return
+      const result = await callPantryVision('estimate-residual', {
+        imageData: prepared.imageData,
+        mimeType: prepared.mimeType,
+        productName: row.name || row.raw,
+        packageHint: row.productInfo?.packageQuantity || ''
+      })
+      setPhotoRows(prev => prev.map(item => item.id !== rowId ? item : {
+        ...item,
+        packageState: 'opened',
+        detectedPackageState: 'opened',
+        residualPercent: Math.max(0, Math.min(100, Number(result?.percentRemaining) || 0)),
+        remainingQty: Number(result?.estimatedQuantity) > 0 ? Number(result.estimatedQuantity) : undefined,
+        remainingUnit: Number(result?.estimatedQuantity) > 0 ? (result?.unit || '') : (item.remainingUnit || 'g'),
+        residualSource: 'photo',
+        residualNote: String(result?.note || ''),
+        residualConfidence: Math.max(0, Math.min(1, Number(result?.confidence) || 0))
+      }))
+    } catch (error: any) {
+      setPhotoError(error?.message || 'Non riesco a stimare il residuo da questa foto.')
+    } finally {
+      setResidualBusyId(null)
+    }
+  }
+
+  function markPhotoRowClosed(rowId: string) {
+    setPhotoRows(prev => prev.map(item => item.id !== rowId ? item : {
+      ...item,
+      packageState: 'sealed',
+      detectedPackageState: 'sealed',
+      confirmedClosed: true,
+      remainingQty: undefined,
+      remainingUnit: undefined,
+      residualPercent: undefined,
+      residualSource: undefined
+    }))
+  }
+
   async function refreshVisionStatus() {
     try {
       const result = await callPantryVision('status')
@@ -287,6 +349,14 @@ export default function ShoppingPantryPage() {
           observedText: String(item.observedText || '').trim(),
           brand: String(item.brand || '').trim(),
           barcode: String(item.barcode || '').replace(/\D/g, ''),
+          detectedPackageState: ['sealed','opened','possibly_opened','unknown'].includes(String(item.packageState || '')) ? String(item.packageState) : 'unknown',
+          packageState: ['opened','possibly_opened'].includes(String(item.packageState || '')) ? 'opened' : 'sealed',
+          openReason: String(item.openReason || '').trim(),
+          remainingQty: undefined,
+          remainingUnit: 'g',
+          residualPercent: undefined,
+          residualSource: undefined,
+          confirmedClosed: item.packageState === 'sealed',
           notes: String(item.notes || '').trim(),
           confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
           include: true,
@@ -310,6 +380,13 @@ export default function ShoppingPantryPage() {
   }
 
   async function importPhotoRecognition() {
+    const unresolved = photoRows.filter(rowNeedsResidual)
+    if (unresolved.length) {
+      const names = unresolved.slice(0, 3).map(row => row.name || row.raw).join(', ')
+      setPhotoError(`Prima di caricare devi confermare il residuo ${unresolved.length === 1 ? 'della confezione' : 'delle confezioni'}: ${names}.`)
+      return
+    }
+
     const selected = photoRows.filter(x => x.include && x.name.trim()).map(x => ({
       name: x.name.trim(),
       qty: Math.max(1, Number(x.qty) || 1),
@@ -319,7 +396,12 @@ export default function ShoppingPantryPage() {
       expiryDate: x.expiryDate || undefined,
       brand: x.brand || '',
       barcode: x.barcode || '',
-      observedText: x.observedText || ''
+      observedText: x.observedText || '',
+      packageState: x.packageState === 'opened' ? 'opened' : 'sealed',
+      remainingQty: x.packageState === 'opened' && Number.isFinite(Number(x.remainingQty)) ? Math.max(0, Number(x.remainingQty)) : undefined,
+      remainingUnit: x.packageState === 'opened' ? (x.remainingUnit || undefined) : undefined,
+      residualPercent: x.packageState === 'opened' && Number.isFinite(Number(x.residualPercent)) ? Math.max(0, Math.min(100, Number(x.residualPercent))) : undefined,
+      residualSource: x.packageState === 'opened' ? (x.residualSource || 'manual') : undefined
     }))
     if (!selected.length) return
     const enriched = await enrichImportedItems(selected)
@@ -383,12 +465,31 @@ export default function ShoppingPantryPage() {
 
   function openNewPantry() {
     setEnrichmentMessage('')
-    setEditingPantry({ id: undefined, name: '', qty: 1, unit: 'pz', category: data.categories[0] || 'Generico', minQty: 0, location: locationFilter === 'all' ? 'pantry' : locationFilter, expiryDate: '', autoRestock: true })
+    setEditingPantry({ id: undefined, name: '', qty: 1, unit: 'pz', category: data.categories[0] || 'Generico', minQty: 0, location: locationFilter === 'all' ? 'pantry' : locationFilter, expiryDate: '', autoRestock: true, packageState: 'sealed', remainingQty: undefined, remainingUnit: 'g', residualPercent: undefined, residualSource: undefined })
   }
 
   function savePantry() {
     if (!editingPantry?.name?.trim()) return
-    upsertPantryItem({ ...editingPantry, name: editingPantry.name.trim(), qty: Number(editingPantry.qty) || 0, minQty: Number(editingPantry.minQty) || 0, location: editingPantry.location || 'pantry', expiryDate: editingPantry.expiryDate || undefined, autoRestock: editingPantry.autoRestock !== false })
+    const opened = editingPantry.packageState === 'opened'
+    const hasResidual = Number(editingPantry.remainingQty) > 0 || Number(editingPantry.residualPercent) > 0
+    if (opened && !hasResidual) {
+      setEnrichmentMessage('Per una confezione aperta indica la quantità residua oppure una percentuale residua.')
+      return
+    }
+    upsertPantryItem({
+      ...editingPantry,
+      name: editingPantry.name.trim(),
+      qty: Number(editingPantry.qty) || 0,
+      minQty: Number(editingPantry.minQty) || 0,
+      location: editingPantry.location || 'pantry',
+      expiryDate: editingPantry.expiryDate || undefined,
+      autoRestock: editingPantry.autoRestock !== false,
+      packageState: opened ? 'opened' : 'sealed',
+      remainingQty: opened && Number.isFinite(Number(editingPantry.remainingQty)) ? Math.max(0, Number(editingPantry.remainingQty)) : undefined,
+      remainingUnit: opened ? (editingPantry.remainingUnit || undefined) : undefined,
+      residualPercent: opened && Number.isFinite(Number(editingPantry.residualPercent)) ? Math.max(0, Math.min(100, Number(editingPantry.residualPercent))) : undefined,
+      residualSource: opened ? (editingPantry.residualSource || 'manual') : undefined
+    })
     setEditingPantry(null)
   }
 
@@ -613,13 +714,14 @@ export default function ShoppingPantryPage() {
                 return (
                   <Card key={item.id} className="pantry-item-card" onClick={() => { setEnrichmentMessage(''); setEditingPantry({ ...item }) }}>
                     <div className="pantry-item-card__top">
-                      <div className="inventory-badges"><Badge>{locationLabel(item.location)}</Badge><Badge>{item.category}</Badge>{item.productInfo ? <Badge tone="success">{item.productInfo.nutriScore ? `Nutri-Score ${item.productInfo.nutriScore}` : 'Scheda online'}</Badge> : null}</div>
+                      <div className="inventory-badges"><Badge>{locationLabel(item.location)}</Badge><Badge>{item.category}</Badge>{item.packageState === 'opened' ? <Badge tone="warning">Aperta</Badge> : null}{item.productInfo ? <Badge tone="success">{item.productInfo.nutriScore ? `Nutri-Score ${item.productInfo.nutriScore}` : 'Scheda online'}</Badge> : null}</div>
                       <div className="inventory-badges">{expiring ? <Badge tone="warning">{expiryDays! < 0 ? 'Scaduto' : expiryDays === 0 ? 'Scade oggi' : `Scade tra ${expiryDays}g`}</Badge> : null}{low ? <Badge tone="danger">Da ricomprare</Badge> : null}</div>
                     </div>
                     <strong>{item.name}</strong>
                     <div className="pantry-item-card__qty"><span>{item.qty}</span><small>{item.unit}</small></div>
                     <div className="inventory-card-meta">
-                      {item.expiryDate ? <span>Scadenza {item.expiryDate.slice(8,10)}/{item.expiryDate.slice(5,7)}</span> : <span>Nessuna scadenza</span>}
+                      {item.packageState === 'opened' ? <span className="inventory-residual-line">Confezione aperta · {residualLabel(item)}</span> : null}
+                      {item.expiryDate ? <span>Scadenza {item.expiryDate.slice(8,10)}/{item.expiryDate.slice(5,7)}</span> : <span>Nessuna scadenza</span>
                       {status?.averageDailyUse ? <span>Consumo medio {status.averageDailyUse < 1 ? status.averageDailyUse.toFixed(2) : status.averageDailyUse.toFixed(1)} {item.unit}/g</span> : <span>Consumo in apprendimento</span>}
                       {status?.daysRemaining !== null && status?.daysRemaining !== undefined ? <span>Autonomia ~{Math.max(0, Math.ceil(status.daysRemaining))} giorni</span> : null}
                     </div>
@@ -804,10 +906,44 @@ export default function ShoppingPantryPage() {
                     <Field label="Unità"><select value={row.unit} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
                     {row.mode === 'new' ? <Field label="Categoria"><select value={row.category} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, category: e.target.value } : x))}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field> : null}
                     <Field label="Scadenza" hint="Solo se visibile/certa"><input type="date" value={row.expiryDate || ''} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, expiryDate: e.target.value } : x))} /></Field>
+                    {['opened','possibly_opened'].includes(row.detectedPackageState) && !row.confirmedClosed ? <div className="open-package-check field--wide">
+                      <div className="open-package-check__head">
+                        <AlertTriangle size={19} />
+                        <div>
+                          <strong>{row.detectedPackageState === 'opened' ? 'Confezione aperta rilevata' : 'Questa confezione potrebbe essere aperta'}</strong>
+                          <span>{row.openReason || 'Prima del caricamento serve confermare quanto prodotto rimane.'}</span>
+                        </div>
+                      </div>
+                      <div className="open-package-check__choices">
+                        <button type="button" onClick={() => markPhotoRowClosed(row.id)}>In realtà è chiusa</button>
+                        <label>
+                          <input type="file" accept="image/*" capture="environment" disabled={residualBusyId === row.id} onChange={e => { const file = e.target.files?.[0]; if (file) void estimateResidualFromPhoto(row.id, file); e.currentTarget.value = '' }} />
+                          <Camera size={16} /><span>{residualBusyId === row.id ? 'Analisi…' : 'Foto dell’interno'}</span>
+                        </label>
+                      </div>
+                      <div className="open-package-residual">
+                        <Field label="Residuo" hint="In alternativa alla foto">
+                          <input type="number" min="0" step="0.1" placeholder="Es. 280" value={row.remainingQty ?? ''} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, packageState: 'opened', remainingQty: e.target.value === '' ? undefined : Number(e.target.value), residualSource: 'manual' } : x))} />
+                        </Field>
+                        <Field label="Unità">
+                          <select value={row.remainingUnit || 'g'} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, packageState: 'opened', remainingUnit: e.target.value, residualSource: 'manual' } : x))}>
+                            <option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option><option value="pz">pz</option>
+                          </select>
+                        </Field>
+                        <Field label="Oppure residuo %" hint="Facoltativo se indichi quantità">
+                          <input type="number" min="1" max="100" step="1" placeholder="Es. 40" value={row.residualPercent ?? ''} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, packageState: 'opened', residualPercent: e.target.value === '' ? undefined : Math.max(0, Math.min(100, Number(e.target.value))), residualSource: 'manual' } : x))} />
+                        </Field>
+                      </div>
+                      {(Number(row.remainingQty) > 0 || Number(row.residualPercent) > 0) ? <div className="open-package-check__result">
+                        <Check size={16} />
+                        <span>Residuo confermato: {Number(row.remainingQty) > 0 && row.remainingUnit ? `${Number(row.remainingQty).toLocaleString('it-IT', { maximumFractionDigits: 2 })} ${row.remainingUnit}` : `~${Math.round(Number(row.residualPercent))}%`}{row.residualSource === 'photo' && row.residualConfidence ? ` · stima foto ${Math.round(row.residualConfidence * 100)}%` : ''}</span>
+                      </div> : <div className="open-package-check__pending">Serve questo dato prima di caricare il prodotto.</div>}
+                    </div> : null}
                   </div> : null}
                 </div>)}
                 <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se un prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
-                <Button icon={<PackageOpen size={18} />} disabled={enrichmentBusy} onClick={importPhotoRecognition}>{enrichmentBusy ? 'Cerco informazioni…' : 'Conferma e carica in dispensa'}</Button>
+                {photoRows.some(rowNeedsResidual) ? <div className="callout callout--warning"><strong>Residuo da confermare</strong><br />{photoRows.filter(rowNeedsResidual).length} {photoRows.filter(rowNeedsResidual).length === 1 ? 'confezione richiede una foto dell’interno oppure l’indicazione del residuo.' : 'confezioni richiedono una foto dell’interno oppure l’indicazione del residuo.'}</div> : null}
+                <Button icon={<PackageOpen size={18} />} disabled={enrichmentBusy || photoRows.some(rowNeedsResidual)} onClick={importPhotoRecognition}>{enrichmentBusy ? 'Cerco informazioni…' : 'Conferma e carica in dispensa'}</Button>
                 {enrichmentMessage ? <div className="product-enrichment-message"><Globe2 size={16} /><span>{enrichmentMessage}</span></div> : null}
               </div> : <EmptyState icon={<Camera size={30} />} title="In attesa della foto" text="Dopo il riconoscimento vedrai qui i prodotti, le quantità stimate e le associazioni da confermare." />}
             </Card>
@@ -829,6 +965,35 @@ export default function ShoppingPantryPage() {
           <Field label="Posizione"><select value={editingPantry.location || 'pantry'} onChange={e => setEditingPantry({ ...editingPantry, location: e.target.value as PantryLocation })}><option value="pantry">Dispensa</option><option value="fridge">Frigo</option><option value="freezer">Freezer</option></select></Field>
           <Field label="Scadenza" hint="Facoltativa"><input type="date" value={editingPantry.expiryDate || ''} onChange={e => setEditingPantry({ ...editingPantry, expiryDate: e.target.value })} /></Field>
           <Field label="Soglia minima" hint="0 = solo previsione consumo"><input type="number" min="0" value={editingPantry.minQty || 0} onChange={e => setEditingPantry({ ...editingPantry, minQty: Number(e.target.value) })} /></Field>
+          <div className="pantry-partial-card field--wide">
+            <div className="pantry-partial-card__head">
+              <div><strong>Stato confezione</strong><span>Registra anche prodotti già consumati parzialmente.</span></div>
+              <select value={editingPantry.packageState || 'sealed'} onChange={e => setEditingPantry({
+                ...editingPantry,
+                packageState: e.target.value,
+                ...(e.target.value === 'sealed'
+                  ? { remainingQty: undefined, remainingUnit: undefined, residualPercent: undefined, residualSource: undefined }
+                  : { remainingUnit: editingPantry.remainingUnit || 'g', residualSource: editingPantry.residualSource || 'manual' })
+              })}>
+                <option value="sealed">Chiusa / intera</option>
+                <option value="opened">Aperta / parzialmente consumata</option>
+              </select>
+            </div>
+            {editingPantry.packageState === 'opened' ? <div className="pantry-partial-grid">
+              <Field label="Quantità residua" hint={editingPantry.productInfo?.packageQuantity ? `Formato: ${editingPantry.productInfo.packageQuantity}` : 'Puoi indicare quantità o percentuale'}>
+                <input type="number" min="0" step="0.1" value={editingPantry.remainingQty ?? ''} onChange={e => setEditingPantry({ ...editingPantry, remainingQty: e.target.value === '' ? undefined : Number(e.target.value), residualSource: 'manual' })} placeholder="Es. 280" />
+              </Field>
+              <Field label="Unità residua">
+                <select value={editingPantry.remainingUnit || 'g'} onChange={e => setEditingPantry({ ...editingPantry, remainingUnit: e.target.value, residualSource: 'manual' })}>
+                  <option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option><option value="pz">pz</option>
+                </select>
+              </Field>
+              <Field label="Residuo %" hint="Alternativa alla quantità">
+                <input type="number" min="1" max="100" value={editingPantry.residualPercent ?? ''} onChange={e => setEditingPantry({ ...editingPantry, residualPercent: e.target.value === '' ? undefined : Math.max(0, Math.min(100, Number(e.target.value))), residualSource: 'manual' })} placeholder="Es. 40" />
+              </Field>
+              <div className="pantry-partial-summary"><span>Disponibilità effettiva</span><strong>{residualLabel(editingPantry)}</strong></div>
+            </div> : null}
+          </div>
           <div className="product-tech-card field--wide">
             <div className="product-tech-card__head">
               {editingPantry.productInfo?.imageUrl ? <img src={editingPantry.productInfo.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <div className="product-tech-card__placeholder"><Globe2 size={24} /></div>}

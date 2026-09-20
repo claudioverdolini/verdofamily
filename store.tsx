@@ -155,7 +155,7 @@ type StoreValue = {
   toggleShoppingItem: (id: number) => void
   deleteShoppingItem: (id: number) => void
   moveTakenShoppingToPantry: (location?: PantryLocation) => void
-  importReceiptItems: (items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; productInfo?: PantryItem['productInfo'] }>, removeFromShopping: boolean, defaultLocation?: PantryLocation) => void
+  importReceiptItems: (items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>, removeFromShopping: boolean, defaultLocation?: PantryLocation) => void
   upsertDish: (dish: Omit<Dish, 'id'> & { id?: number }) => void
   deleteDish: (id: number) => void
   upsertMealPlan: (plan: Omit<MealPlan, 'id'> & { id?: number }) => void
@@ -1141,7 +1141,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           minQty: Math.max(0, Number(item.minQty || 0)),
           location: item.location || 'pantry' as PantryLocation,
           expiryDate: item.expiryDate || undefined,
-          autoRestock: item.autoRestock !== false
+          autoRestock: item.autoRestock !== false,
+          packageState: item.packageState === 'opened' ? 'opened' : 'sealed',
+          remainingQty: item.packageState === 'opened' && Number.isFinite(Number(item.remainingQty)) ? Math.max(0, Number(item.remainingQty)) : undefined,
+          remainingUnit: item.packageState === 'opened' ? (item.remainingUnit || undefined) : undefined,
+          residualPercent: item.packageState === 'opened' && Number.isFinite(Number(item.residualPercent)) ? Math.max(0, Math.min(100, Number(item.residualPercent))) : undefined,
+          residualSource: item.packageState === 'opened' && ['manual','photo'].includes(String(item.residualSource || '')) ? item.residualSource : undefined
         }
         const delta = Number(clean.qty || 0) - Number(old.qty || 0)
         return {
@@ -1160,7 +1165,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         minQty: Math.max(0, Number(item.minQty || 0)),
         location: item.location || 'pantry',
         expiryDate: item.expiryDate || undefined,
-        autoRestock: item.autoRestock !== false
+        autoRestock: item.autoRestock !== false,
+        packageState: item.packageState === 'opened' ? 'opened' : 'sealed',
+        remainingQty: item.packageState === 'opened' && Number.isFinite(Number(item.remainingQty)) ? Math.max(0, Number(item.remainingQty)) : undefined,
+        remainingUnit: item.packageState === 'opened' ? (item.remainingUnit || undefined) : undefined,
+        residualPercent: item.packageState === 'opened' && Number.isFinite(Number(item.residualPercent)) ? Math.max(0, Math.min(100, Number(item.residualPercent))) : undefined,
+        residualSource: item.packageState === 'opened' && ['manual','photo'].includes(String(item.residualSource || '')) ? item.residualSource : undefined
       }
       return {
         ...prev,
@@ -1193,7 +1203,19 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       if (!actualDelta) return prev
       return {
         ...prev,
-        pantry: prev.pantry.map(p => p.id === id ? { ...p, qty: nextQty } : p),
+        pantry: prev.pantry.map(p => p.id === id
+          ? {
+              ...p,
+              qty: nextQty,
+              ...(nextQty <= 0 ? {
+                packageState: 'sealed' as const,
+                remainingQty: undefined,
+                remainingUnit: undefined,
+                residualPercent: undefined,
+                residualSource: undefined
+              } : {})
+            }
+          : p),
         pantryMovements: movement(prev.pantryMovements, id, actualDelta, 'manual')
       }
     })
@@ -1212,7 +1234,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function mergeIntoPantry(
     pantry: PantryItem[],
     movements: PantryMovement[],
-    items: Array<{ name: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; productInfo?: PantryItem['productInfo'] }>,
+    items: Array<{ name: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
     reason: PantryMovement['reason'],
     defaultLocation: PantryLocation = 'pantry'
   ) {
@@ -1225,7 +1247,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         normalize(p.name) === normalize(item.name) &&
         normalize(p.unit) === normalize(item.unit) &&
         (p.location || 'pantry') === location &&
-        (p.expiryDate || '') === (expiryDate || '')
+        (p.expiryDate || '') === (expiryDate || '') &&
+        (p.packageState || 'sealed') === (item.packageState || 'sealed')
       )
       const qty = Math.max(0, Number(item.qty || 0))
       if (idx >= 0) {
@@ -1235,7 +1258,16 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         const productInfo = incomingInfo && (!currentInfo || Number(incomingInfo.confidence || 0) >= Number(currentInfo.confidence || 0))
           ? incomingInfo
           : currentInfo
-        next[idx] = { ...current, qty: Number(current.qty || 0) + qty, productInfo }
+        next[idx] = {
+          ...current,
+          qty: Number(current.qty || 0) + qty,
+          productInfo,
+          packageState: item.packageState || current.packageState || 'sealed',
+          remainingQty: item.packageState === 'opened' ? item.remainingQty : current.remainingQty,
+          remainingUnit: item.packageState === 'opened' ? item.remainingUnit : current.remainingUnit,
+          residualPercent: item.packageState === 'opened' ? item.residualPercent : current.residualPercent,
+          residualSource: item.packageState === 'opened' ? item.residualSource : current.residualSource
+        }
         nextMovements = movement(nextMovements, current.id, qty, reason)
       } else {
         const id = nextId(next)
@@ -1249,6 +1281,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           location,
           expiryDate,
           autoRestock: true,
+          packageState: item.packageState || 'sealed',
+          remainingQty: item.packageState === 'opened' ? item.remainingQty : undefined,
+          remainingUnit: item.packageState === 'opened' ? item.remainingUnit : undefined,
+          residualPercent: item.packageState === 'opened' ? item.residualPercent : undefined,
+          residualSource: item.packageState === 'opened' ? item.residualSource : undefined,
           productInfo: item.productInfo
         })
         nextMovements = movement(nextMovements, id, qty, reason)
@@ -1277,7 +1314,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function importReceiptItems(
-    items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; productInfo?: PantryItem['productInfo'] }>,
+    items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
     removeFromShopping: boolean,
     defaultLocation: PantryLocation = 'pantry'
   ) {
