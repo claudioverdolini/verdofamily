@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  BarChart3,
   Bell,
   CalendarDays,
   CheckSquare2,
@@ -38,6 +39,7 @@ import BoardPage from './pages/Board'
 import HealthPage from './pages/Health'
 import DeadlinesPage from './pages/Deadlines'
 import TodosPage from './pages/Todos'
+import ReportsPage from './pages/Reports'
 import UsersPage from './pages/Users'
 import SettingsPage from './pages/Settings'
 import VoiceAssistant from './components/VoiceAssistant'
@@ -66,6 +68,7 @@ const NAV: Array<{ key: PageKey; label: string; icon: React.ReactNode; group?: s
   { key: 'health', label: 'Salute', icon: <HeartPulse size={20} />, group: 'Famiglia' },
   { key: 'deadlines', label: 'Scadenze', icon: <ReceiptText size={20} />, group: 'Famiglia' },
   { key: 'todos', label: 'Da fare', icon: <CheckSquare2 size={20} />, group: 'Famiglia' },
+  { key: 'reports', label: 'Report', icon: <BarChart3 size={20} />, group: 'Gestione' },
   { key: 'users', label: 'Membri', icon: <Users size={20} />, group: 'Gestione' },
   { key: 'settings', label: 'Impostazioni', icon: <Settings size={20} />, group: 'Gestione' }
 ]
@@ -82,6 +85,7 @@ function PageRenderer() {
     case 'health': return <HealthPage />
     case 'deadlines': return <DeadlinesPage />
     case 'todos': return <TodosPage />
+    case 'reports': return <ReportsPage />
     case 'users': return <UsersPage />
     case 'settings': return <SettingsPage />
     default: return <Dashboard />
