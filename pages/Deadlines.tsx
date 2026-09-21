@@ -18,6 +18,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { useFamily } from '../store'
+import MultiAssigneePicker from '../components/MultiAssigneePicker'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { localDateISO, parseISODate } from '../utils'
 import type { DeadlineCategory } from '../types'
@@ -86,11 +87,13 @@ export default function DeadlinesPage() {
   }, [data.deadlines])
 
   function openNew() {
+    const defaultUserId = authUser?.id || data.users[0]?.id || 1
     setEditing({
       id: undefined,
       title: '',
       date: today,
-      userId: authUser?.id || data.users[0]?.id || 1,
+      userId: defaultUserId,
+      userIds: [defaultUserId],
       done: false,
       kind: 'general',
       category: 'other' as DeadlineCategory,
@@ -102,16 +105,25 @@ export default function DeadlinesPage() {
 
   function save() {
     if (!editing?.title?.trim() || !editing?.date) return
-    upsertDeadline({
+    const userIds = editing.id
+      ? [Number(editing.userId)]
+      : Array.from(new Set(
+          (Array.isArray(editing.userIds) && editing.userIds.length ? editing.userIds : [editing.userId])
+            .map(Number)
+            .filter((id: number) => id > 0)
+        ))
+    if (!userIds.length) return
+    userIds.forEach((userId: number, index: number) => upsertDeadline({
       ...editing,
+      id: editing.id && index === 0 ? editing.id : undefined,
       title: editing.title.trim(),
-      userId: Number(editing.userId),
+      userId,
       kind: 'general',
       category: editing.category || 'other',
       reminderDays: Array.from(new Set((editing.reminderDays || []).map(Number))).sort((a: number, b: number) => b - a),
       repeatYearly: editing.repeatYearly === true,
       notes: editing.notes || ''
-    })
+    }))
     setEditing(null)
   }
 
@@ -257,11 +269,17 @@ export default function DeadlinesPage() {
         <Field label="Data">
           <input type="date" value={editing?.date || ''} onChange={e => setEditing({ ...editing, date: e.target.value })} />
         </Field>
-        <Field label="Per chi">
-          <select value={editing?.userId || authUser?.id || ''} onChange={e => setEditing({ ...editing, userId: Number(e.target.value) })}>
+        {editing?.id ? <Field label="Per chi">
+          <select value={editing?.userId || authUser?.id || ''} onChange={e => setEditing({ ...editing, userId: Number(e.target.value), userIds: [Number(e.target.value)] })}>
             {data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
           </select>
-        </Field>
+        </Field> : <Field label="Per chi" className="field--wide" hint="Puoi assegnare la stessa scadenza a più persone con un solo inserimento. Ognuno avrà il proprio stato.">
+          <MultiAssigneePicker
+            users={data.users}
+            selectedIds={editing?.userIds || [editing?.userId].filter(Boolean)}
+            onChange={userIds => setEditing({ ...editing, userIds, userId: userIds[0] || 0 })}
+          />
+        </Field>}
         <Field label="Categoria">
           <select
             value={editing?.category || 'other'}
