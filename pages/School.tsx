@@ -15,6 +15,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { useFamily } from '../store'
+import MultiAssigneePicker from '../components/MultiAssigneePicker'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { addDays, dayLabel, localDateISO, money, parseISODate } from '../utils'
 import type { SchoolItemType } from '../types'
@@ -101,9 +102,11 @@ export default function SchoolPage() {
   }
 
   function openItem(item?: any, presetDate?: string) {
-    setItemEditing(item ? { ...item } : {
+    const defaultUserId = selectedStudent?.id || students[0]?.id || 1
+    setItemEditing(item ? { ...item, userIds: [Number(item.userId)] } : {
       id: undefined,
-      userId: selectedStudent?.id || students[0]?.id || 1,
+      userId: defaultUserId,
+      userIds: [defaultUserId],
       type: 'homework' as SchoolItemType,
       title: '',
       date: presetDate || tomorrow,
@@ -116,9 +119,17 @@ export default function SchoolPage() {
 
   function saveItem() {
     if (!itemEditing?.title?.trim() || !itemEditing?.date) return
-    upsertSchoolItem({
-      id: itemEditing.id,
-      userId: Number(itemEditing.userId),
+    const userIds = itemEditing.id
+      ? [Number(itemEditing.userId)]
+      : Array.from(new Set(
+          (Array.isArray(itemEditing.userIds) && itemEditing.userIds.length ? itemEditing.userIds : [itemEditing.userId])
+            .map(Number)
+            .filter((id: number) => id > 0)
+        ))
+    if (!userIds.length) return
+    userIds.forEach((userId: number, index: number) => upsertSchoolItem({
+      id: itemEditing.id && index === 0 ? itemEditing.id : undefined,
+      userId,
       type: itemEditing.type,
       title: itemEditing.title.trim(),
       date: itemEditing.date,
@@ -127,7 +138,7 @@ export default function SchoolPage() {
       amount: itemEditing.type === 'payment' ? Math.max(0, Number(itemEditing.amount) || 0) : undefined,
       done: !!itemEditing.done,
       createdAt: itemEditing.createdAt
-    })
+    }))
     setItemEditing(null)
   }
 
@@ -333,11 +344,19 @@ export default function SchoolPage() {
             {ITEM_TYPES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </Field>
-        <Field label="Per">
-          <select value={itemEditing.userId} onChange={e => setItemEditing({ ...itemEditing, userId: Number(e.target.value) })} disabled={isChild}>
+        {itemEditing.id || isChild ? <Field label="Per">
+          <select value={itemEditing.userId} onChange={e => setItemEditing({ ...itemEditing, userId: Number(e.target.value), userIds: [Number(e.target.value)] })} disabled={isChild}>
             {students.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
           </select>
-        </Field>
+        </Field> : <Field label="Per" className="field--wide" hint="Seleziona uno o più ragazzi. L’attività verrà creata separatamente per ciascuno.">
+          <MultiAssigneePicker
+            users={students}
+            selectedIds={itemEditing.userIds || [itemEditing.userId].filter(Boolean)}
+            onChange={userIds => setItemEditing({ ...itemEditing, userIds, userId: userIds[0] || 0 })}
+            showFamilyShortcut={false}
+            childrenLabel="Tutti i ragazzi"
+          />
+        </Field>}
         <Field label="Titolo" className="field--wide">
           <input autoFocus value={itemEditing.title} onChange={e => setItemEditing({ ...itemEditing, title: e.target.value })} placeholder="Es. Portare cartellina di tecnologia" />
         </Field>
