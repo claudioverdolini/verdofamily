@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
-import { localDateISO, money, parseISODate } from '../utils'
+import { localDateISO, money } from '../utils'
 import type { ExpenseCategory, ExpenseRecord } from '../types'
 
 const CATEGORIES: Array<{ value: ExpenseCategory; label: string }> = [
