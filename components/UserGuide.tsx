@@ -56,8 +56,9 @@ const SECTIONS: GuideSection[] = [
     items: [
       'Crea eventi per una persona, più persone o tutta la famiglia.',
       'Puoi usare viste Agenda, Settimana e Mese; su telefono viene privilegiata la lettura compatta.',
-      'Gli eventi possono avere orario, note e promemoria.',
-      'Gli impegni rilevanti alimentano Home e notifiche.'
+      'Gli eventi possono avere orario, note e uno o più promemoria.',
+      'Puoi creare eventi giornalieri, settimanali, ogni 2 settimane, mensili o annuali, con data finale facoltativa.',
+      'Gli impegni ricorrenti alimentano correttamente calendario, Home e notifiche.'
     ]
   },
   {

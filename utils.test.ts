@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, cleanReceiptLine, medicineDepletionDate, medicineInventorySummary, medicineTherapyCoverage, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, therapyLineRequiredTablets, weekDates } from './utils'
+import { addDays, calendarEventOccursOn, calendarOccurrencesBetween, cleanReceiptLine, medicineDepletionDate, medicineInventorySummary, medicineTherapyCoverage, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, therapyLineRequiredTablets, weekDates } from './utils'
 import { initialData } from './data'
 
 describe('date helpers', () => {
@@ -44,6 +44,35 @@ describe('date helpers', () => {
     expect(result?.remainingDays).toBe(9)
     expect(result?.requiredTablets).toBe(18)
     expect(result?.sufficient).toBe(true)
+  })
+})
+
+describe('calendar recurrence', () => {
+  const base: any = {
+    id: 1,
+    title: 'Allenamento',
+    date: '2026-09-21',
+    time: '18:00',
+    userId: 1,
+    recurrence: 'weekly'
+  }
+
+  it('matches weekly and biweekly occurrences', () => {
+    expect(calendarEventOccursOn(base, '2026-09-28')).toBe(true)
+    expect(calendarEventOccursOn(base, '2026-09-29')).toBe(false)
+    expect(calendarEventOccursOn({ ...base, recurrence: 'biweekly' }, '2026-10-05')).toBe(true)
+    expect(calendarEventOccursOn({ ...base, recurrence: 'biweekly' }, '2026-09-28')).toBe(false)
+  })
+
+  it('honors recurrence end date', () => {
+    expect(calendarEventOccursOn({ ...base, recurrenceEndDate: '2026-10-05' }, '2026-10-05')).toBe(true)
+    expect(calendarEventOccursOn({ ...base, recurrenceEndDate: '2026-10-05' }, '2026-10-12')).toBe(false)
+  })
+
+  it('expands one master event without duplicating stored data', () => {
+    const rows = calendarOccurrencesBetween([base], '2026-09-21', '2026-10-05')
+    expect(rows.map(item => item.date)).toEqual(['2026-09-21', '2026-09-28', '2026-10-05'])
+    expect(rows.every(item => item.id === 1)).toBe(true)
   })
 })
 
@@ -136,7 +165,7 @@ describe('data migration', () => {
   it('migrates legacy meals to dishes', () => {
     const migrated = migrateData({ users: initialData.users, meals: [{ id: 9, name: 'Riso', type: 'Primo', variant: '', ingredients: [] }] }, initialData)
     expect(migrated.dishes[0].name).toBe('Riso')
-    expect(migrated.version).toBe(17)
+    expect(migrated.version).toBe(18)
   })
 
   it('promotes pantry identity from the existing technical sheet', () => {

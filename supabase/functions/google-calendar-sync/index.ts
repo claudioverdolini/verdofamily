@@ -204,6 +204,21 @@ function googleEventBody(event: any, familyId: string, timeZone: string, partici
     }
   };
 
+  const recurrenceMap: Record<string,string> = {
+    daily: "DAILY",
+    weekly: "WEEKLY",
+    biweekly: "WEEKLY;INTERVAL=2",
+    monthly: "MONTHLY",
+    yearly: "YEARLY"
+  };
+  const recurrenceRule = recurrenceMap[String(event.recurrence || "")];
+  if (recurrenceRule) {
+    const until = /^\d{4}-\d{2}-\d{2}$/.test(String(event.recurrenceEndDate || ""))
+      ? `;UNTIL=${String(event.recurrenceEndDate).replace(/-/g, "")}T235959Z`
+      : "";
+    base.recurrence = [`RRULE:FREQ=${recurrenceRule}${until}`];
+  }
+
   if (!event.time) {
     base.start = { date: event.date };
     base.end = { date: addOneDay(event.date) };

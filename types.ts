@@ -49,6 +49,8 @@ export type FamilyUser = {
   prefs: UserPrefs
 }
 
+export type CalendarRecurrence = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly'
+
 export type CalendarEvent = {
   id: number
   title: string
@@ -59,6 +61,8 @@ export type CalendarEvent = {
   userId: number
   userIds?: number[]
   audience?: 'users' | 'family'
+  recurrence?: CalendarRecurrence
+  recurrenceEndDate?: string
   notes?: string
   linkedHealthVisitId?: number
   linkedHealthReminderType?: 'visit' | 'booking'

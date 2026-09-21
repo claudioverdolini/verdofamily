@@ -1,4 +1,4 @@
-import type { BoardPost, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
+import type { BoardPost, CalendarEvent, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -50,6 +50,39 @@ export function addDays(dateStr: string, days: number) {
   const d = parseISODate(dateStr)
   d.setDate(d.getDate() + days)
   return localDateISO(d)
+}
+
+export function calendarEventOccursOn(event: CalendarEvent, date: string) {
+  if (!event?.date || !date || date < event.date) return false
+  if (event.recurrenceEndDate && date > event.recurrenceEndDate) return false
+  const recurrence = event.recurrence || 'none'
+  if (recurrence === 'none') return date === event.date
+
+  const start = parseISODate(event.date)
+  const target = parseISODate(date)
+  const diffDays = Math.round((target.getTime() - start.getTime()) / 86400000)
+  if (diffDays < 0) return false
+
+  if (recurrence === 'daily') return true
+  if (recurrence === 'weekly') return diffDays % 7 === 0
+  if (recurrence === 'biweekly') return diffDays % 14 === 0
+  if (recurrence === 'monthly') return target.getDate() === start.getDate()
+  if (recurrence === 'yearly') return target.getMonth() === start.getMonth() && target.getDate() === start.getDate()
+  return date === event.date
+}
+
+export function calendarOccurrencesBetween(events: CalendarEvent[], startDate: string, endDate: string) {
+  if (!startDate || !endDate || endDate < startDate) return [] as CalendarEvent[]
+  const days = Math.min(3660, Math.max(0, daysInclusive(startDate, endDate)))
+  const occurrences: CalendarEvent[] = []
+  for (let index = 0; index < days; index += 1) {
+    const date = addDays(startDate, index)
+    for (const event of events || []) {
+      if (!calendarEventOccursOn(event, date)) continue
+      occurrences.push({ ...event, date })
+    }
+  }
+  return occurrences
 }
 
 export function daysInclusive(startDate: string, endDate: string) {
@@ -651,7 +684,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 17,
+    version: 18,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -675,7 +708,22 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       const userId = Number(event?.userId || 0)
       const rawIds = Array.isArray(event?.userIds) ? event.userIds.map(Number).filter((id: number) => id > 0) : []
       const userIds = Array.from(new Set(rawIds.length ? rawIds : (userId ? [userId] : []))) as number[]
-      return { ...event, id: Number(event.id), userId: userId || userIds[0] || 0, userIds, audience: event?.audience === 'family' ? 'family' : 'users' }
+      const recurrence = ['none','daily','weekly','biweekly','monthly','yearly'].includes(String(event?.recurrence || ''))
+        ? event.recurrence
+        : 'none'
+      const recurrenceEndDate = /^\d{4}-\d{2}-\d{2}$/.test(String(event?.recurrenceEndDate || ''))
+        && String(event.recurrenceEndDate) >= String(event.date || '')
+        ? String(event.recurrenceEndDate)
+        : undefined
+      return {
+        ...event,
+        id: Number(event.id),
+        userId: userId || userIds[0] || 0,
+        userIds,
+        audience: event?.audience === 'family' ? 'family' : 'users',
+        recurrence,
+        recurrenceEndDate
+      }
     }) : [],
     deadlines: migrateDeadlines(source.deadlines),
     categories: Array.isArray(source.categories) && source.categories.length ? source.categories : fallback.categories,

@@ -2988,3 +2988,66 @@ html.has-modal-open .content{
   .guide-current-badge{display:none}
   .guide-item__content{padding-left:53px;padding-right:10px}
 }
+
+
+/* Calendar recurrence + precise family audience control */
+.calendar-family-toggle{
+  width:max-content;
+  max-width:100%;
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  min-height:38px;
+  padding:4px 8px 4px 2px;
+}
+.calendar-family-toggle input{
+  flex:0 0 auto;
+  width:20px;
+  height:20px;
+  min-height:0;
+  margin:0;
+}
+.calendar-family-toggle label{
+  cursor:pointer;
+  font-size:13.5px;
+  line-height:1.2;
+  user-select:none;
+}
+.calendar-recurrence-summary{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:10px 12px;
+  border:1px solid color-mix(in srgb,var(--accent) 24%,var(--border));
+  border-radius:13px;
+  background:color-mix(in srgb,var(--accent) 5%,var(--surface));
+  color:var(--accent);
+}
+.calendar-recurrence-summary>span{
+  display:grid;
+  gap:1px;
+}
+.calendar-recurrence-summary strong{
+  font-size:12.5px;
+  color:var(--text);
+}
+.calendar-recurrence-summary small{
+  font-size:11px;
+  color:var(--muted);
+}
+.calendar-recurrence-inline{
+  display:inline-block;
+  vertical-align:-2px;
+  margin-left:6px;
+  color:var(--accent);
+}
+.agenda-copy strong{
+  display:flex;
+  align-items:center;
+  min-width:0;
+}
+@media(max-width:520px){
+  .calendar-family-toggle{
+    min-height:42px;
+  }
+}
