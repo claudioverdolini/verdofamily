@@ -56,6 +56,13 @@ export default function ShoppingPantryPage() {
   const [residualBusyId, setResidualBusyId] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!window.matchMedia?.('(max-width: 820px)').matches) return
+    const scroller = document.querySelector<HTMLElement>('.content')
+    const frame = window.requestAnimationFrame(() => scroller?.scrollTo({ top: 0, left: 0, behavior: 'auto' }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [tab])
+
+  useEffect(() => {
     if (scanMode !== 'pantry-photo' || !cloudAuthenticated || !familyId || !supabase) return
     void refreshVisionStatus()
   }, [scanMode, cloudAuthenticated, familyId])
@@ -629,10 +636,23 @@ export default function ShoppingPantryPage() {
             { value: 'shopping', label: `Spesa · ${pending.length}` },
             { value: 'pantry', label: `Dispensa · ${data.pantry.length}` },
             { value: 'insights', label: `Avvisi · ${restockSuggestions.length + expiringSoon.length}` },
-            { value: 'scan', label: 'Scansiona' }
+            { value: 'scan', label: 'Importa' }
           ]}
         />
       </div>
+
+      {tab !== 'scan' ? <div className="shopping-import-shortcuts" aria-label="Importazione rapida">
+        <button type="button" onClick={() => { setScanMode('pantry-photo'); setTab('scan') }}>
+          <span className="shopping-import-shortcuts__icon"><Camera size={19} /></span>
+          <span><strong>Foto prodotti</strong><small>Scatta o scegli una foto</small></span>
+          <ChevronRight size={17} />
+        </button>
+        <button type="button" onClick={() => { setScanMode('receipt'); setTab('scan') }}>
+          <span className="shopping-import-shortcuts__icon"><ScanLine size={19} /></span>
+          <span><strong>Scontrino</strong><small>Foto o OCR acquisti</small></span>
+          <ChevronRight size={17} />
+        </button>
+      </div> : null}
 
       {tab === 'shopping' ? (
         <div className="shopping-layout">
@@ -682,7 +702,7 @@ export default function ShoppingPantryPage() {
                 ))}
               </div>
             ) : (
-              <EmptyState icon={<ShoppingBasket size={30} />} title="Lista vuota" text="Aggiungi ciò che manca oppure importa uno scontrino dopo la spesa." />
+              <EmptyState icon={<ShoppingBasket size={30} />} title="Lista vuota" text="Aggiungi ciò che manca oppure usa Foto prodotti / Scontrino qui sopra." />
             )}
           </Card>
         </div>

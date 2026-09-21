@@ -675,6 +675,7 @@ function AppShell() {
   const { authUser, activePage, setActivePage, logout, cloudAuthenticated, cloudLoading, needsFamilySetup, familyName } = useFamily()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const contentRef = useRef<HTMLElement>(null)
 
   const prefs = authUser?.prefs
 
@@ -698,6 +699,13 @@ function AppShell() {
     mq?.addEventListener?.('change', apply)
     return () => mq?.removeEventListener?.('change', apply)
   }, [prefs?.accent, prefs?.visualStyle, prefs?.theme, prefs?.density])
+
+  useEffect(() => {
+    const reset = () => contentRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+    reset()
+    const frame = window.requestAnimationFrame(reset)
+    return () => window.cancelAnimationFrame(frame)
+  }, [activePage])
 
   const bottomTabs = useMemo(() => (prefs?.bottomTabs?.length ? prefs.bottomTabs : ['home', 'calendar', 'shopping', 'meals']).slice(0, 4), [prefs?.bottomTabs])
   const current = NAV.find(n => n.key === activePage)
@@ -729,7 +737,7 @@ function AppShell() {
 
     <div className="app-main">
       <header className="topbar"><div className="topbar__left"><IconButton className="mobile-menu-btn" label="Menu" onClick={() => setDrawerOpen(true)}><Menu size={21} /></IconButton><div><span>{current?.label || 'VerdoFamily'}</span><small>{familyName || 'Family Hub'}</small></div></div><div className="topbar__right"><SyncIndicator /><NotificationCenter /><button className="topbar-profile" onClick={() => navigate('settings')}><Avatar user={authUser} size="sm" /><span>{authUser.name}</span></button></div></header>
-      <main className="content"><PageRenderer /></main>
+      <main className="content" ref={contentRef}><PageRenderer /></main>
     </div>
 
     <nav className="bottom-nav" aria-label="Navigazione mobile">{bottomTabs.map(key => { const item = NAV.find(n => n.key === key); if (!item) return null; return <button key={key} className={activePage === key ? 'is-active' : ''} onClick={() => navigate(key)}><span data-page={item.key}>{item.icon}</span><small>{item.label.replace(' & Dispensa','').replace('Compiti & Paghette','Paghette')}</small></button> })}<button className={bottomTabs.includes(activePage) ? '' : 'is-active'} onClick={() => setMoreOpen(true)}><span data-page="more"><MoreHorizontal size={20} /></span><small>Altro</small></button></nav>
