@@ -69,7 +69,7 @@ const SECTIONS: GuideSection[] = [
     page: 'meals',
     keywords: 'pasti ricette planner menu piatti cookidoo link ingredienti lista spesa',
     items: [
-      'Pianifica pranzo, cena e gli altri pasti giorno per giorno.',
+      'Pianifica pranzo, cena e gli altri pasti giorno per giorno, anche per più persone in un’unica operazione.',
       'Su smartphone il planner mostra un giorno alla volta per evitare lo scorrimento orizzontale.',
       'Puoi salvare ricette, piatti e link esterni, compresi link Cookidoo o altri siti.',
       'Gli ingredienti delle ricette possono essere usati per costruire la lista della spesa e confrontati con la dispensa.'
@@ -102,7 +102,7 @@ const SECTIONS: GuideSection[] = [
     keywords: 'compiti paghetta wallet ricorrenti bambini approvazione credito famiglia',
     items: [
       'Assegna compiti singoli o ricorrenti a bambini e adulti.',
-      'Un compito ricorrente può essere creato una sola volta e assegnato a più persone.',
+      'Compiti singoli e ricorrenti possono essere assegnati a più persone con un’unica operazione.',
       'Lo svolgimento resta individuale: ogni persona completa e riceve approvazione separatamente.',
       'La paghetta viene accreditata solo dopo l’approvazione prevista.',
       'Il wallet conserva saldo e movimenti per ciascun membro.'
@@ -118,6 +118,7 @@ const SECTIONS: GuideSection[] = [
     items: [
       'Gestisci orario scolastico e materie per ciascun figlio.',
       'Registra compiti, verifiche, interrogazioni, materiali, circolari, autorizzazioni, gite e pagamenti.',
+      'Quando la stessa attività riguarda più ragazzi, puoi selezionarli insieme e VerdoFamily crea uno stato separato per ciascuno.',
       'Le attività scolastiche possono comparire nei riepiloghi e nelle notifiche.'
     ]
   },
@@ -156,7 +157,7 @@ const SECTIONS: GuideSection[] = [
     page: 'deadlines',
     keywords: 'scadenze annuali documenti assicurazione auto abbonamento compleanno manutenzione',
     items: [
-      'Tieni sotto controllo scadenze singole e annuali.',
+      'Tieni sotto controllo scadenze singole e annuali; una nuova scadenza può essere assegnata a più persone con un solo inserimento.',
       'Puoi classificare documenti, assicurazioni, auto, scuola, abbonamenti, compleanni, manutenzioni e altre categorie.',
       'Imposta avvisi anticipati e consulta sia le prossime scadenze sia la vista annuale.'
     ]
@@ -169,7 +170,8 @@ const SECTIONS: GuideSection[] = [
     page: 'todos',
     keywords: 'todo da fare routine quotidiana settimanale mensile ricorrente',
     items: [
-      'Usa “Da fare” per attività semplici assegnate a un membro.',
+      'Usa “Da fare” per attività semplici: puoi assegnare lo stesso promemoria a più persone in una volta sola.',
+      'Anche una nuova routine può essere assegnata contemporaneamente a più membri; poi ogni routine resta individuale.',
       'Le routine possono ripetersi giornalmente, settimanalmente, ogni due settimane, mensilmente, semestralmente o annualmente.',
       'Le completazioni restano associate alla persona e alla data.'
     ]
