@@ -100,7 +100,14 @@ export default function ShoppingPantryPage() {
       const existing = data.pantry.find(pantryItem =>
         normalize(pantryItem.name) === normalize(item.name) && !!pantryItem.productInfo
       )
-      return existing?.productInfo ? { ...item, productInfo: existing.productInfo } : item
+      return existing?.productInfo ? {
+        ...item,
+        brand: item.brand || existing.brand || existing.productInfo.brand || '',
+        variant: item.variant || existing.variant || '',
+        packageSize: item.packageSize || existing.packageSize || existing.productInfo.packageQuantity || '',
+        barcode: item.barcode || existing.barcode || existing.productInfo.barcode || '',
+        productInfo: existing.productInfo
+      } : item
     })
 
     const requests = withExisting
@@ -128,7 +135,13 @@ export default function ShoppingPantryPage() {
         const result: any = byKey.get(String(index))
         if (!result?.autoApply || !result?.match) return item
         enriched += 1
-        return { ...item, productInfo: result.match }
+        return {
+          ...item,
+          brand: item.brand || result.match.brand || '',
+          packageSize: item.packageSize || result.match.packageQuantity || '',
+          barcode: item.barcode || result.match.barcode || '',
+          productInfo: result.match
+        }
       })
       setEnrichmentMessage(enriched
         ? `${enriched} ${enriched === 1 ? 'scheda tecnica trovata' : 'schede tecniche trovate'} e collegate automaticamente.`
@@ -171,7 +184,13 @@ export default function ShoppingPantryPage() {
         }
       }
 
-      setEditingPantry((current: any) => current ? { ...current, productInfo: match } : current)
+      setEditingPantry((current: any) => current ? {
+        ...current,
+        brand: current.brand || match.brand || '',
+        packageSize: current.packageSize || match.packageQuantity || '',
+        barcode: current.barcode || match.barcode || '',
+        productInfo: match
+      } : current)
       setEnrichmentMessage('Scheda tecnica aggiornata.')
     } catch {
       setEnrichmentMessage('Ricerca online non disponibile in questo momento.')
@@ -492,6 +511,8 @@ export default function ShoppingPantryPage() {
             raw: String(item.detectedName || '').trim(),
             observedText: String(item.observedText || '').trim(),
             brand: String(item.brand || '').trim(),
+            variant: String(item.variant || '').trim(),
+            packageSize: String(item.packageSize || '').trim(),
             barcode: String(item.barcode || '').replace(/\D/g, ''),
             detectedPackageState: ['sealed','opened','possibly_opened','unknown'].includes(String(item.packageState || '')) ? String(item.packageState) : 'unknown',
             packageState: ['opened','possibly_opened'].includes(String(item.packageState || '')) ? 'opened' : 'sealed',
@@ -555,6 +576,8 @@ export default function ShoppingPantryPage() {
       location: inventoryDestination,
       expiryDate: x.expiryDate || undefined,
       brand: x.brand || '',
+      variant: x.variant || '',
+      packageSize: x.packageSize || '',
       barcode: x.barcode || '',
       observedText: x.observedText || '',
       packageState: x.packageState === 'opened' ? 'opened' : 'sealed',
@@ -584,6 +607,10 @@ export default function ShoppingPantryPage() {
       if (q) {
         const searchable = normalize([
           item.name,
+          item.brand,
+          item.variant,
+          item.packageSize,
+          item.barcode,
           item.productInfo?.brand,
           item.productInfo?.displayName,
           item.productInfo?.barcode
@@ -626,7 +653,7 @@ export default function ShoppingPantryPage() {
 
   function openNewPantry() {
     setEnrichmentMessage('')
-    setEditingPantry({ id: undefined, name: '', qty: 1, unit: 'pz', category: data.categories[0] || 'Generico', minQty: 0, location: locationFilter === 'all' ? 'pantry' : locationFilter, expiryDate: '', autoRestock: true, packageState: 'sealed', remainingQty: undefined, remainingUnit: 'g', residualPercent: undefined, residualSource: undefined })
+    setEditingPantry({ id: undefined, name: '', brand: '', variant: '', packageSize: '', barcode: '', qty: 1, unit: 'pz', category: data.categories[0] || 'Generico', minQty: 0, location: locationFilter === 'all' ? 'pantry' : locationFilter, expiryDate: '', autoRestock: true, packageState: 'sealed', remainingQty: undefined, remainingUnit: 'g', residualPercent: undefined, residualSource: undefined })
   }
 
   function savePantry() {
@@ -640,6 +667,10 @@ export default function ShoppingPantryPage() {
     upsertPantryItem({
       ...editingPantry,
       name: editingPantry.name.trim(),
+      brand: String(editingPantry.brand || '').trim(),
+      variant: String(editingPantry.variant || '').trim(),
+      packageSize: String(editingPantry.packageSize || '').trim(),
+      barcode: String(editingPantry.barcode || '').replace(/\D/g, ''),
       qty: Number(editingPantry.qty) || 0,
       minQty: Number(editingPantry.minQty) || 0,
       location: editingPantry.location || 'pantry',
@@ -892,6 +923,11 @@ export default function ShoppingPantryPage() {
                       <div className="inventory-badges">{expiring ? <Badge tone="warning">{expiryDays! < 0 ? 'Scaduto' : expiryDays === 0 ? 'Scade oggi' : `Scade tra ${expiryDays}g`}</Badge> : null}{low ? <Badge tone="danger">Da ricomprare</Badge> : null}</div>
                     </div>
                     <strong>{item.name}</strong>
+                    {(item.brand || item.variant || item.packageSize) ? <div className="pantry-product-identity">
+                      {item.brand ? <b>{item.brand}</b> : null}
+                      {item.variant ? <span>{item.variant}</span> : null}
+                      {item.packageSize ? <span>{item.packageSize}</span> : null}
+                    </div> : null}
                     <div className="pantry-item-card__qty"><span>{item.qty}</span><small>{item.unit}</small></div>
                     <div className="inventory-card-meta">
                       {item.packageState === 'opened' ? <span className="inventory-residual-line">Confezione aperta · {residualLabel(item)}</span> : null}
@@ -1082,7 +1118,7 @@ export default function ShoppingPantryPage() {
                 <div className="vision-summary"><strong>{photoRows.filter(row => row.include).length} da importare · {photoRows.length} riconosciuti</strong><span>{photoRows.some(row => row.duplicateKind) ? 'I doppioni tra foto sono evidenziati e quelli più sicuri vengono esclusi automaticamente.' : 'Controlla soprattutto le righe con confidenza più bassa.'}</span></div>
                 {photoRows.map(row => <div key={row.id} className="receipt-match">
                   <div className="receipt-match__head">
-                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.brand ? <small> · {row.brand}</small> : null}{row.barcode ? <small> · EAN {row.barcode}</small> : row.observedText ? <small> · letto: {row.observedText}</small> : null}<small> · Foto {(row.sourcePhotoIndex ?? 0) + 1}</small></span></label>
+                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.brand ? <small> · {row.brand}</small> : null}{row.variant ? <small> · {row.variant}</small> : null}{row.packageSize ? <small> · {row.packageSize}</small> : null}{row.barcode ? <small> · EAN {row.barcode}</small> : row.observedText ? <small> · letto: {row.observedText}</small> : null}<small> · Foto {(row.sourcePhotoIndex ?? 0) + 1}</small></span></label>
                     <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge>
                   </div>
                   {row.duplicateKind ? <div className={`photo-duplicate-warning photo-duplicate-warning--${row.duplicateKind}`}>
@@ -1155,6 +1191,15 @@ export default function ShoppingPantryPage() {
       >
         {editingPantry ? <div className="form-grid form-grid--2">
           <Field label="Prodotto" className="field--wide"><input autoFocus value={editingPantry.name} onChange={e => setEditingPantry({ ...editingPantry, name: e.target.value })} /></Field>
+          <div className="pantry-identity-fields field--wide">
+            <div className="pantry-identity-fields__head"><strong>Identità prodotto</strong><span>Dati brevi usati per riconoscimento, doppioni e scheda tecnica.</span></div>
+            <div className="pantry-identity-fields__grid">
+              <Field label="Marca"><input value={editingPantry.brand || ''} onChange={e => setEditingPantry({ ...editingPantry, brand: e.target.value })} placeholder="Es. Barilla" /></Field>
+              <Field label="Variante / linea"><input value={editingPantry.variant || ''} onChange={e => setEditingPantry({ ...editingPantry, variant: e.target.value })} placeholder="Es. Integrale" /></Field>
+              <Field label="Formato confezione"><input value={editingPantry.packageSize || ''} onChange={e => setEditingPantry({ ...editingPantry, packageSize: e.target.value })} placeholder="Es. 500 g" /></Field>
+              <Field label="Barcode / EAN"><input inputMode="numeric" value={editingPantry.barcode || ''} onChange={e => setEditingPantry({ ...editingPantry, barcode: e.target.value.replace(/\D/g, '').slice(0, 14) })} placeholder="8–14 cifre" /></Field>
+            </div>
+          </div>
           <Field label="Quantità"><input type="number" min="0" value={editingPantry.qty} onChange={e => setEditingPantry({ ...editingPantry, qty: Number(e.target.value) })} /></Field>
           <Field label="Unità"><select value={editingPantry.unit} onChange={e => setEditingPantry({ ...editingPantry, unit: e.target.value })}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
           <Field label="Categoria"><select value={editingPantry.category} onChange={e => setEditingPantry({ ...editingPantry, category: e.target.value })}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field>

@@ -177,6 +177,10 @@ export type PantryProductTechnicalInfo = {
 export type PantryItem = {
   id: number
   name: string
+  brand?: string
+  variant?: string
+  packageSize?: string
+  barcode?: string
   qty: number
   unit: string
   category: string

@@ -155,7 +155,7 @@ type StoreValue = {
   toggleShoppingItem: (id: number) => void
   deleteShoppingItem: (id: number) => void
   moveTakenShoppingToPantry: (location?: PantryLocation) => void
-  importReceiptItems: (items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>, removeFromShopping: boolean, defaultLocation?: PantryLocation) => void
+  importReceiptItems: (items: Array<{ name: string; brand?: string; variant?: string; packageSize?: string; barcode?: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>, removeFromShopping: boolean, defaultLocation?: PantryLocation) => void
   upsertDish: (dish: Omit<Dish, 'id'> & { id?: number }) => void
   deleteDish: (id: number) => void
   upsertMealPlan: (plan: Omit<MealPlan, 'id'> & { id?: number }) => void
@@ -1137,6 +1137,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           ...old,
           ...item,
           id: old.id,
+          brand: String(item.brand || item.productInfo?.brand || '').trim().slice(0, 120) || undefined,
+          variant: String(item.variant || '').trim().slice(0, 120) || undefined,
+          packageSize: String(item.packageSize || item.productInfo?.packageQuantity || '').trim().slice(0, 100) || undefined,
+          barcode: /^\d{8,14}$/.test(String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, ''))
+            ? String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+            : undefined,
           qty: Math.max(0, Number(item.qty || 0)),
           minQty: Math.max(0, Number(item.minQty || 0)),
           location: item.location || 'pantry' as PantryLocation,
@@ -1161,6 +1167,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         ...item,
         id,
         name: item.name.trim(),
+        brand: String(item.brand || item.productInfo?.brand || '').trim().slice(0, 120) || undefined,
+        variant: String(item.variant || '').trim().slice(0, 120) || undefined,
+        packageSize: String(item.packageSize || item.productInfo?.packageQuantity || '').trim().slice(0, 100) || undefined,
+        barcode: /^\d{8,14}$/.test(String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, ''))
+          ? String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+          : undefined,
         qty: Math.max(0, Number(item.qty || 0)),
         minQty: Math.max(0, Number(item.minQty || 0)),
         location: item.location || 'pantry',
@@ -1234,7 +1246,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function mergeIntoPantry(
     pantry: PantryItem[],
     movements: PantryMovement[],
-    items: Array<{ name: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
+    items: Array<{ name: string; brand?: string; variant?: string; packageSize?: string; barcode?: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
     reason: PantryMovement['reason'],
     defaultLocation: PantryLocation = 'pantry'
   ) {
@@ -1243,13 +1255,20 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     for (const item of items) {
       const location = item.location || defaultLocation
       const expiryDate = item.expiryDate || undefined
-      const idx = next.findIndex(p =>
-        normalize(p.name) === normalize(item.name) &&
-        normalize(p.unit) === normalize(item.unit) &&
-        (p.location || 'pantry') === location &&
-        (p.expiryDate || '') === (expiryDate || '') &&
-        (p.packageState || 'sealed') === (item.packageState || 'sealed')
-      )
+      const incomingBrand = normalize(item.brand || item.productInfo?.brand || '')
+      const incomingBarcode = String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+      const idx = next.findIndex(p => {
+        const currentBrand = normalize(p.brand || p.productInfo?.brand || '')
+        const currentBarcode = String(p.barcode || p.productInfo?.barcode || '').replace(/\D/g, '')
+        const sameSku = !!incomingBarcode && !!currentBarcode && incomingBarcode === currentBarcode
+        const sameNamedProduct = normalize(p.name) === normalize(item.name)
+          && (!incomingBrand || !currentBrand || incomingBrand === currentBrand)
+        return (sameSku || sameNamedProduct)
+          && normalize(p.unit) === normalize(item.unit)
+          && (p.location || 'pantry') === location
+          && (p.expiryDate || '') === (expiryDate || '')
+          && (p.packageState || 'sealed') === (item.packageState || 'sealed')
+      })
       const qty = Math.max(0, Number(item.qty || 0))
       if (idx >= 0) {
         const current = next[idx]
@@ -1261,6 +1280,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         next[idx] = {
           ...current,
           qty: Number(current.qty || 0) + qty,
+          brand: String(item.brand || productInfo?.brand || current.brand || '').trim().slice(0, 120) || undefined,
+          variant: String(item.variant || current.variant || '').trim().slice(0, 120) || undefined,
+          packageSize: String(item.packageSize || productInfo?.packageQuantity || current.packageSize || '').trim().slice(0, 100) || undefined,
+          barcode: /^\d{8,14}$/.test(String(item.barcode || productInfo?.barcode || current.barcode || '').replace(/\D/g, ''))
+            ? String(item.barcode || productInfo?.barcode || current.barcode || '').replace(/\D/g, '')
+            : undefined,
           productInfo,
           packageState: item.packageState || current.packageState || 'sealed',
           remainingQty: item.packageState === 'opened' ? item.remainingQty : current.remainingQty,
@@ -1274,6 +1299,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         next.push({
           id,
           name: item.name.trim(),
+          brand: String(item.brand || item.productInfo?.brand || '').trim().slice(0, 120) || undefined,
+          variant: String(item.variant || '').trim().slice(0, 120) || undefined,
+          packageSize: String(item.packageSize || item.productInfo?.packageQuantity || '').trim().slice(0, 100) || undefined,
+          barcode: /^\d{8,14}$/.test(String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, ''))
+            ? String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+            : undefined,
           qty,
           unit: item.unit || 'pz',
           category: item.category || 'Generico',
@@ -1314,7 +1345,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function importReceiptItems(
-    items: Array<{ name: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
+    items: Array<{ name: string; brand?: string; variant?: string; packageSize?: string; barcode?: string; qty: number; unit: string; category: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
     removeFromShopping: boolean,
     defaultLocation: PantryLocation = 'pantry'
   ) {

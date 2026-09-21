@@ -651,7 +651,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 16,
+    version: 17,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -682,6 +682,12 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
     pantry: Array.isArray(source.pantry) ? source.pantry.map((item: any): PantryItem => ({
       id: Number(item.id),
       name: String(item.name || 'Prodotto'),
+      brand: String(item.brand || item.productInfo?.brand || '').trim().slice(0, 120) || undefined,
+      variant: String(item.variant || '').trim().slice(0, 120) || undefined,
+      packageSize: String(item.packageSize || item.productInfo?.packageQuantity || '').trim().slice(0, 100) || undefined,
+      barcode: /^\d{8,14}$/.test(String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, ''))
+        ? String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+        : undefined,
       qty: Math.max(0, Number(item.qty || 0)),
       unit: item.unit || 'pz',
       category: item.category || 'Generico',
