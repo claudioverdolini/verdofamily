@@ -136,7 +136,33 @@ describe('data migration', () => {
   it('migrates legacy meals to dishes', () => {
     const migrated = migrateData({ users: initialData.users, meals: [{ id: 9, name: 'Riso', type: 'Primo', variant: '', ingredients: [] }] }, initialData)
     expect(migrated.dishes[0].name).toBe('Riso')
-    expect(migrated.version).toBe(16)
+    expect(migrated.version).toBe(17)
+  })
+
+  it('promotes pantry identity from the existing technical sheet', () => {
+    const migrated = migrateData({
+      ...initialData,
+      version: 16,
+      pantry: [{
+        id: 77,
+        name: 'Pasta integrale',
+        qty: 1,
+        unit: 'pz',
+        category: 'Dispensa',
+        productInfo: {
+          source: 'openfoodfacts',
+          retrievedAt: '2026-09-21T10:00:00.000Z',
+          confidence: 1,
+          brand: 'Barilla',
+          packageQuantity: '500 g',
+          barcode: '8076800195057'
+        }
+      }]
+    }, initialData)
+
+    expect(migrated.pantry[0].brand).toBe('Barilla')
+    expect(migrated.pantry[0].packageSize).toBe('500 g')
+    expect(migrated.pantry[0].barcode).toBe('8076800195057')
   })
 
   it('separates a legacy medicine from its prescribed therapy without losing data', () => {
