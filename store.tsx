@@ -6,6 +6,7 @@ import type {
   Chore,
   Deadline,
   Dish,
+  ExpenseRecord,
   FamilyData,
   FamilyUser,
   MealPlan,
@@ -98,7 +99,7 @@ function healthHash(value: FamilyData) {
 
 type PushCategory = keyof PushTopics
 
-const PAGE_KEYS: PageKey[] = ['home', 'calendar', 'shopping', 'meals', 'chores', 'school', 'board', 'health', 'deadlines', 'todos', 'users', 'settings']
+const PAGE_KEYS: PageKey[] = ['home', 'calendar', 'shopping', 'meals', 'chores', 'school', 'board', 'health', 'deadlines', 'todos', 'reports', 'users', 'settings']
 
 function pushCategoryHashes(value: FamilyData): Record<PushCategory, string> {
   return {
@@ -190,6 +191,8 @@ type StoreValue = {
   deleteBoardPost: (id: string) => void
   addBoardAttachment: (postId: string, attachment: BoardAttachment) => void
   removeBoardAttachment: (postId: string, attachmentId: string) => void
+  upsertExpense: (expense: Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) => string
+  deleteExpense: (id: string) => Promise<void>
   restoreRecycleItem: (id: string, payload: any) => Promise<boolean>
   recoverConflictDraft: (id: string, snapshot: any) => Promise<boolean>
   exportData: () => string
@@ -1920,6 +1923,59 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     setData(prev => ({ ...prev, boardPosts: prev.boardPosts.filter(item => item.id !== id) }))
   }
 
+  function upsertExpense(expense: Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) {
+    if (!authUser || authUser.role === 'bimbo') return ''
+    const existingBySource = !expense.id && expense.sourceRef
+      ? dataRef.current.expenses.find(item => item.source === 'receipt' && item.sourceRef === expense.sourceRef)
+      : undefined
+    if (existingBySource) return existingBySource.id
+
+    const id = expense.id || crypto.randomUUID()
+    const now = new Date().toISOString()
+    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    setData(prev => {
+      const existing = prev.expenses.find(item => item.id === id)
+      const clean: ExpenseRecord = {
+        id,
+        date: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.date || '')) ? expense.date : localDateISO(),
+        merchant: String(expense.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
+        total: Math.max(0, Number(expense.total) || 0),
+        category: allowedCategories.includes(String(expense.category)) ? expense.category : 'other',
+        source: expense.source === 'receipt' ? 'receipt' : 'manual',
+        sourceRef: expense.sourceRef ? String(expense.sourceRef).slice(0, 160) : undefined,
+        createdAt: existing?.createdAt || expense.createdAt || now,
+        createdByUserId: existing?.createdByUserId || expense.createdByUserId || authUser.id,
+        notes: expense.notes?.trim().slice(0, 2000) || undefined,
+        items: Array.isArray(expense.items) ? expense.items.map(item => ({
+          id: String(item.id || crypto.randomUUID()),
+          name: String(item.name || 'Articolo').trim().slice(0, 200) || 'Articolo',
+          qty: Math.max(0, Number(item.qty) || 0),
+          unit: String(item.unit || 'pz').slice(0, 20),
+          unitPrice: Number.isFinite(Number(item.unitPrice)) ? Math.max(0, Number(item.unitPrice)) : undefined,
+          totalPrice: Number.isFinite(Number(item.totalPrice)) ? Math.max(0, Number(item.totalPrice)) : undefined,
+          category: item.category ? String(item.category).slice(0, 100) : undefined
+        })) : []
+      }
+      if (clean.total <= 0) return prev
+      return {
+        ...prev,
+        expenses: existing
+          ? prev.expenses.map(item => item.id === id ? clean : item)
+          : [clean, ...prev.expenses]
+      }
+    })
+    return id
+  }
+
+  async function deleteExpense(id: string) {
+    if (!authUser || authUser.role === 'bimbo') return
+    const expense = data.expenses.find(item => item.id === id)
+    if (!expense) return
+    if (!confirmDeletion('la spesa “' + expense.merchant + '” del ' + expense.date)) return
+    if (!await archiveDeletedItem('reports', expense.merchant + ' · ' + expense.date, { kind: 'expense', item: expense })) return
+    setData(prev => ({ ...prev, expenses: prev.expenses.filter(item => item.id !== id) }))
+  }
+
   function addBoardAttachment(postId: string, attachment: BoardAttachment) {
     if (!authUser) return
     setData(prev => {
@@ -2049,6 +2105,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const result = addUnique(next.boardPosts, item)
       return { next: { ...next, boardPosts: result.list }, applied: result.added }
     }
+    if (kind === 'expense') {
+      const result = addUnique(next.expenses, item)
+      return { next: { ...next, expenses: result.list }, applied: result.added }
+    }
     if (kind === 'category') {
       const category = String(item || '').trim()
       if (!category || next.categories.some(existing => normalize(existing) === normalize(category))) return { next, applied: false }
@@ -2173,6 +2233,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
     upsertBoardPost, toggleBoardPin, deleteBoardPost, addBoardAttachment, removeBoardAttachment,
+    upsertExpense, deleteExpense,
     restoreRecycleItem, recoverConflictDraft,
     exportData, importData, resetData
   }
