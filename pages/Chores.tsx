@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { CheckCircle2, Clock3, Pencil, Plus, Repeat2, RotateCcw, Trash2, WalletCards, XCircle } from 'lucide-react'
 import { useFamily } from '../store'
+import MultiAssigneePicker from '../components/MultiAssigneePicker'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { localDateISO, money } from '../utils'
 
@@ -58,7 +59,8 @@ export default function ChoresPage() {
 
   function openNew() {
     if (isChild) return
-    setEditing({ title: '', deadline: localDateISO(), userId: data.users[0]?.id || 1, amount: 1 })
+    const defaultUserId = data.users.find(user => user.role === 'bimbo')?.id || data.users[0]?.id || 1
+    setEditing({ title: '', deadline: localDateISO(), userId: defaultUserId, userIds: [defaultUserId], amount: 1 })
   }
 
   function openRecurring(item?: any) {
@@ -88,12 +90,20 @@ export default function ChoresPage() {
 
   function saveChore() {
     if (!editing?.title?.trim() || isChild) return
-    addChore({
-      title: editing.title.trim(),
-      deadline: editing.deadline,
-      userId: Number(editing.userId),
-      amount: Math.max(0, Number(editing.amount) || 0)
-    })
+    const userIds = Array.from(new Set(
+      (Array.isArray(editing.userIds) && editing.userIds.length ? editing.userIds : [editing.userId])
+        .map(Number)
+        .filter((id: number) => id > 0)
+    ))
+    if (!userIds.length) return
+    for (const userId of userIds) {
+      addChore({
+        title: editing.title.trim(),
+        deadline: editing.deadline,
+        userId,
+        amount: Math.max(0, Number(editing.amount) || 0)
+      })
+    }
     setEditing(null)
   }
 
@@ -377,10 +387,12 @@ export default function ChoresPage() {
         <Field label="Scadenza">
           <input type="date" value={editing.deadline} onChange={e => setEditing({ ...editing, deadline: e.target.value })} />
         </Field>
-        <Field label="Assegna a">
-          <select value={editing.userId} onChange={e => setEditing({ ...editing, userId: Number(e.target.value) })}>
-            {data.users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+        <Field label="Assegna a" className="field--wide" hint="Puoi selezionare una o più persone. Ogni assegnatario avrà completamento e paghetta separati.">
+          <MultiAssigneePicker
+            users={data.users}
+            selectedIds={editing.userIds || [editing.userId].filter(Boolean)}
+            onChange={userIds => setEditing({ ...editing, userIds, userId: userIds[0] || 0 })}
+          />
         </Field>
         <Field label="Compenso">
           <input type="number" min="0" step="0.1" value={editing.amount} onChange={e => setEditing({ ...editing, amount: Number(e.target.value) })} />
