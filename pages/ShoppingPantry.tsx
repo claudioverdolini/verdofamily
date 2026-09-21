@@ -2,9 +2,87 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Camera, Check, ChevronRight, Globe2, PackageOpen, Plus, Refrigerator, RefreshCw, ScanLine, Search, ShoppingBasket, Snowflake, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
-import { localDateISO, normalize, pantryAverageDailyUse, pantryDaysRemaining, pantryExpiryDays, pantryNeedsRestock, parseReceiptLines, similarity } from '../utils'
+import { cleanReceiptLine, localDateISO, normalize, pantryAverageDailyUse, pantryDaysRemaining, pantryExpiryDays, pantryNeedsRestock, parseReceiptLines, similarity } from '../utils'
 import type { PantryLocation } from '../types'
 import { supabase } from '../supabaseClient'
+
+const RECEIPT_EXPENSE_CATEGORIES = [
+  { value: 'groceries', label: 'Spesa alimentare' },
+  { value: 'home', label: 'Casa' },
+  { value: 'transport', label: 'Auto e trasporti' },
+  { value: 'health', label: 'Salute' },
+  { value: 'school', label: 'Scuola' },
+  { value: 'bills', label: 'Bollette e utenze' },
+  { value: 'leisure', label: 'Tempo libero' },
+  { value: 'clothing', label: 'Abbigliamento' },
+  { value: 'other', label: 'Altro' }
+] as const
+
+function receiptMoney(value: string) {
+  const match = String(value || '').replace(/\s/g, '').match(/(\d{1,6}[,.]\d{2})(?!.*\d)/)
+  if (!match) return undefined
+  const amount = Number(match[1].replace(',', '.'))
+  return Number.isFinite(amount) ? amount : undefined
+}
+
+function receiptFingerprint(text: string) {
+  let hash = 2166136261
+  const normalized = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim()
+  for (let i = 0; i < normalized.length; i++) {
+    hash ^= normalized.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `ocr-${(hash >>> 0).toString(16)}-${normalized.length}`
+}
+
+function inspectReceiptText(text: string) {
+  const rawLines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const normalizedLines = rawLines.map(line => normalize(line))
+  let total = 0
+  for (let i = rawLines.length - 1; i >= 0; i--) {
+    const n = normalizedLines[i]
+    if ((n.includes('totale') && !n.includes('subtotale')) || n.startsWith('importo')) {
+      const amount = receiptMoney(rawLines[i])
+      if (amount !== undefined) { total = amount; break }
+    }
+  }
+
+  let date = localDateISO()
+  const dateMatch = String(text || '').match(/\b(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})\b/)
+  if (dateMatch) {
+    const year = Number(dateMatch[3]) < 100 ? 2000 + Number(dateMatch[3]) : Number(dateMatch[3])
+    const month = Number(dateMatch[2])
+    const day = Number(dateMatch[1])
+    const candidate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) date = candidate
+  }
+
+  const stop = ['documento commerciale','scontrino','p iva','partita iva','iva','data','ora','cassa','totale','subtotale','pagamento','contanti','carta','resto']
+  const merchant = rawLines.slice(0, 12).find(line => {
+    const n = normalize(line)
+    return /[a-zà-ù]{3}/i.test(line)
+      && !stop.some(term => n === term || n.startsWith(term + ' '))
+      && !/^via\s|^viale\s|^piazza\s|^corso\s|^tel\s|^www\.|^http/i.test(line)
+      && !/^\d/.test(line)
+  })?.replace(/\s{2,}/g, ' ').slice(0, 160) || ''
+
+  const details = new Map<string, { price?: number; qty: number }>()
+  rawLines.forEach(line => {
+    const cleaned = cleanReceiptLine(line)
+    if (!cleaned) return
+    const qtyMatch = line.match(/^\s*(\d+(?:[,.]\d+)?)\s*[xX]\s*/)
+    const qty = qtyMatch ? Math.max(0, Number(qtyMatch[1].replace(',', '.')) || 1) : 1
+    const price = receiptMoney(line)
+    details.set(normalize(cleaned), { price, qty })
+  })
+
+  if (total <= 0) {
+    const sum = [...details.values()].reduce((value, row) => value + Number(row.price || 0), 0)
+    if (sum > 0) total = Math.round(sum * 100) / 100
+  }
+
+  return { merchant, date, total, sourceRef: receiptFingerprint(text), details }
+}
 
 export default function ShoppingPantryPage() {
   const {
@@ -20,6 +98,7 @@ export default function ShoppingPantryPage() {
     renameCategory,
     deleteCategory,
     importReceiptItems,
+    upsertExpense,
     cloudAuthenticated,
     familyId
   } = useFamily()
@@ -42,6 +121,7 @@ export default function ShoppingPantryPage() {
   const [ocrError, setOcrError] = useState('')
   const [receiptText, setReceiptText] = useState('')
   const [receiptRows, setReceiptRows] = useState<any[]>([])
+  const [receiptMeta, setReceiptMeta] = useState<any>({ merchant: '', date: localDateISO(), total: 0, category: 'groceries', sourceRef: '' })
   const [removeFromShopping, setRemoveFromShopping] = useState(true)
 
   const [scanMode, setScanMode] = useState<'receipt' | 'pantry-photo'>('receipt')
@@ -762,6 +842,7 @@ export default function ShoppingPantryPage() {
   }
 
   function analyzeReceipt(text = receiptText) {
+    const inspection = inspectReceiptText(text)
     const lines = parseReceiptLines(text)
     const catalog = catalogNames()
     const rows = lines.map((raw, index) => {
@@ -772,23 +853,40 @@ export default function ShoppingPantryPage() {
         .slice(0, 5)
       const top = suggestions[0]
       const confident = !!top && top.score >= 0.72
+      const detail = inspection.details.get(normalize(raw))
+      const qty = Math.max(0, Number(detail?.qty || 1))
+      const totalPrice = detail?.price
       return {
         id: `${Date.now()}-${index}`,
         raw,
         include: true,
         mode: confident ? 'existing' : 'new',
         name: confident ? top.name : raw,
-        qty: 1,
+        qty,
         unit: 'pz',
         category: 'Generico',
+        totalPrice,
+        unitPrice: totalPrice !== undefined && qty > 0 ? Math.round(totalPrice / qty * 100) / 100 : undefined,
         suggestions
       }
+    })
+    setReceiptMeta({
+      merchant: inspection.merchant,
+      date: inspection.date,
+      total: inspection.total,
+      category: 'groceries',
+      sourceRef: inspection.sourceRef
     })
     setReceiptRows(rows)
   }
 
   async function importReceipt() {
-    const selected = receiptRows.filter(x => x.include && x.name.trim()).map(x => ({
+    const sourceRef = receiptMeta.sourceRef || receiptFingerprint(receiptText)
+    const duplicateExpense = !!sourceRef && (data.expenses || []).some(item => item.source === 'receipt' && item.sourceRef === sourceRef)
+    if (duplicateExpense && !window.confirm('Questo scontrino risulta già importato. Continuando potresti aumentare di nuovo le quantità in dispensa. Vuoi continuare comunque? La spesa non verrà duplicata nel Report.')) return
+
+    const selectedRows = receiptRows.filter(x => x.include && x.name.trim())
+    const selected = selectedRows.map(x => ({
       name: x.name.trim(),
       qty: Math.max(0, Number(x.qty) || 1),
       unit: x.unit || 'pz',
@@ -799,8 +897,32 @@ export default function ShoppingPantryPage() {
     if (!selected.length) return
     const enriched = await enrichImportedItems(selected)
     importReceiptItems(enriched, removeFromShopping, inventoryDestination)
+
+    const total = Math.max(0, Number(receiptMeta.total) || 0)
+    if (total > 0 && !duplicateExpense) {
+      upsertExpense({
+        date: receiptMeta.date || localDateISO(),
+        merchant: receiptMeta.merchant?.trim() || 'Scontrino',
+        total,
+        category: receiptMeta.category || 'groceries',
+        source: 'receipt',
+        sourceRef,
+        notes: 'Importato automaticamente da OCR scontrino',
+        items: selectedRows.map(row => ({
+          id: crypto.randomUUID(),
+          name: row.name.trim(),
+          qty: Math.max(0, Number(row.qty) || 1),
+          unit: row.unit || 'pz',
+          unitPrice: row.unitPrice,
+          totalPrice: row.totalPrice,
+          category: row.category || undefined
+        }))
+      })
+    }
+
     setReceiptRows([])
     setReceiptText('')
+    setReceiptMeta({ merchant: '', date: localDateISO(), total: 0, category: 'groceries', sourceRef: '' })
     setTab('pantry')
   }
 
@@ -1028,6 +1150,16 @@ export default function ShoppingPantryPage() {
               <textarea rows={8} value={receiptText} onChange={e => setReceiptText(e.target.value)} placeholder="Incolla qui il testo dello scontrino…" />
             </Field>
             <Button icon={<ScanLine size={18} />} disabled={!receiptText.trim()} onClick={() => analyzeReceipt()}>Analizza prodotti</Button>
+            {receiptRows.length ? <div className="receipt-expense-meta">
+              <div className="receipt-expense-meta__head"><ReceiptText size={18} /><div><strong>Dati per il Report spese</strong><span>Controlla ciò che l’OCR ha riconosciuto prima dell’importazione.</span></div></div>
+              <div className="form-grid form-grid--2">
+                <Field label="Negozio / esercente" className="field--wide"><input value={receiptMeta.merchant || ''} onChange={e => setReceiptMeta({ ...receiptMeta, merchant: e.target.value })} placeholder="Es. Conad" /></Field>
+                <Field label="Data"><input type="date" value={receiptMeta.date || localDateISO()} onChange={e => setReceiptMeta({ ...receiptMeta, date: e.target.value })} /></Field>
+                <Field label="Totale €" hint={Number(receiptMeta.total) > 0 ? 'Rilevato automaticamente: verifica prima di importare.' : 'Non rilevato: inseriscilo per alimentare il Report.'}><input type="number" min="0" step="0.01" value={receiptMeta.total || ''} onChange={e => setReceiptMeta({ ...receiptMeta, total: e.target.value })} placeholder="0,00" /></Field>
+                <Field label="Categoria"><select value={receiptMeta.category || 'groceries'} onChange={e => setReceiptMeta({ ...receiptMeta, category: e.target.value })}>{RECEIPT_EXPENSE_CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+              </div>
+              {Number(receiptMeta.total) <= 0 ? <div className="callout callout--warning">Il totale non è stato riconosciuto: i prodotti possono essere importati comunque, ma la spesa entrerà nei Report solo se indichi un importo.</div> : null}
+            </div> : null}
           </Card>
 
           <Card>
@@ -1058,7 +1190,8 @@ export default function ShoppingPantryPage() {
                         ) : (
                           <Field label="Nome nuovo prodotto"><input value={row.name} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>
                         )}
-                        <Field label="Quantità"><input type="number" min="0" value={row.qty} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value) } : x))} /></Field>
+                        <Field label="Quantità"><input type="number" min="0" value={row.qty} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value), unitPrice: x.totalPrice !== undefined && Number(e.target.value) > 0 ? Math.round(x.totalPrice / Number(e.target.value) * 100) / 100 : x.unitPrice } : x))} /></Field>
+                        <Field label="Prezzo riga €" hint="Facoltativo"><input type="number" min="0" step="0.01" value={row.totalPrice ?? ''} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, totalPrice: e.target.value === '' ? undefined : Number(e.target.value), unitPrice: e.target.value !== '' && Number(x.qty) > 0 ? Math.round(Number(e.target.value) / Number(x.qty) * 100) / 100 : undefined } : x))} /></Field>
                         <Field label="Unità"><select value={row.unit} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
                         {row.mode === 'new' ? <Field label="Categoria"><select value={row.category} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, category: e.target.value } : x))}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field> : null}
                       </div>
