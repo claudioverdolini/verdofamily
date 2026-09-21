@@ -25,6 +25,38 @@ const RECURRENCE_OPTIONS = [
 
 const recurrenceLabel = (value?: string) => RECURRENCE_OPTIONS.find(option => option.value === (value || 'none'))?.label || 'Non ripetere'
 
+function nextRecurrenceDate(startDate: string, recurrence?: string) {
+  if (!startDate) return ''
+  if (recurrence === 'daily') return addDays(startDate, 1)
+  if (recurrence === 'weekly') return addDays(startDate, 7)
+  if (recurrence === 'biweekly') return addDays(startDate, 14)
+
+  const start = parseISODate(startDate)
+  if (recurrence === 'monthly') {
+    const wantedDay = start.getDate()
+    for (let offset = 1; offset <= 24; offset += 1) {
+      const candidate = new Date(start.getFullYear(), start.getMonth() + offset, 1, 12)
+      const lastDay = new Date(candidate.getFullYear(), candidate.getMonth() + 1, 0, 12).getDate()
+      if (wantedDay <= lastDay) {
+        candidate.setDate(wantedDay)
+        return localDateISO(candidate)
+      }
+    }
+  }
+
+  if (recurrence === 'yearly') {
+    const month = start.getMonth()
+    const day = start.getDate()
+    for (let offset = 1; offset <= 8; offset += 1) {
+      const year = start.getFullYear() + offset
+      const lastDay = new Date(year, month + 1, 0, 12).getDate()
+      if (day <= lastDay) return localDateISO(new Date(year, month, day, 12))
+    }
+  }
+
+  return ''
+}
+
 const emptyEvent = (date: string, userId: number) => ({
   id: undefined,
   title: '',
@@ -46,6 +78,9 @@ export default function CalendarPage() {
   const [view, setView] = useState<'month' | 'week' | 'agenda'>(() => window.matchMedia?.('(max-width: 820px)').matches ? 'agenda' : 'month')
   const [cursor, setCursor] = useState(today)
   const [editing, setEditing] = useState<any>(null)
+  const minimumRecurrenceEndDate = editing?.recurrence && editing.recurrence !== 'none'
+    ? nextRecurrenceDate(editing.date, editing.recurrence)
+    : ''
 
   const cells = useMemo(() => monthCells(cursor), [cursor])
   const week = useMemo(() => weekDates(cursor), [cursor])
@@ -147,6 +182,12 @@ export default function CalendarPage() {
 
   function save() {
     if (!editing?.title?.trim() || !editing?.date) return
+    const nextOccurrence = editing.recurrence && editing.recurrence !== 'none'
+      ? nextRecurrenceDate(editing.date, editing.recurrence)
+      : ''
+    if (editing.recurrenceEndDate && nextOccurrence && editing.recurrenceEndDate < nextOccurrence) {
+      return alert(`Con questa data finale l'evento non riuscirebbe a ripetersi. Scegli almeno ${nextOccurrence.split('-').reverse().join('/')} oppure lascia vuoto “Ripeti fino al”.`)
+    }
     const audience = editing.audience === 'family' ? 'family' : 'users'
     const userIds = audience === 'family' ? data.users.map(user => user.id) : participantIds(editing)
     if (!userIds.length) return alert('Seleziona almeno una persona oppure scegli Tutta la famiglia.')
@@ -239,8 +280,22 @@ export default function CalendarPage() {
               {RECURRENCE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </Field>
-          {editing.recurrence && editing.recurrence !== 'none' ? <Field label="Ripeti fino al" hint="Facoltativo: se vuoto la serie non ha una data finale.">
-            <input type="date" min={editing.date} value={editing.recurrenceEndDate || ''} onChange={e => setEditing({ ...editing, recurrenceEndDate: e.target.value })} />
+          {editing.recurrence && editing.recurrence !== 'none' ? <Field
+            label="Ripeti fino al · facoltativo"
+            hint={minimumRecurrenceEndDate
+              ? `Lascia vuoto per continuare senza scadenza. Per avere almeno una ripetizione, scegli dal ${minimumRecurrenceEndDate.split('-').reverse().join('/')} in poi.`
+              : 'Lascia vuoto per continuare senza scadenza.'}
+          >
+            <input
+              type="date"
+              min={minimumRecurrenceEndDate || editing.date}
+              value={editing.recurrenceEndDate || ''}
+              aria-invalid={!!(editing.recurrenceEndDate && minimumRecurrenceEndDate && editing.recurrenceEndDate < minimumRecurrenceEndDate)}
+              onChange={e => setEditing({ ...editing, recurrenceEndDate: e.target.value })}
+            />
+            {editing.recurrenceEndDate && minimumRecurrenceEndDate && editing.recurrenceEndDate < minimumRecurrenceEndDate
+              ? <small style={{ color: '#DC2626', fontWeight: 800 }}>Questa data fermerebbe la serie prima della seconda occorrenza.</small>
+              : null}
           </Field> : null}
           <Field label="Ora inizio"><input type="time" value={editing.time || ''} onChange={e => setEditing({ ...editing, time: e.target.value })} /></Field>
           <Field label="Ora fine"><input type="time" value={editing.endTime || ''} onChange={e => setEditing({ ...editing, endTime: e.target.value })} /></Field>
