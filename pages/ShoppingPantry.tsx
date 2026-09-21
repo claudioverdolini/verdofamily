@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Camera, Check, ChevronRight, Globe2, PackageOpen, Plus, Refrigerator, RefreshCw, ScanLine, Search, ShoppingBasket, Snowflake, Sparkles, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, Camera, Check, ChevronRight, Globe2, PackageOpen, Plus, ReceiptText, Refrigerator, RefreshCw, ScanLine, Search, ShoppingBasket, Snowflake, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { cleanReceiptLine, localDateISO, normalize, pantryAverageDailyUse, pantryDaysRemaining, pantryExpiryDays, pantryNeedsRestock, parseReceiptLines, similarity } from '../utils'
