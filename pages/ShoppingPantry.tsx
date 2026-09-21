@@ -50,6 +50,7 @@ export default function ShoppingPantryPage() {
   const [photoError, setPhotoError] = useState('')
   const [photoPreview, setPhotoPreview] = useState('')
   const [photoPayload, setPhotoPayload] = useState<{ imageData: string; mimeType: string } | null>(null)
+  const [photoBatch, setPhotoBatch] = useState<Array<{ id: string; preview: string; imageData: string; mimeType: string; name: string }>>([])
   const [photoRows, setPhotoRows] = useState<any[]>([])
   const [enrichmentBusy, setEnrichmentBusy] = useState(false)
   const [enrichmentMessage, setEnrichmentMessage] = useState('')
@@ -307,77 +308,229 @@ export default function ShoppingPantryPage() {
     }
   }
 
-  async function selectPantryPhoto(file: File) {
-    setPhotoError('')
-    setPhotoRows([])
-    try {
-      const prepared = await preparePantryPhoto(file)
-      setPhotoPreview(prepared.preview)
-      setPhotoPayload({ imageData: prepared.imageData, mimeType: prepared.mimeType })
-    } catch (error: any) {
-      setPhotoPreview('')
-      setPhotoPayload(null)
-      setPhotoError(error?.message || 'Non riesco a preparare questa foto.')
+  function photoProductFingerprint(row: any) {
+    const barcode = String(row?.barcode || '').replace(/\D/g, '')
+    const brand = normalize(String(row?.brand || ''))
+    const name = normalize(String(row?.name || row?.raw || ''))
+    const observed = normalize(String(row?.observedText || ''))
+    return { barcode, brand, name, observed }
+  }
+
+  function photoDuplicateScore(a: any, b: any) {
+    const left = photoProductFingerprint(a)
+    const right = photoProductFingerprint(b)
+    if (!left.name || !right.name) return { score: 0, reason: '' }
+
+    const differentPackageState = (a.packageState || 'sealed') !== (b.packageState || 'sealed')
+    const nameScore = similarity([left.brand, left.name].filter(Boolean).join(' '), [right.brand, right.name].filter(Boolean).join(' '))
+    const observedScore = left.observed && right.observed ? similarity(left.observed, right.observed) : 0
+    const brandMatches = !!left.brand && !!right.brand && (left.brand === right.brand || similarity(left.brand, right.brand) >= .9)
+
+    // EAN identifies the SKU, not the physical pack. It is a strong duplicate clue
+    // only when the two recognition rows also look alike and represent the same state.
+    if (left.barcode && right.barcode && left.barcode === right.barcode && !differentPackageState) {
+      const score = Math.max(.95, nameScore, observedScore)
+      return { score, reason: 'Stesso barcode rilevato in un’altra foto' }
     }
+
+    if (!differentPackageState && brandMatches && nameScore >= .92) {
+      return { score: Math.max(.94, nameScore), reason: 'Stessa marca e prodotto rilevati in un’altra foto' }
+    }
+
+    if (!differentPackageState && nameScore >= .88 && observedScore >= .72) {
+      return { score: Math.max(.89, (nameScore + observedScore) / 2), reason: 'Nome ed etichetta molto simili a un’altra foto' }
+    }
+
+    if (!differentPackageState && nameScore >= .84 && (brandMatches || observedScore >= .55)) {
+      return { score: Math.max(.82, nameScore * .92), reason: 'Possibile articolo già presente in un’altra foto' }
+    }
+
+    return { score: 0, reason: '' }
+  }
+
+  function flagPhotoDuplicates(rows: any[]) {
+    const next = rows.map(row => ({ ...row, duplicateKind: undefined, duplicateOf: undefined, duplicateReason: undefined, duplicateScore: undefined }))
+    for (let i = 0; i < next.length; i += 1) {
+      const current = next[i]
+      if (!current.sourcePhotoId) continue
+      let best: { row: any; score: number; reason: string } | null = null
+
+      for (let j = 0; j < i; j += 1) {
+        const previous = next[j]
+        if (!previous.sourcePhotoId || previous.sourcePhotoId === current.sourcePhotoId) continue
+        const match = photoDuplicateScore(current, previous)
+        if (match.score > (best?.score || 0)) best = { row: previous, ...match }
+      }
+
+      if (!best || best.score < .82) continue
+      const strong = best.score >= .94
+      current.duplicateKind = strong ? 'strong' : 'possible'
+      current.duplicateOf = best.row.id
+      current.duplicateReason = best.reason
+      current.duplicateScore = best.score
+      if (strong) current.include = false
+    }
+    return next
+  }
+
+  function keepDuplicateRow(rowId: string) {
+    setPhotoRows(prev => prev.map(row => row.id === rowId
+      ? { ...row, include: true, duplicateKind: undefined, duplicateOf: undefined, duplicateReason: undefined, duplicateScore: undefined }
+      : row
+    ))
+  }
+
+  function excludeDuplicateRow(rowId: string) {
+    setPhotoRows(prev => prev.map(row => row.id === rowId ? { ...row, include: false } : row))
+  }
+
+  async function addPantryPhotos(files: File[]) {
+    const images = files.filter(file => file.type.startsWith('image/'))
+    if (!images.length) {
+      setPhotoError('Seleziona almeno una foto valida.')
+      return
+    }
+
+    const remaining = Math.max(0, 6 - photoBatch.length)
+    if (!remaining) {
+      setPhotoError('Puoi usare fino a 6 foto nella stessa sessione. Analizza o rimuovi una foto prima di aggiungerne altre.')
+      return
+    }
+
+    const chosen = images.slice(0, remaining)
+    setPhotoError(images.length > remaining ? `Ho aggiunto le prime ${remaining} foto: il limite per sessione è 6.` : '')
+
+    const prepared: Array<{ id: string; preview: string; imageData: string; mimeType: string; name: string }> = []
+    for (let index = 0; index < chosen.length; index += 1) {
+      try {
+        const item = await preparePantryPhoto(chosen[index])
+        prepared.push({
+          id: `batch-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+          preview: item.preview,
+          imageData: item.imageData,
+          mimeType: item.mimeType,
+          name: chosen[index].name || `Foto ${photoBatch.length + index + 1}`
+        })
+      } catch (error: any) {
+        setPhotoError(error?.message || 'Una delle foto non può essere preparata.')
+      }
+    }
+
+    if (!prepared.length) return
+    setPhotoBatch(prev => [...prev, ...prepared].slice(0, 6))
+    // Keep legacy single-photo fields synced with the most recently added photo.
+    const latest = prepared[prepared.length - 1]
+    setPhotoPreview(latest.preview)
+    setPhotoPayload({ imageData: latest.imageData, mimeType: latest.mimeType })
+  }
+
+  async function selectPantryPhoto(file: File) {
+    await addPantryPhotos([file])
+  }
+
+  function removePantryPhoto(photoId: string) {
+    setPhotoBatch(prev => {
+      const next = prev.filter(photo => photo.id !== photoId)
+      const latest = next[next.length - 1]
+      setPhotoPreview(latest?.preview || '')
+      setPhotoPayload(latest ? { imageData: latest.imageData, mimeType: latest.mimeType } : null)
+      return next
+    })
+    setPhotoRows(prev => flagPhotoDuplicates(prev.filter(row => row.sourcePhotoId !== photoId)))
   }
 
   function clearPantryPhoto() {
     setPhotoBusy(false)
     setPhotoError('')
     setPhotoRows([])
+    setPhotoBatch([])
     setPhotoPreview('')
     setPhotoPayload(null)
   }
 
   async function analyzePantryPhoto() {
-    if (!photoPayload) return
+    const photos = photoBatch.length
+      ? photoBatch
+      : (photoPayload ? [{ id: 'legacy-photo', preview: photoPreview, ...photoPayload, name: 'Foto' }] : [])
+    if (!photos.length) return
+
     setPhotoBusy(true)
     setPhotoError('')
     try {
-      const result = await callPantryVision('analyze', { ...photoPayload, locationHint: inventoryDestination })
       const catalog = catalogNames()
-      const rows = (result?.items || []).map((item: any, index: number) => {
-        const exact = item.matchName && catalog.some(name => normalize(name) === normalize(item.matchName))
-          ? catalog.find(name => normalize(name) === normalize(item.matchName))
-          : ''
-        const searchText = `${item.detectedName || ''} ${item.observedText || ''}`.trim()
-        const suggestions = catalog
-          .map(name => ({ name, score: similarity(searchText, name) }))
-          .filter(x => x.score >= .16)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 5)
-        const top = suggestions[0]
-        const confidentExisting = !!exact || (!!top && top.score >= .78)
-        const chosenName = exact || (confidentExisting ? top.name : String(item.detectedName || '').trim())
-        const category = data.categories.includes(item.category) ? item.category : 'Generico'
-        return {
-          id: `photo-${Date.now()}-${index}`,
-          raw: String(item.detectedName || '').trim(),
-          observedText: String(item.observedText || '').trim(),
-          brand: String(item.brand || '').trim(),
-          barcode: String(item.barcode || '').replace(/\D/g, ''),
-          detectedPackageState: ['sealed','opened','possibly_opened','unknown'].includes(String(item.packageState || '')) ? String(item.packageState) : 'unknown',
-          packageState: ['opened','possibly_opened'].includes(String(item.packageState || '')) ? 'opened' : 'sealed',
-          openReason: String(item.openReason || '').trim(),
-          remainingQty: undefined,
-          remainingUnit: 'g',
-          residualPercent: undefined,
-          residualSource: undefined,
-          confirmedClosed: item.packageState === 'sealed',
-          notes: String(item.notes || '').trim(),
-          confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
-          include: true,
-          mode: confidentExisting ? 'existing' : 'new',
-          name: chosenName,
-          qty: Math.max(1, Number(item.qty) || 1),
-          unit: item.unit || 'pz',
-          category,
-          expiryDate: String(item.expiryDate || ''),
-          suggestions
-        }
-      }).filter((row: any) => row.raw)
-      setPhotoRows(rows)
-      if (!rows.length) setPhotoError('Non ho riconosciuto prodotti con sufficiente affidabilità. Prova una foto più vicina e ben illuminata.')
+      const allRows: any[] = []
+
+      // Sequential analysis avoids bursts against the vision backend and makes
+      // multi-photo sessions predictable on mobile networks.
+      for (let photoIndex = 0; photoIndex < photos.length; photoIndex += 1) {
+        const photo = photos[photoIndex]
+        const result = await callPantryVision('analyze', {
+          imageData: photo.imageData,
+          mimeType: photo.mimeType,
+          locationHint: inventoryDestination
+        })
+
+        const rows = (result?.items || []).map((item: any, index: number) => {
+          const exact = item.matchName && catalog.some(name => normalize(name) === normalize(item.matchName))
+            ? catalog.find(name => normalize(name) === normalize(item.matchName))
+            : ''
+          const searchText = `${item.detectedName || ''} ${item.observedText || ''}`.trim()
+          const suggestions = catalog
+            .map(name => ({ name, score: similarity(searchText, name) }))
+            .filter(x => x.score >= .16)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5)
+          const top = suggestions[0]
+          const confidentExisting = !!exact || (!!top && top.score >= .78)
+          const chosenName = exact || (confidentExisting ? top.name : String(item.detectedName || '').trim())
+          const category = data.categories.includes(item.category) ? item.category : 'Generico'
+          return {
+            id: `photo-${photo.id}-${index}`,
+            sourcePhotoId: photo.id,
+            sourcePhotoIndex: photoIndex,
+            sourcePhotoName: photo.name || `Foto ${photoIndex + 1}`,
+            raw: String(item.detectedName || '').trim(),
+            observedText: String(item.observedText || '').trim(),
+            brand: String(item.brand || '').trim(),
+            barcode: String(item.barcode || '').replace(/\D/g, ''),
+            detectedPackageState: ['sealed','opened','possibly_opened','unknown'].includes(String(item.packageState || '')) ? String(item.packageState) : 'unknown',
+            packageState: ['opened','possibly_opened'].includes(String(item.packageState || '')) ? 'opened' : 'sealed',
+            openReason: String(item.openReason || '').trim(),
+            remainingQty: undefined,
+            remainingUnit: 'g',
+            residualPercent: undefined,
+            residualSource: undefined,
+            confirmedClosed: item.packageState === 'sealed',
+            notes: String(item.notes || '').trim(),
+            confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
+            include: true,
+            mode: confidentExisting ? 'existing' : 'new',
+            name: chosenName,
+            qty: Math.max(1, Number(item.qty) || 1),
+            unit: item.unit || 'pz',
+            category,
+            expiryDate: String(item.expiryDate || ''),
+            suggestions
+          }
+        }).filter((row: any) => row.raw)
+
+        allRows.push(...rows)
+      }
+
+      const deduped = flagPhotoDuplicates(allRows)
+      setPhotoRows(deduped)
+
+      const strongCount = deduped.filter(row => row.duplicateKind === 'strong').length
+      const possibleCount = deduped.filter(row => row.duplicateKind === 'possible').length
+      if (!deduped.length) {
+        setPhotoError('Non ho riconosciuto prodotti con sufficiente affidabilità. Prova foto più vicine e ben illuminate.')
+      } else if (strongCount || possibleCount) {
+        setPhotoError(
+          strongCount
+            ? `Ho escluso ${strongCount} ${strongCount === 1 ? 'doppione molto probabile' : 'doppioni molto probabili'} tra le foto${possibleCount ? ` e segnalato ${possibleCount} possibile ${possibleCount === 1 ? 'doppione' : 'doppioni'}` : ''}. Controlla le righe evidenziate.`
+            : `Ho segnalato ${possibleCount} possibile ${possibleCount === 1 ? 'doppione' : 'doppioni'} tra le foto. Controlla prima di importare.`
+        )
+      }
     } catch (error: any) {
       const raw = error?.message || 'errore sconosciuto'
       setPhotoError(raw.includes('vision_not_configured') ? 'Il riconoscimento fotografico deve ancora essere attivato nelle impostazioni cloud.' : `Analisi non riuscita: ${raw}`)
@@ -414,6 +567,7 @@ export default function ShoppingPantryPage() {
     const enriched = await enrichImportedItems(selected)
     importReceiptItems(enriched, removeFromShopping, inventoryDestination)
     setPhotoRows([])
+    setPhotoBatch([])
     setPhotoPreview('')
     setPhotoPayload(null)
     setTab('pantry')
@@ -828,7 +982,7 @@ export default function ShoppingPantryPage() {
                 <input type="file" accept="image/*" onChange={e => { const file = e.target.files?.[0]; if (file) runOcr(file); e.currentTarget.value = '' }} />
                 <Upload size={28} />
                 <strong>Scegli foto esistente</strong>
-                <span>Apri galleria, Foto o File del dispositivo.</span>
+                <span>Puoi selezionare più immagini insieme.</span>
               </label>
             </div>
             <div className="image-source-hint">Meglio se la foto è dritta, nitida e ben illuminata.</div>
@@ -889,36 +1043,58 @@ export default function ShoppingPantryPage() {
             <Card>
               <CardHeader title="1. Fotografa la dispensa" subtitle="Puoi fotografare uno scaffale, il frigorifero o un gruppo di prodotti." />
               {!cloudAuthenticated || !familyId ? <div className="callout">Accedi al cloud VerdoFamily per usare il riconoscimento fotografico.</div> : visionStatus && !visionStatus.configured ? <div className="callout callout--warning"><strong>Riconoscimento AI da attivare</strong><br />Il modulo è installato, ma manca la chiave Gemini nel backend.</div> : null}
-              {photoPreview ? <div className="pantry-photo-preview"><img src={photoPreview} alt="Foto dispensa da analizzare" /><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}><span>Foto pronta per il riconoscimento</span><Button variant="danger" size="sm" icon={<Trash2 size={16} />} onClick={clearPantryPhoto}>Rimuovi foto</Button></div></div> : null}
+              {photoBatch.length ? <div className="pantry-photo-batch">
+                <div className="pantry-photo-batch__head">
+                  <div><strong>{photoBatch.length} {photoBatch.length === 1 ? 'foto pronta' : 'foto pronte'}</strong><span>Le analizzerò come un’unica sessione e controllerò i doppioni tra immagini.</span></div>
+                  <Button variant="danger" size="sm" icon={<Trash2 size={16} />} onClick={clearPantryPhoto}>Svuota</Button>
+                </div>
+                <div className="pantry-photo-batch__grid">
+                  {photoBatch.map((photo, index) => <div key={photo.id} className="pantry-photo-thumb">
+                    <img src={photo.preview} alt={`Foto ${index + 1} da analizzare`} />
+                    <span>Foto {index + 1}</span>
+                    <button type="button" aria-label={`Rimuovi foto ${index + 1}`} onClick={() => removePantryPhoto(photo.id)}><Trash2 size={14} /></button>
+                  </div>)}
+                </div>
+              </div> : null}
               <div className="image-source-grid image-source-grid--pantry">
                 <label className="image-source-option">
                   <input type="file" accept="image/*" capture="environment" onChange={e => { const file = e.target.files?.[0]; if (file) void selectPantryPhoto(file); e.currentTarget.value = '' }} />
                   <Camera size={30} />
-                  <strong>{photoPreview ? 'Scatta un’altra foto' : 'Scatta foto'}</strong>
+                  <strong>{photoBatch.length ? 'Aggiungi un’altra foto' : 'Scatta foto'}</strong>
                   <span>Usa la fotocamera del tablet o telefono.</span>
                 </label>
                 <label className="image-source-option">
-                  <input type="file" accept="image/*" onChange={e => { const file = e.target.files?.[0]; if (file) void selectPantryPhoto(file); e.currentTarget.value = '' }} />
+                  <input type="file" accept="image/*" multiple onChange={e => { const files = Array.from(e.target.files || []); if (files.length) void addPantryPhotos(files); e.currentTarget.value = '' }} />
                   <Upload size={30} />
-                  <strong>{photoPreview ? 'Scegli un’altra foto' : 'Scegli foto esistente'}</strong>
+                  <strong>{photoBatch.length ? 'Aggiungi foto dalla galleria' : 'Scegli una o più foto'}</strong>
                   <span>Apri galleria, Foto o File del dispositivo.</span>
                 </label>
               </div>
               <div className="image-source-hint">Per risultati migliori: foto frontale, luce uniforme e prodotti non troppo sovrapposti.</div>
               <div className="callout">🔒 La foto viene usata solo per il riconoscimento e non viene salvata nella dispensa o negli allegati.</div>
               {photoError ? <div className="callout callout--warning">{photoError}</div> : null}
-              <Button icon={<ScanLine size={18} />} disabled={!photoPayload || photoBusy || visionStatus?.configured === false} onClick={analyzePantryPhoto}>{photoBusy ? 'Riconoscimento in corso…' : 'Riconosci prodotti'}</Button>
+              <Button icon={<ScanLine size={18} />} disabled={!photoBatch.length || photoBusy || visionStatus?.configured === false} onClick={analyzePantryPhoto}>{photoBusy ? `Analizzo ${photoBatch.length} ${photoBatch.length === 1 ? 'foto' : 'foto'}…` : `Riconosci prodotti da ${photoBatch.length || 0} ${photoBatch.length === 1 ? 'foto' : 'foto'}`}</Button>
             </Card>
 
             <Card>
               <CardHeader title="2. Controlla e carica" subtitle="Nessuna quantità viene modificata senza la tua conferma." />
               {photoBusy ? <div className="vision-loading"><ScanLine size={28} /><strong>Sto guardando la foto…</strong><span>Leggo confezioni, etichette e quantità visibili.</span></div> : photoRows.length ? <div className="receipt-matches">
-                <div className="vision-summary"><strong>{photoRows.length} {photoRows.length === 1 ? 'prodotto riconosciuto' : 'prodotti riconosciuti'}</strong><span>Controlla soprattutto le righe con confidenza più bassa.</span></div>
+                <div className="vision-summary"><strong>{photoRows.filter(row => row.include).length} da importare · {photoRows.length} riconosciuti</strong><span>{photoRows.some(row => row.duplicateKind) ? 'I doppioni tra foto sono evidenziati e quelli più sicuri vengono esclusi automaticamente.' : 'Controlla soprattutto le righe con confidenza più bassa.'}</span></div>
                 {photoRows.map(row => <div key={row.id} className="receipt-match">
                   <div className="receipt-match__head">
-                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.brand ? <small> · {row.brand}</small> : null}{row.barcode ? <small> · EAN {row.barcode}</small> : row.observedText ? <small> · letto: {row.observedText}</small> : null}</span></label>
+                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.brand ? <small> · {row.brand}</small> : null}{row.barcode ? <small> · EAN {row.barcode}</small> : row.observedText ? <small> · letto: {row.observedText}</small> : null}<small> · Foto {(row.sourcePhotoIndex ?? 0) + 1}</small></span></label>
                     <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge>
                   </div>
+                  {row.duplicateKind ? <div className={`photo-duplicate-warning photo-duplicate-warning--${row.duplicateKind}`}>
+                    <AlertTriangle size={17} />
+                    <div>
+                      <strong>{row.duplicateKind === 'strong' ? 'Doppione molto probabile' : 'Possibile doppione'}</strong>
+                      <span>{row.duplicateReason}{row.duplicateScore ? ` · ${Math.round(row.duplicateScore * 100)}% corrispondenza` : ''}</span>
+                    </div>
+                    {row.duplicateKind === 'strong' && !row.include
+                      ? <button type="button" onClick={() => keepDuplicateRow(row.id)}>Tieni comunque</button>
+                      : <button type="button" onClick={() => excludeDuplicateRow(row.id)}>Escludi</button>}
+                  </div> : null}
                   {row.include ? <div className="receipt-match__grid">
                     <Field label="Associazione"><select value={row.mode} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, mode: e.target.value } : x))}><option value="existing">Prodotto esistente</option><option value="new">Crea nuovo prodotto</option></select></Field>
                     {row.mode === 'existing' ? <Field label="Prodotto"><select value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))}>{row.suggestions.length ? row.suggestions.map((suggestion: any) => <option key={suggestion.name} value={suggestion.name}>{suggestion.name} · {Math.round(suggestion.score * 100)}%</option>) : <option value={row.name}>{row.name}</option>}{catalogNames().filter(name => !row.suggestions.some((suggestion: any) => suggestion.name === name)).map(name => <option key={name} value={name}>{name}</option>)}</select></Field> : <Field label="Nome prodotto"><input value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>}
