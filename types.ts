@@ -13,6 +13,7 @@ export type PageKey =
   | 'health'
   | 'deadlines'
   | 'todos'
+  | 'reports'
   | 'users'
   | 'settings'
 
@@ -370,6 +371,32 @@ export type BoardPost = {
   attachments: BoardAttachment[]
 }
 
+export type ExpenseCategory = 'groceries' | 'home' | 'transport' | 'health' | 'school' | 'bills' | 'leisure' | 'clothing' | 'other'
+
+export type ExpenseItem = {
+  id: string
+  name: string
+  qty: number
+  unit: string
+  unitPrice?: number
+  totalPrice?: number
+  category?: string
+}
+
+export type ExpenseRecord = {
+  id: string
+  date: string
+  merchant: string
+  total: number
+  category: ExpenseCategory
+  source: 'receipt' | 'manual'
+  sourceRef?: string
+  createdAt: string
+  createdByUserId?: number
+  notes?: string
+  items: ExpenseItem[]
+}
+
 export type FamilyData = {
   version: number
   storageModel?: 'normalized-v1' | 'normalized-v2'
@@ -393,4 +420,5 @@ export type FamilyData = {
   schoolTimetable: SchoolTimetableEntry[]
   schoolItems: SchoolItem[]
   boardPosts: BoardPost[]
+  expenses: ExpenseRecord[]
 }
