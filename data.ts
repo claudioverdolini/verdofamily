@@ -2,7 +2,7 @@ import type { FamilyData } from './types'
 import { DEFAULT_PREFS } from './utils'
 
 export const initialData: FamilyData = {
-  version: 18,
+  version: 19,
   storageModel: 'normalized-v2',
   assistantName: 'Verdo',
   users: [
@@ -55,5 +55,6 @@ export const initialData: FamilyData = {
   schoolSubjects: [],
   schoolTimetable: [],
   schoolItems: [],
-  boardPosts: []
+  boardPosts: [],
+  expenses: []
 }
