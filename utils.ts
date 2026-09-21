@@ -684,7 +684,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 18,
+    version: 19,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -908,6 +908,27 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         size: attachment.size === undefined ? undefined : Number(attachment.size || 0),
         createdAt: attachment.createdAt || new Date().toISOString()
       })).filter((attachment: any) => attachment.path) : []
-    })) : []
+    })) : [],
+    expenses: Array.isArray(source.expenses) ? source.expenses.map((item: any) => ({
+      id: String(item.id || crypto.randomUUID()),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || '')) ? String(item.date) : localDateISO(),
+      merchant: String(item.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
+      total: Math.max(0, Number(item.total) || 0),
+      category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
+      source: item.source === 'receipt' ? 'receipt' : 'manual',
+      sourceRef: item.sourceRef ? String(item.sourceRef).slice(0, 160) : undefined,
+      createdAt: item.createdAt || new Date().toISOString(),
+      createdByUserId: Number(item.createdByUserId || 0) || undefined,
+      notes: item.notes ? String(item.notes).slice(0, 2000) : undefined,
+      items: Array.isArray(item.items) ? item.items.map((row: any) => ({
+        id: String(row.id || crypto.randomUUID()),
+        name: String(row.name || 'Articolo').trim().slice(0, 200) || 'Articolo',
+        qty: Math.max(0, Number(row.qty) || 0),
+        unit: String(row.unit || 'pz').slice(0, 20),
+        unitPrice: Number.isFinite(Number(row.unitPrice)) ? Math.max(0, Number(row.unitPrice)) : undefined,
+        totalPrice: Number.isFinite(Number(row.totalPrice)) ? Math.max(0, Number(row.totalPrice)) : undefined,
+        category: row.category ? String(row.category).slice(0, 100) : undefined
+      })) : []
+    })).filter((item: any) => item.total > 0) : []
   }
 }
