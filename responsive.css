@@ -3051,3 +3051,63 @@ html.has-modal-open .content{
     min-height:42px;
   }
 }
+
+
+/* Unified multi-assignee controls */
+.multi-assignee-control{
+  display:grid;
+  gap:7px;
+  min-width:0;
+}
+.multi-assignee-picker{
+  width:100%;
+  min-width:0;
+}
+.multi-assignee-picker>button:disabled{
+  cursor:default;
+  opacity:.78;
+}
+.multi-assignee-shortcuts{
+  margin-top:1px;
+}
+.todo-compose--multi{
+  grid-template-columns:minmax(0,1fr) auto!important;
+  align-items:center;
+}
+.todo-multi-assignees{
+  display:grid;
+  gap:7px;
+  margin-top:10px;
+  padding-top:10px;
+  border-top:1px solid var(--border);
+}
+.todo-multi-assignees>span{
+  color:var(--muted);
+  font-size:11.5px;
+  font-weight:850;
+}
+@media(max-width:820px){
+  .todo-compose--multi{
+    grid-template-columns:minmax(0,1fr) auto!important;
+  }
+  .todo-compose--multi .btn{
+    grid-row:auto!important;
+  }
+}
+@media(max-width:520px){
+  .multi-assignee-picker.recurring-assignee-picker{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .multi-assignee-picker.recurring-assignee-picker>button{
+    min-height:54px;
+    padding:7px 8px;
+  }
+}
+@media(max-width:370px){
+  .multi-assignee-picker.recurring-assignee-picker{
+    grid-template-columns:minmax(0,1fr);
+  }
+  .todo-compose--multi{
+    grid-template-columns:minmax(0,1fr)!important;
+  }
+}
