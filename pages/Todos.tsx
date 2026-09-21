@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { CalendarClock, Check, History, Pencil, Plus, Repeat2, RotateCcw, Trash2 } from 'lucide-react'
 import { useFamily } from '../store'
+import MultiAssigneePicker from '../components/MultiAssigneePicker'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { dayLabel, localDateISO, nextRoutineDueDate, routineCompletedOn, routineDueOn } from '../utils'
 import type { RoutineFrequency } from '../types'
@@ -36,7 +37,7 @@ export default function TodosPage() {
   const isChild = authUser?.role === 'bimbo'
   const [view, setView] = useState<'today' | 'routines' | 'archive'>('today')
   const [title, setTitle] = useState('')
-  const [userId, setUserId] = useState(authUser?.id || data.users[0]?.id || 1)
+  const [todoUserIds, setTodoUserIds] = useState<number[]>([authUser?.id || data.users[0]?.id || 1])
   const [routineEditing, setRoutineEditing] = useState<any>(null)
 
   const openTodos = useMemo(
@@ -91,17 +92,23 @@ export default function TodosPage() {
 
   function submit() {
     if (!title.trim()) return
-    addTodo({ title: title.trim(), userId: Number(userId) })
+    const ids = isChild && authUser
+      ? [authUser.id]
+      : Array.from(new Set(todoUserIds.map(Number).filter(id => id > 0)))
+    if (!ids.length) return
+    for (const userId of ids) addTodo({ title: title.trim(), userId })
     setTitle('')
   }
 
   function openRoutine(item?: any) {
     if (isChild) return
+    const defaultUserId = data.users[0]?.id || 1
     setRoutineEditing(item
-      ? { ...item }
+      ? { ...item, userIds: [Number(item.userId)] }
       : {
           title: '',
-          userId: data.users[0]?.id || 1,
+          userId: defaultUserId,
+          userIds: [defaultUserId],
           frequency: 'weekly' as RoutineFrequency,
           startDate: today,
           endDate: '',
@@ -112,16 +119,24 @@ export default function TodosPage() {
 
   function saveRoutine() {
     if (isChild || !routineEditing?.title?.trim()) return
-    upsertRoutine({
-      id: routineEditing.id,
+    const ids = routineEditing.id
+      ? [Number(routineEditing.userId)]
+      : Array.from(new Set(
+          (Array.isArray(routineEditing.userIds) && routineEditing.userIds.length ? routineEditing.userIds : [routineEditing.userId])
+            .map(Number)
+            .filter((id: number) => id > 0)
+        ))
+    if (!ids.length) return
+    ids.forEach((userId: number, index: number) => upsertRoutine({
+      id: routineEditing.id && index === 0 ? routineEditing.id : undefined,
       title: routineEditing.title.trim(),
-      userId: Number(routineEditing.userId),
+      userId,
       frequency: routineEditing.frequency,
       startDate: routineEditing.startDate || today,
       endDate: routineEditing.endDate || undefined,
       active: routineEditing.active !== false,
       notes: routineEditing.notes || ''
-    })
+    }))
     setRoutineEditing(null)
   }
 
@@ -150,7 +165,7 @@ export default function TodosPage() {
 
     {view === 'today' ? <>
       <Card className="todo-compose-card">
-        <div className="todo-compose">
+        <div className="todo-compose todo-compose--multi">
           <input
             autoComplete="off"
             value={title}
@@ -158,11 +173,12 @@ export default function TodosPage() {
             onKeyDown={e => { if (e.key === 'Enter') submit() }}
             placeholder="Aggiungi un promemoria…"
           />
-          <select value={userId} onChange={e => setUserId(Number(e.target.value))}>
-            {(isChild && authUser ? [authUser] : data.users).map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
-          </select>
-          <Button icon={<Plus size={17} />} onClick={submit}>Aggiungi</Button>
+          <Button icon={<Plus size={17} />} onClick={submit} disabled={!title.trim() || (!isChild && !todoUserIds.length)}>Aggiungi</Button>
         </div>
+        {!isChild ? <div className="todo-multi-assignees">
+          <span>A chi?</span>
+          <MultiAssigneePicker users={data.users} selectedIds={todoUserIds} onChange={setTodoUserIds} />
+        </div> : null}
       </Card>
 
       <div className="todo-routine-grid">
@@ -300,11 +316,17 @@ export default function TodosPage() {
             placeholder="Es. Cambio lenzuola"
           />
         </Field>
-        <Field label="Assegna a">
-          <select value={routineEditing.userId} onChange={e => setRoutineEditing({ ...routineEditing, userId: Number(e.target.value) })}>
+        {routineEditing.id ? <Field label="Assegna a">
+          <select value={routineEditing.userId} onChange={e => setRoutineEditing({ ...routineEditing, userId: Number(e.target.value), userIds: [Number(e.target.value)] })}>
             {data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
           </select>
-        </Field>
+        </Field> : <Field label="Assegna a" className="field--wide" hint="Seleziona una o più persone: verrà creata una routine individuale per ciascuno.">
+          <MultiAssigneePicker
+            users={data.users}
+            selectedIds={routineEditing.userIds || [routineEditing.userId].filter(Boolean)}
+            onChange={userIds => setRoutineEditing({ ...routineEditing, userIds, userId: userIds[0] || 0 })}
+          />
+        </Field>}
         <Field label="Frequenza">
           <select value={routineEditing.frequency} onChange={e => setRoutineEditing({ ...routineEditing, frequency: e.target.value as RoutineFrequency })}>
             {FREQUENCIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
