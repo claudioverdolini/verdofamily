@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import {
-  Bell, CalendarDays, CheckSquare2, ChevronRight, Cloud, GraduationCap, HeartPulse,
+  BarChart3, Bell, CalendarDays, CheckSquare2, ChevronRight, Cloud, GraduationCap, HeartPulse,
   HelpCircle, Home, Lightbulb, Mic, PackageOpen, Pin, ReceiptText, Search,
   Settings, ShoppingBasket, Sparkles, Users, Utensils, WalletCards, X
 } from 'lucide-react'
@@ -229,6 +229,20 @@ const SECTIONS: GuideSection[] = [
     ]
   },
   {
+    id: 'reports',
+    title: 'Report e spese',
+    subtitle: 'Scontrini, categorie e andamento nel tempo',
+    icon: <BarChart3 size={20} />,
+    page: 'reports',
+    keywords: 'report spese scontrini totale negozio categorie andamento mese anno ocr',
+    items: [
+      'Gli scontrini importati possono alimentare automaticamente il registro spese con data, negozio, totale e articoli riconosciuti.',
+      'Puoi correggere i dati rilevati prima dell’importazione oppure aggiungere una spesa manuale.',
+      'Il Report mostra totale, media per spesa, spesa alimentare, ripartizione per categoria, negozi principali e andamento degli ultimi mesi.',
+      'Le spese restano modificabili e ogni eliminazione richiede conferma.'
+    ]
+  },
+  {
     id: 'cloud',
     title: 'Cloud e sicurezza dei dati',
     subtitle: 'Sincronizzazione e protezioni',
@@ -248,6 +262,7 @@ const DISCOVER = [
   'Le confezioni aperte possono avere quantità o percentuale residua e una stima da foto dell’interno.',
   'Le ricorrenze dei compiti possono essere assegnate a più persone con una sola configurazione.',
   'La Home è modulare: puoi scegliere quali riepiloghi mostrare.',
+  'Gli scontrini possono alimentare automaticamente il Report spese con negozio, data e totale.',
   'Le schede tecniche della dispensa possono recuperare automaticamente informazioni online.',
   'Le notifiche possono usare un contenuto discreto sulla schermata di blocco.'
 ]
