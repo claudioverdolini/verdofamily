@@ -29,6 +29,7 @@ const TAB_OPTIONS: Array<{ key: PageKey; label: string }> = [
   { key: 'board', label: 'Bacheca' },
   { key: 'deadlines', label: 'Scadenze' },
   { key: 'todos', label: 'ToDo' },
+  { key: 'reports', label: 'Report' },
   { key: 'users', label: 'Utenti' }
 ]
 
