@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { BellRing, CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Flame, Heart, Leaf, Link2, Moon, RefreshCw, RotateCcw, Sparkles, Unlink, Upload, Waves, Zap } from 'lucide-react'
+import { BellRing, CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Flame, Heart, Image as ImageIcon, ImagePlus, Leaf, Link2, Moon, RefreshCw, RotateCcw, Sparkles, Unlink, Upload, Waves, Zap } from 'lucide-react'
 import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
 import type { PageKey, ThemeMode } from '../types'
 import { Avatar, Button, Card, CardHeader, Field, PageIntro, Segmented } from '../ui'
 import TelegramReportsCard from '../components/TelegramReportsCard'
-import { imageFileToAvatarDataUrl } from '../utils'
+import { imageFileToAvatarDataUrl, imageFileToBackgroundDataUrl } from '../utils'
+import { BACKGROUND_PRESETS } from '../backgrounds'
 import { disablePush, enablePush, getPushStatus, sendPushTest, syncPushTopics, type PushStatus, type PushTopics } from '../pushNotifications'
 
 const VISUAL_STYLES = [
@@ -197,6 +198,7 @@ export default function SettingsPage() {
   const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarChoice[]>([])
   const [googleBusy, setGoogleBusy] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
+  const [backgroundBusy, setBackgroundBusy] = useState(false)
   const [googleMessage, setGoogleMessage] = useState('')
   const [googleDraft, setGoogleDraft] = useState({ personalCalendarId: 'primary', familyCalendarId: '', familyEventTarget: 'personal' as 'personal' | 'shared' | 'both' })
   const [pushStatus, setPushStatus] = useState<PushStatus | null>(null)
@@ -229,6 +231,28 @@ export default function SettingsPage() {
     } finally {
       setAvatarBusy(false)
     }
+  }
+
+  async function changeBackground(file?: File) {
+    if (!file) return
+    setBackgroundBusy(true)
+    setMessage('')
+    try {
+      const backgroundImage = await imageFileToBackgroundDataUrl(file)
+      updateCurrentPrefs({ backgroundImage, backgroundPreset: 'custom' })
+      setMessage('Sfondo personalizzato applicato.')
+    } catch (error: any) {
+      setMessage(error?.message || 'Impossibile elaborare lo sfondo.')
+    } finally {
+      setBackgroundBusy(false)
+    }
+  }
+
+  function removeCustomBackground() {
+    if (!prefs?.backgroundImage) return
+    if (!confirm('Rimuovere definitivamente la foto di sfondo personalizzata?')) return
+    updateCurrentPrefs({ backgroundImage: undefined, backgroundPreset: 'none' })
+    setMessage('Foto di sfondo rimossa.')
   }
 
   useEffect(() => {
@@ -707,6 +731,56 @@ export default function SettingsPage() {
                   })}
                 </div>
               </Field>
+              <Field label="Sfondo dell’app" hint="Scegli uno sfondo astratto oppure usa una tua foto. La scelta è personale per questo profilo.">
+                <div className="background-preset-grid">
+                  {BACKGROUND_PRESETS.map(item => {
+                    const selected = prefs.backgroundPreset === item.id
+                    return <button
+                      type="button"
+                      key={item.id}
+                      className={`background-preset ${selected ? 'is-active' : ''}`}
+                      onClick={() => updateCurrentPrefs({ backgroundPreset: item.id as any })}
+                    >
+                      <span className="background-preset__preview" style={{ backgroundImage: item.css === 'none' ? undefined : item.css }}>
+                        {item.id === 'none' ? <ImageIcon size={21} /> : null}
+                      </span>
+                      <span><strong>{item.name}</strong><small>{item.subtitle}</small></span>
+                      {selected ? <Check size={15} /> : null}
+                    </button>
+                  })}
+                  <label className={`background-preset background-preset--upload ${prefs.backgroundPreset === 'custom' ? 'is-active' : ''}`}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={backgroundBusy}
+                      onChange={e => { const file = e.target.files?.[0]; if (file) void changeBackground(file); e.currentTarget.value = '' }}
+                    />
+                    <span
+                      className="background-preset__preview"
+                      style={prefs.backgroundImage ? { backgroundImage: `url("${prefs.backgroundImage}")` } : undefined}
+                    >
+                      {!prefs.backgroundImage ? <ImagePlus size={22} /> : null}
+                    </span>
+                    <span><strong>{backgroundBusy ? 'Elaborazione…' : 'La tua foto'}</strong><small>{prefs.backgroundImage ? 'Tocca per sostituire' : 'Carica immagine'}</small></span>
+                    {prefs.backgroundPreset === 'custom' ? <Check size={15} /> : null}
+                  </label>
+                </div>
+              </Field>
+
+              {prefs.backgroundPreset !== 'none' ? <div className="wallpaper-controls">
+                <Field label={`Intensità sfondo · ${Math.round(prefs.backgroundStrength)}%`} hint="Più alta = immagine più visibile.">
+                  <input type="range" min="8" max="60" step="1" value={prefs.backgroundStrength} onChange={e => updateCurrentPrefs({ backgroundStrength: Number(e.target.value) })} />
+                </Field>
+                <Field label={`Sfocatura · ${Math.round(prefs.backgroundBlur)} px`} hint="Ammorbidisce lo sfondo dietro alle card.">
+                  <input type="range" min="0" max="12" step="1" value={prefs.backgroundBlur} onChange={e => updateCurrentPrefs({ backgroundBlur: Number(e.target.value) })} />
+                </Field>
+              </div> : null}
+
+              {prefs.backgroundImage ? <div className="wallpaper-custom-actions">
+                <Button size="sm" variant="ghost" onClick={() => updateCurrentPrefs({ backgroundPreset: 'custom' })}>Usa la mia foto</Button>
+                <Button size="sm" variant="danger" onClick={removeCustomBackground}>Rimuovi foto</Button>
+              </div> : null}
+
               <div className="form-grid form-grid--2 settings-inline-fields">
                 <Field label="Colore personalizzato" hint="Se vuoi uscire dalle palette predefinite."><input type="color" value={prefs.accent} onChange={e => updateCurrentPrefs({ accent: e.target.value, visualStyle: 'custom' as any })} /></Field>
                 <Field label="Spaziatura"><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
