@@ -4197,3 +4197,107 @@ html.has-modal-open .content{
     padding:10px;
   }
 }
+
+
+/* User density preference: make Comfortable vs Compact visibly different.
+   Compact reduces whitespace on tablet/desktop but deliberately keeps mobile
+   touch targets unchanged. */
+.custom-accent-control{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:9px;
+}
+.custom-accent-control input[type=color]{
+  min-height:44px;
+}
+.custom-accent-control code{
+  min-width:72px;
+  padding:8px 9px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--surface2);
+  color:var(--muted);
+  font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  text-align:center;
+}
+
+@media (min-width:821px){
+  html[data-density=compact]{
+    --topbar:58px;
+    --sidebar:248px;
+    --radius:16px;
+  }
+  html[data-density=compact] .content{
+    padding:20px 24px 34px;
+  }
+  html[data-density=compact] .page-intro{
+    margin-bottom:17px;
+  }
+  html[data-density=compact] .card{
+    padding:14px;
+  }
+  html[data-density=compact] .card-header{
+    margin-bottom:11px;
+  }
+  html[data-density=compact] .form-grid{
+    gap:10px;
+  }
+  html[data-density=compact] .sidebar{
+    padding-top:12px;
+  }
+  html[data-density=compact] .sidebar__head{
+    height:46px;
+    padding-bottom:8px;
+  }
+  html[data-density=compact] .sidebar__nav{
+    gap:2px;
+    padding-top:6px;
+  }
+  html[data-density=compact] .sidebar__nav>button{
+    min-height:38px;
+    padding:7px 10px;
+  }
+  html[data-density=compact] .nav-group-label{
+    padding-top:10px;
+    padding-bottom:3px;
+  }
+  html[data-density=compact] .settings-flow{
+    gap:16px;
+  }
+  html[data-density=compact] .settings-section{
+    gap:8px;
+  }
+  html[data-density=compact] .settings-unified-card{
+    padding:12px;
+  }
+  html[data-density=compact] .settings-subsection{
+    padding-top:2px;
+    padding-bottom:4px;
+  }
+  html[data-density=compact] .settings-subsection__head{
+    margin-bottom:9px;
+  }
+  html[data-density=compact] .settings-inline-fields{
+    margin-top:8px;
+  }
+  html[data-density=compact] .settings-toggle-list--grid{
+    gap:5px;
+  }
+  html[data-density=compact] .settings-toggle-list--grid>label{
+    min-height:50px;
+    padding:7px 9px;
+  }
+  html[data-density=compact] .theme-preset{
+    min-height:56px;
+  }
+  html[data-density=compact] .background-preset{
+    min-height:72px;
+  }
+}
+
+@media (max-width:820px){
+  .custom-accent-control{
+    grid-template-columns:minmax(0,1fr) 76px;
+  }
+}
