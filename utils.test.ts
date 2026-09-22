@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, calendarEventOccursOn, calendarOccurrencesBetween, cleanReceiptLine, medicineDepletionDate, medicineInventorySummary, medicineTherapyCoverage, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, therapyLineRequiredTablets, weekDates } from './utils'
+import { addDays, calendarEventOccursOn, calendarOccurrencesBetween, cleanReceiptLine, medicineDepletionDate, medicineInventorySummary, medicineTherapyCoverage, mergePrefs, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, therapyLineRequiredTablets, weekDates } from './utils'
 import { initialData } from './data'
 import { bankSourceRef, inferExpenseCategory, parseBankAmount, parseBankDate } from './bankImport'
 
@@ -45,6 +45,28 @@ describe('date helpers', () => {
     expect(result?.remainingDays).toBe(9)
     expect(result?.requiredTablets).toBe(18)
     expect(result?.sufficient).toBe(true)
+  })
+})
+
+describe('wallpaper preferences', () => {
+  it('fills safe defaults for older profiles', () => {
+    const prefs = mergePrefs({ visualStyle: 'ocean' })
+    expect(prefs.backgroundPreset).toBe('none')
+    expect(prefs.backgroundStrength).toBe(24)
+    expect(prefs.backgroundBlur).toBe(0)
+  })
+
+  it('sanitizes wallpaper settings and custom images', () => {
+    const prefs = mergePrefs({
+      backgroundPreset: 'custom',
+      backgroundImage: 'javascript:alert(1)',
+      backgroundStrength: 99,
+      backgroundBlur: 99
+    } as any)
+    expect(prefs.backgroundPreset).toBe('none')
+    expect(prefs.backgroundImage).toBeUndefined()
+    expect(prefs.backgroundStrength).toBe(60)
+    expect(prefs.backgroundBlur).toBe(12)
   })
 })
 
@@ -191,7 +213,7 @@ describe('data migration', () => {
   it('migrates legacy meals to dishes', () => {
     const migrated = migrateData({ users: initialData.users, meals: [{ id: 9, name: 'Riso', type: 'Primo', variant: '', ingredients: [] }] }, initialData)
     expect(migrated.dishes[0].name).toBe('Riso')
-    expect(migrated.version).toBe(20)
+    expect(migrated.version).toBe(21)
   })
 
   it('promotes pantry identity from the existing technical sheet', () => {
