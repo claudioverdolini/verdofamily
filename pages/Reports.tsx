@@ -23,6 +23,7 @@ import { localDateISO, money } from '../utils'
 import type { ExpenseCategory, ExpenseRecord, RecurringExpenseFrequency } from '../types'
 import {
   bankSourceRef,
+  bankMerchantSimilarity,
   inferExpenseCategory,
   parseBankAmount,
   parseBankDate,
@@ -84,6 +85,8 @@ function cleanMerchant(value: string) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 160)
 }
 
+type BankDuplicateStatus = 'none' | 'exact' | 'likely' | 'possible'
+
 type BankPreviewRow = {
   id: string
   include: boolean
@@ -92,7 +95,13 @@ type BankPreviewRow = {
   total: number
   category: ExpenseCategory
   sourceRef: string
-  duplicate: boolean
+  legacySourceRef: string
+  sourceKey: string
+  duplicateStatus: BankDuplicateStatus
+  duplicateReason?: string
+  matchedExpense?: ExpenseRecord
+  bankDouble: boolean
+  bankDoubleReason?: string
   valid: boolean
 }
 
@@ -116,12 +125,53 @@ export default function ReportsPage() {
   const [quick, setQuick] = useState({ merchant: '', total: '', category: 'other' as ExpenseCategory })
   const [quickMessage, setQuickMessage] = useState('')
   const [bankTable, setBankTable] = useState<BankTable | null>(null)
-  const [bankMapping, setBankMapping] = useState<BankColumnMapping>({ date: '', description: '', amount: '', debit: '', credit: '' })
+  const [bankMapping, setBankMapping] = useState<BankColumnMapping>({ date: '', description: '', amount: '', debit: '', credit: '', reference: '' })
   const [bankRows, setBankRows] = useState<BankPreviewRow[]>([])
   const [bankMessage, setBankMessage] = useState('')
   const [bankBusy, setBankBusy] = useState(false)
+  const [bankFilter, setBankFilter] = useState<'all' | 'new' | 'review' | 'double'>('all')
 
   const canEdit = authUser?.role !== 'bimbo'
+
+  function daysBetween(left: string, right: string) {
+    const a = new Date(`${left}T12:00:00`).getTime()
+    const b = new Date(`${right}T12:00:00`).getTime()
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return 999
+    return Math.abs(Math.round((a - b) / 86400000))
+  }
+
+  function duplicateAssessment(date: string, merchant: string, total: number, sourceRef: string, legacySourceRef: string) {
+    const existing = data.expenses || []
+    const exact = existing.find(item => item.sourceRef === sourceRef || item.sourceRef === legacySourceRef)
+    if (exact) return { status: 'exact' as BankDuplicateStatus, reason: 'Questo movimento bancario risulta già importato.', match: exact }
+
+    let best: { score: number; status: BankDuplicateStatus; reason: string; match: ExpenseRecord } | null = null
+    for (const item of existing) {
+      if (Math.abs(Number(item.total || 0) - total) > .01) continue
+      const days = daysBetween(date, item.date)
+      if (days > 3) continue
+      const similarity = bankMerchantSimilarity(merchant, item.merchant)
+      let status: BankDuplicateStatus = 'none'
+      let score = 0
+      let reason = ''
+
+      if ((days <= 1 && similarity >= .82) || (days <= 2 && similarity >= .94)) {
+        status = 'likely'
+        score = 90 + similarity * 9 - days
+        reason = `Stesso importo e descrizione molto simile a una spesa già registrata ${days ? `a distanza di ${days} gg` : 'nello stesso giorno'}.`
+      } else if ((days === 0 && similarity >= .45) || (days <= 3 && similarity >= .72)) {
+        status = 'possible'
+        score = 70 + similarity * 10 - days
+        reason = `Stesso importo e possibile corrispondenza con una spesa già registrata${days ? ` a distanza di ${days} gg` : ''}.`
+      }
+
+      if (status !== 'none' && (!best || score > best.score)) best = { score, status, reason, match: item }
+    }
+
+    return best
+      ? { status: best.status, reason: best.reason, match: best.match }
+      : { status: 'none' as BankDuplicateStatus, reason: '', match: undefined }
+  }
 
   useEffect(() => {
     if (canEdit) materializeRecurringExpenses()
