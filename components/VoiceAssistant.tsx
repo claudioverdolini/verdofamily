@@ -21,7 +21,7 @@ function splitItems(value: string) {
 
 export default function VoiceAssistant() {
   const {
-    data, authUser, setActivePage, addShoppingItem, addTodo, upsertDeadline, upsertBoardPost, upsertExpense
+    data, authUser, setActivePage, addShoppingItem, addTodo, upsertDeadline, upsertBoardPost, upsertExpense, changePantryQty
   } = useFamily()
 
   const assistantName = data.assistantName || 'Verdo'
@@ -107,6 +107,77 @@ export default function VoiceAssistant() {
     return false
   }
 
+  function normalizedPantryName(value: string) {
+    return clean(value).replace(/^(?:il|lo|la|i|gli|le|un|uno|una)\s+/, '').trim()
+  }
+
+  function pantryCandidates(productName: string) {
+    const wanted = normalizedPantryName(productName)
+    if (!wanted) return []
+    const available = data.pantry.filter(item => Number(item.qty || 0) > 0)
+    const exact = available.filter(item => normalize(item.name) === wanted || normalize([item.brand, item.name].filter(Boolean).join(' ')) === wanted)
+    const list = exact.length ? exact : available.filter(item => {
+      const name = normalize(item.name)
+      const full = normalize([item.brand, item.name].filter(Boolean).join(' '))
+      return name.includes(wanted) || wanted.includes(name) || full.includes(wanted) || wanted.includes(full)
+    })
+    return [...list].sort((a, b) => (a.expiryDate || '9999-12-31').localeCompare(b.expiryDate || '9999-12-31'))
+  }
+
+  function unitFactor(unit: string) {
+    const value = normalize(unit).replace(/\./g, '')
+    if (['g', 'gr', 'grammo', 'grammi'].includes(value)) return { family: 'mass', factor: 1 }
+    if (['kg', 'chilo', 'chili'].includes(value)) return { family: 'mass', factor: 1000 }
+    if (['ml', 'millilitro', 'millilitri'].includes(value)) return { family: 'volume', factor: 1 }
+    if (['l', 'lt', 'litro', 'litri'].includes(value)) return { family: 'volume', factor: 1000 }
+    if (['pz', 'pezzo', 'pezzi'].includes(value)) return { family: 'count', factor: 1 }
+    return { family: value || 'count', factor: 1 }
+  }
+
+  function convertQuantity(value: number, fromUnit: string | undefined, toUnit: string) {
+    if (!fromUnit) return value
+    const from = unitFactor(fromUnit)
+    const to = unitFactor(toUnit)
+    if (from.family !== to.family) return null
+    return value * from.factor / to.factor
+  }
+
+  function consumeFromPantry(productName: string, quantity?: number, requestedUnit?: string, finishAll = false) {
+    const candidates = pantryCandidates(productName)
+    if (!candidates.length) return { ok: false as const, reason: 'missing' as const, productName }
+
+    const primaryUnit = candidates[0].unit || 'pz'
+    const compatible = candidates.filter(item => unitFactor(item.unit || 'pz').family === unitFactor(primaryUnit).family)
+    const total = compatible.reduce((sum, item) => sum + Number(item.qty || 0), 0)
+    const requestedInPrimary = finishAll
+      ? total
+      : convertQuantity(Math.max(0, Number(quantity || 1)), requestedUnit, primaryUnit)
+
+    if (requestedInPrimary === null) return { ok: false as const, reason: 'unit' as const, productName, unit: primaryUnit }
+    let remaining = Math.min(total, Math.max(0, Number(requestedInPrimary || 0)))
+    let consumed = 0
+
+    for (const item of compatible) {
+      if (remaining <= 0) break
+      const current = Math.max(0, Number(item.qty || 0))
+      const decrease = Math.min(current, remaining)
+      if (!decrease) continue
+      changePantryQty(item.id, -decrease)
+      consumed += decrease
+      remaining -= decrease
+    }
+
+    return {
+      ok: true as const,
+      name: candidates[0].name,
+      consumed,
+      unit: primaryUnit,
+      stockBefore: total,
+      stockAfter: Math.max(0, total - consumed),
+      requested: Number(requestedInPrimary || 0)
+    }
+  }
+
   function execute(rawValue: string) {
     if (!authUser) return
     const raw = stripName(rawValue)
@@ -142,6 +213,46 @@ export default function VoiceAssistant() {
         items: []
       })
       speak('Registrati ' + total.toFixed(2).replace('.', ',') + ' euro per ' + merchant + '.')
+      return
+    }
+
+    const finishedPantry = raw.match(/(?:(?:ho\s+)?(?:finito|terminato|esaurito)|(?:e|è)\s+finito)\s+(?:tutto\s+)?(?:il|lo|la|i|gli|le|un|uno|una)?\s*(.+)$/i)
+    if (finishedPantry) {
+      const result = consumeFromPantry(finishedPantry[1], undefined, undefined, true)
+      if (!result.ok) {
+        speak('Non trovo ' + finishedPantry[1].trim() + ' in dispensa.')
+        return
+      }
+      speak('Ho segnato come finito ' + result.name + '. Quantità residua: zero.')
+      return
+    }
+
+    const usedPantry = raw.match(/(?:(?:ho\s+)?(?:usato|consumato)|scarica|consuma|togli)\s+(\d+(?:[.,]\d+)?)\s*(pz|pezzi|pezzo|g|gr|grammi|kg|ml|l|lt|litri|litro)?\s*(?:di\s+)?(.+)$/i)
+    if (usedPantry) {
+      const quantity = Number(usedPantry[1].replace(',', '.'))
+      const result = consumeFromPantry(usedPantry[3], quantity, usedPantry[2])
+      if (!result.ok) {
+        speak(result.reason === 'unit'
+          ? 'La quantità indicata non è compatibile con l’unità usata per questo prodotto.'
+          : 'Non trovo ' + usedPantry[3].trim() + ' in dispensa.')
+        return
+      }
+      if (result.consumed < result.requested) {
+        speak('Ho scaricato tutto quello che risultava disponibile per ' + result.name + ': ' + result.consumed.toLocaleString('it-IT') + ' ' + result.unit + '.')
+      } else {
+        speak('Ho scaricato ' + result.consumed.toLocaleString('it-IT') + ' ' + result.unit + ' di ' + result.name + '. Restano ' + result.stockAfter.toLocaleString('it-IT') + ' ' + result.unit + '.')
+      }
+      return
+    }
+
+    const usedOnePantry = raw.match(/(?:(?:ho\s+)?(?:usato|consumato)|scarica|consuma)\s+(?:il|lo|la|i|gli|le|un|uno|una)?\s*(.+)$/i)
+    if (usedOnePantry) {
+      const result = consumeFromPantry(usedOnePantry[1], 1)
+      if (!result.ok) {
+        speak('Non trovo ' + usedOnePantry[1].trim() + ' in dispensa.')
+        return
+      }
+      speak('Ho scaricato 1 ' + result.unit + ' di ' + result.name + '. Restano ' + result.stockAfter.toLocaleString('it-IT') + ' ' + result.unit + '.')
       return
     }
 
@@ -332,6 +443,7 @@ export default function VoiceAssistant() {
         <div className="voice-examples">
           <strong>Prova:</strong>
           <button onClick={() => execute('Aggiungi latte e pane alla spesa')}>Aggiungi latte e pane alla spesa</button>
+          <button onClick={() => execute('Ho finito il latte')}>Ho finito il latte</button>
           <button onClick={() => execute('Cosa abbiamo domani?')}>Cosa abbiamo domani?</button>
           <button onClick={() => execute('Apri scuola')}>Apri scuola</button>
         </div>
