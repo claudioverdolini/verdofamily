@@ -530,6 +530,16 @@ export default function SettingsPage() {
     updateCurrentPrefs({ theme })
   }
 
+  function applyCustomAccent(accent: string) {
+    if (!accent) return
+    const root = document.documentElement
+    root.style.setProperty('--accent', accent)
+    root.style.setProperty('--accent2', accent)
+    root.style.setProperty('--accent-glow', accent)
+    root.dataset.visualStyle = 'custom'
+    updateCurrentPrefs({ accent, visualStyle: 'custom' as any })
+  }
+
   function toggleBottomTab(key: PageKey) {
     const current = prefs.bottomTabs || []
     if (current.includes(key)) {
@@ -782,8 +792,19 @@ export default function SettingsPage() {
               </div> : null}
 
               <div className="form-grid form-grid--2 settings-inline-fields">
-                <Field label="Colore personalizzato" hint="Se vuoi uscire dalle palette predefinite."><input type="color" value={prefs.accent} onChange={e => updateCurrentPrefs({ accent: e.target.value, visualStyle: 'custom' as any })} /></Field>
-                <Field label="Spaziatura"><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
+                <Field label="Colore personalizzato" hint="Se vuoi uscire dalle palette predefinite. Il colore viene applicato subito all’interfaccia.">
+                  <div className="custom-accent-control">
+                    <input
+                      type="color"
+                      value={prefs.accent}
+                      aria-label="Colore personalizzato dell’interfaccia"
+                      onInput={e => applyCustomAccent((e.currentTarget as HTMLInputElement).value)}
+                      onChange={e => applyCustomAccent(e.currentTarget.value)}
+                    />
+                    <code>{String(prefs.accent || '#635BFF').toUpperCase()}</code>
+                  </div>
+                </Field>
+                <Field label="Spaziatura" hint="Comoda lascia più respiro; Compatta riduce spazi, card e navigazione."><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
               </div>
             </section>
           </div>
