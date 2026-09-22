@@ -9,6 +9,7 @@ import {
   CircleDot,
   CreditCard,
   FileText,
+  Filter,
   GraduationCap,
   Home,
   Pencil,
@@ -170,17 +171,20 @@ export default function DeadlinesPage() {
           { value: 'year', label: 'Vista anno' }
         ]}
       />
-      <div className="deadline-category-filter">
-        <button className={category === 'all' ? 'is-active' : ''} onClick={() => setCategory('all')}>Tutte</button>
-        {CATEGORY_OPTIONS.map(item => <button
-          key={item.value}
-          className={category === item.value ? 'is-active' : ''}
-          onClick={() => setCategory(item.value)}
-          title={item.label}
-        >
-          {item.icon}<span>{item.label}</span>
-        </button>)}
-      </div>
+      <label className="deadline-category-select" title="Filtra le scadenze per categoria">
+        <span className="deadline-category-select__icon"><Filter size={16} /></span>
+        <span className="deadline-category-select__copy">
+          <small>Categoria</small>
+          <select
+            value={category}
+            onChange={e => setCategory(e.target.value as 'all' | DeadlineCategory)}
+            aria-label="Filtra per categoria"
+          >
+            <option value="all">Tutte le categorie</option>
+            {CATEGORY_OPTIONS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </span>
+      </label>
     </div>
 
     {view === 'upcoming' ? <Card>
