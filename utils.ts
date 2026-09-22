@@ -574,6 +574,7 @@ export const DEFAULT_PREFS: UserPrefs = {
   accent: '#635BFF',
   visualStyle: 'violet',
   backgroundPreset: 'none',
+  backgroundColor: '#EEF6FF',
   backgroundImage: undefined,
   backgroundStrength: 24,
   backgroundBlur: 0,
@@ -612,7 +613,7 @@ function normalizeHomeCards(input?: UserPrefs['homeCards']) {
 }
 
 export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
-  const allowedBackgrounds = ['none','aurora','sky','sand','forest','sunset','night','lavender','custom']
+  const allowedBackgrounds = ['none','color','aurora','sky','sand','forest','sunset','night','lavender','custom']
   const rawBackgroundImage = String(input?.backgroundImage || '')
   const backgroundImage = /^data:image\/(?:webp|jpeg|png);base64,/i.test(rawBackgroundImage) && rawBackgroundImage.length <= 1_200_000
     ? rawBackgroundImage
@@ -621,12 +622,17 @@ export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
     ? input?.backgroundPreset
     : DEFAULT_PREFS.backgroundPreset
   const backgroundPreset = requestedPreset === 'custom' && !backgroundImage ? 'none' : requestedPreset
+  const rawBackgroundColor = String(input?.backgroundColor || '')
+  const backgroundColor = /^#[0-9a-f]{6}$/i.test(rawBackgroundColor)
+    ? rawBackgroundColor.toUpperCase()
+    : DEFAULT_PREFS.backgroundColor
 
   return {
     ...DEFAULT_PREFS,
     ...(input || {}),
     visualStyle: input?.visualStyle || visualStyleFromAccent(input?.accent) || DEFAULT_PREFS.visualStyle,
     backgroundPreset,
+    backgroundColor,
     backgroundImage,
     backgroundStrength: Math.max(8, Math.min(60, Number(input?.backgroundStrength ?? DEFAULT_PREFS.backgroundStrength) || DEFAULT_PREFS.backgroundStrength)),
     backgroundBlur: Math.max(0, Math.min(12, Number(input?.backgroundBlur ?? DEFAULT_PREFS.backgroundBlur) || 0)),
