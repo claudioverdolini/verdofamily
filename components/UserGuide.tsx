@@ -223,6 +223,7 @@ const SECTIONS: GuideSection[] = [
     page: 'settings',
     keywords: 'impostazioni tema colore stile luminosità densità home widget notifiche dati backup',
     items: [
+      'In Impostazioni → Aspetto puoi scegliere uno sfondo preimpostato oppure caricare una tua foto, regolando intensità e sfocatura.',
       'Personalizza luminosità, stile colore e spaziatura dell’interfaccia.',
       'Scegli quali moduli mostrare nella barra inferiore e quali widget vedere nella Home.',
       'Gestisci preferenze di notifica e livello di dettaglio delle push.',
