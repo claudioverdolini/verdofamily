@@ -20,6 +20,15 @@ const VISUAL_STYLES = [
   { id: 'electric', name: 'Electric', subtitle: 'Blu + violetto', primary: '#2563EB', secondary: '#8B5CF6', Icon: Zap }
 ] as const
 
+const BACKGROUND_COLORS = [
+  { name: 'Ghiaccio', value: '#EEF6FF' },
+  { name: 'Neutro', value: '#F4F6F8' },
+  { name: 'Sabbia', value: '#FFF4E6' },
+  { name: 'Salvia', value: '#EDF7F0' },
+  { name: 'Rosa', value: '#FFF0F4' },
+  { name: 'Lavanda', value: '#F5F0FF' }
+] as const
+
 const TAB_OPTIONS: Array<{ key: PageKey; label: string }> = [
   { key: 'home', label: 'Home' },
   { key: 'calendar', label: 'Calendario' },
@@ -540,6 +549,16 @@ export default function SettingsPage() {
     updateCurrentPrefs({ accent, visualStyle: 'custom' as any })
   }
 
+  function applyBackgroundColor(backgroundColor: string) {
+    if (!/^#[0-9a-f]{6}$/i.test(backgroundColor)) return
+    const normalized = backgroundColor.toUpperCase()
+    const root = document.documentElement
+    root.style.setProperty('--app-wallpaper', `linear-gradient(${normalized}, ${normalized})`)
+    root.style.setProperty('--wallpaper-strength', '1')
+    root.dataset.wallpaper = 'on'
+    updateCurrentPrefs({ backgroundColor: normalized, backgroundPreset: 'color' as any })
+  }
+
   function toggleBottomTab(key: PageKey) {
     const current = prefs.bottomTabs || []
     if (current.includes(key)) {
@@ -688,42 +707,74 @@ export default function SettingsPage() {
   }
 
   return <div className="page">
-    <PageIntro eyebrow="Centro di controllo" title="Impostazioni" description="Poche aree chiare: il tuo spazio, l’uso quotidiano, le connessioni e la protezione dei dati." />
+    <PageIntro eyebrow="Centro di controllo" title="Impostazioni" description="Ogni scelta è separata per funzione: profilo, aspetto dell’app, uso quotidiano, connessioni e sicurezza dei dati." />
 
     <nav className="settings-jump-nav" aria-label="Vai alla sezione">
       {[
-        ['settings-profile', 'Profilo'],
-        ['settings-daily', 'Quotidiano'],
+        ['settings-profile', 'Profilo e aspetto'],
+        ['settings-daily', 'Uso quotidiano'],
         ['settings-connections', 'Connessioni'],
-        ['settings-data', 'Dati']
+        ['settings-data', 'Sicurezza e dati']
       ].map(([id, label]) => <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{label}</button>)}
     </nav>
 
     <div className="settings-flow">
       <section id="settings-profile" className="settings-section">
         <div className="settings-section__head">
-          <div><span>01</span><h2>Il tuo spazio</h2></div>
-          <p>Profilo e aspetto: tutto ciò che riguarda come riconosci e visualizzi il tuo VerdoFamily.</p>
+          <div><span>01</span><h2>Profilo e aspetto</h2></div>
+          <p>Prima chi sei, poi come vuoi vedere l’app. Colori del profilo, interfaccia e sfondo sono tre impostazioni diverse.</p>
         </div>
-        <Card className="settings-card--wide settings-unified-card">
-          <div className="settings-unified-grid settings-unified-grid--identity">
-            <section className="settings-subsection">
-              <div className="settings-subsection__head"><div><strong>Profilo</strong><span>Nome e colore personale</span></div></div>
-              <div className="settings-profile settings-profile--compact"><Avatar user={authUser} size="lg" /><div><strong>{authUser.name}</strong><span>{authUser.role}</span></div></div>
-              <div className="settings-profile-photo-actions">
-                <label className="btn btn--soft btn--sm"><Camera size={15} /> {avatarBusy ? 'Elaboro…' : authUser.avatarUrl ? 'Cambia foto' : 'Aggiungi foto'}<input type="file" accept="image/*" hidden disabled={avatarBusy} onChange={e => changeAvatar(e.target.files?.[0])} /></label>
-                {authUser.avatarUrl ? <button className="text-link" onClick={() => { if (confirm('Rimuovere la foto identificativa dal tuo profilo?')) updateCurrentProfile({ avatarUrl: '' }) }}>Rimuovi foto</button> : null}
-              </div>
-              <div className="form-grid form-grid--2">
-                <Field label="Nome"><input value={authUser.name} onChange={e => updateCurrentProfile({ name: e.target.value })} /></Field>
-                <Field label="Colore profilo"><input type="color" value={authUser.color} onChange={e => updateCurrentProfile({ color: e.target.value })} /></Field>
-              </div>
-            </section>
 
-            <section className="settings-subsection">
-              <div className="settings-subsection__head"><div><strong>Aspetto</strong><span>Tema, colore e densità</span></div></div>
-              <Field label="Luminosità"><Segmented value={prefs.theme} onChange={setTheme} options={[{ value: 'system', label: 'Sistema' }, { value: 'light', label: 'Chiaro' }, { value: 'dark', label: 'Scuro' }]} /></Field>
-              <Field label="Stile colore" hint="Cambia il carattere visivo dell’app: icone, pulsanti attivi e dettagli grafici seguono la palette scelta.">
+        <div className="settings-profile-appearance-stack">
+          <Card className="settings-card--wide settings-zone-card">
+            <div className="settings-zone-heading">
+              <div>
+                <span className="settings-zone-kicker">Profilo personale</span>
+                <h3>Come vieni riconosciuto</h3>
+                <p>Foto, nome e colore identificativo servono a distinguerti dagli altri membri della famiglia.</p>
+              </div>
+            </div>
+
+            <div className="profile-settings-grid">
+              <div>
+                <div className="settings-profile settings-profile--compact"><Avatar user={authUser} size="lg" /><div><strong>{authUser.name}</strong><span>{authUser.role}</span></div></div>
+                <div className="settings-profile-photo-actions">
+                  <label className="btn btn--soft btn--sm"><Camera size={15} /> {avatarBusy ? 'Elaboro…' : authUser.avatarUrl ? 'Cambia foto' : 'Aggiungi foto'}<input type="file" accept="image/*" hidden disabled={avatarBusy} onChange={e => changeAvatar(e.target.files?.[0])} /></label>
+                  {authUser.avatarUrl ? <button className="text-link" onClick={() => { if (confirm('Rimuovere la foto identificativa dal tuo profilo?')) updateCurrentProfile({ avatarUrl: '' }) }}>Rimuovi foto</button> : null}
+                </div>
+              </div>
+              <div className="form-grid form-grid--2 profile-fields">
+                <Field label="Nome"><input value={authUser.name} onChange={e => updateCurrentProfile({ name: e.target.value })} /></Field>
+                <Field label="Colore identificativo" hint="Usato per avatar e riferimenti al tuo profilo; non cambia i colori dell’app."><input type="color" value={authUser.color} onChange={e => updateCurrentProfile({ color: e.target.value })} /></Field>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="settings-card--wide settings-zone-card">
+            <div className="settings-zone-heading">
+              <div>
+                <span className="settings-zone-kicker">Aspetto dell’app</span>
+                <h3>Come vuoi vedere VerdoFamily</h3>
+                <p>Qui modifichi luminosità, spaziatura, colore dell’interfaccia e sfondo. Ogni gruppo indica chiaramente cosa cambia.</p>
+              </div>
+            </div>
+
+            <div className="appearance-settings-grid">
+              <section className="appearance-block">
+                <div className="appearance-block__head">
+                  <div><strong>Visualizzazione</strong><span>Dimensioni e luminosità</span></div>
+                </div>
+                <div className="form-grid form-grid--2">
+                  <Field label="Tema"><Segmented value={prefs.theme} onChange={setTheme} options={[{ value: 'system', label: 'Sistema' }, { value: 'light', label: 'Chiaro' }, { value: 'dark', label: 'Scuro' }]} /></Field>
+                  <Field label="Spaziatura" hint="Comoda = più respiro. Compatta = più contenuti a schermo."><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
+                </div>
+              </section>
+
+              <section className="appearance-block">
+                <div className="appearance-block__head">
+                  <div><strong>Colore dell’interfaccia</strong><span>Pulsanti, icone, selezioni e dettagli</span></div>
+                  <em>Non cambia lo sfondo</em>
+                </div>
                 <div className="theme-preset-grid">
                   {VISUAL_STYLES.map(item => {
                     const Icon = item.Icon
@@ -740,59 +791,7 @@ export default function SettingsPage() {
                     </button>
                   })}
                 </div>
-              </Field>
-              <Field label="Sfondo dell’app" hint="Scegli uno sfondo astratto oppure usa una tua foto. La scelta è personale per questo profilo.">
-                <div className="background-preset-grid">
-                  {BACKGROUND_PRESETS.map(item => {
-                    const selected = prefs.backgroundPreset === item.id
-                    return <button
-                      type="button"
-                      key={item.id}
-                      className={`background-preset ${selected ? 'is-active' : ''}`}
-                      onClick={() => updateCurrentPrefs({ backgroundPreset: item.id as any })}
-                    >
-                      <span className="background-preset__preview" style={{ backgroundImage: item.css === 'none' ? undefined : item.css }}>
-                        {item.id === 'none' ? <ImageIcon size={21} /> : null}
-                      </span>
-                      <span><strong>{item.name}</strong><small>{item.subtitle}</small></span>
-                      {selected ? <Check size={15} /> : null}
-                    </button>
-                  })}
-                  <label className={`background-preset background-preset--upload ${prefs.backgroundPreset === 'custom' ? 'is-active' : ''}`}>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      disabled={backgroundBusy}
-                      onChange={e => { const file = e.target.files?.[0]; if (file) void changeBackground(file); e.currentTarget.value = '' }}
-                    />
-                    <span
-                      className="background-preset__preview"
-                      style={prefs.backgroundImage ? { backgroundImage: `url("${prefs.backgroundImage}")` } : undefined}
-                    >
-                      {!prefs.backgroundImage ? <ImagePlus size={22} /> : null}
-                    </span>
-                    <span><strong>{backgroundBusy ? 'Elaborazione…' : 'La tua foto'}</strong><small>{prefs.backgroundImage ? 'Tocca per sostituire' : 'Carica immagine'}</small></span>
-                    {prefs.backgroundPreset === 'custom' ? <Check size={15} /> : null}
-                  </label>
-                </div>
-              </Field>
-
-              {prefs.backgroundPreset !== 'none' ? <div className="wallpaper-controls">
-                <Field label={`Intensità sfondo · ${Math.round(prefs.backgroundStrength)}%`} hint="Più alta = immagine più visibile.">
-                  <input type="range" min="8" max="60" step="1" value={prefs.backgroundStrength} onChange={e => updateCurrentPrefs({ backgroundStrength: Number(e.target.value) })} />
-                </Field>
-                <Field label={`Sfocatura · ${Math.round(prefs.backgroundBlur)} px`} hint="Ammorbidisce lo sfondo dietro alle card.">
-                  <input type="range" min="0" max="12" step="1" value={prefs.backgroundBlur} onChange={e => updateCurrentPrefs({ backgroundBlur: Number(e.target.value) })} />
-                </Field>
-              </div> : null}
-
-              {prefs.backgroundImage ? <div className="wallpaper-custom-actions">
-                <Button size="sm" variant="ghost" onClick={() => updateCurrentPrefs({ backgroundPreset: 'custom' })}>Usa la mia foto</Button>
-                <Button size="sm" variant="danger" onClick={removeCustomBackground}>Rimuovi foto</Button>
-              </div> : null}
-
-              <div className="form-grid form-grid--2 settings-inline-fields">
-                <Field label="Colore personalizzato" hint="Se vuoi uscire dalle palette predefinite. Il colore viene applicato subito all’interfaccia.">
+                <Field label="Colore personalizzato dell’interfaccia" hint="Se vuoi un colore diverso dalle palette sopra.">
                   <div className="custom-accent-control">
                     <input
                       type="color"
@@ -804,11 +803,116 @@ export default function SettingsPage() {
                     <code>{String(prefs.accent || '#635BFF').toUpperCase()}</code>
                   </div>
                 </Field>
-                <Field label="Spaziatura" hint="Comoda lascia più respiro; Compatta riduce spazi, card e navigazione."><Segmented value={prefs.density} onChange={(density: any) => updateCurrentPrefs({ density })} options={[{ value: 'comfortable', label: 'Comoda' }, { value: 'compact', label: 'Compatta' }]} /></Field>
-              </div>
-            </section>
-          </div>
-        </Card>
+              </section>
+
+              <section className="appearance-block appearance-block--wide">
+                <div className="appearance-block__head">
+                  <div><strong>Sfondo dell’app</strong><span>La superficie dietro a schede e contenuti</span></div>
+                  <em>Questo cambia lo sfondo</em>
+                </div>
+
+                <div className="background-source-grid">
+                  <button
+                    type="button"
+                    className={`background-preset ${prefs.backgroundPreset === 'none' ? 'is-active' : ''}`}
+                    onClick={() => updateCurrentPrefs({ backgroundPreset: 'none' })}
+                  >
+                    <span className="background-preset__preview"><ImageIcon size={21} /></span>
+                    <span><strong>Pulito</strong><small>Sfondo neutro dell’app</small></span>
+                    {prefs.backgroundPreset === 'none' ? <Check size={15} /> : null}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`background-preset ${prefs.backgroundPreset === 'color' ? 'is-active' : ''}`}
+                    onClick={() => applyBackgroundColor(prefs.backgroundColor || '#EEF6FF')}
+                  >
+                    <span className="background-preset__preview" style={{ background: prefs.backgroundColor || '#EEF6FF' }} />
+                    <span><strong>Colore pieno</strong><small>Scegli qualsiasi tinta</small></span>
+                    {prefs.backgroundPreset === 'color' ? <Check size={15} /> : null}
+                  </button>
+
+                  {prefs.backgroundImage ? <button
+                    type="button"
+                    className={`background-preset ${prefs.backgroundPreset === 'custom' ? 'is-active' : ''}`}
+                    onClick={() => updateCurrentPrefs({ backgroundPreset: 'custom' })}
+                  >
+                    <span className="background-preset__preview" style={{ backgroundImage: `url("${prefs.backgroundImage}")` }} />
+                    <span><strong>La tua foto</strong><small>Usa l’immagine caricata</small></span>
+                    {prefs.backgroundPreset === 'custom' ? <Check size={15} /> : null}
+                  </button> : <label className="background-preset background-preset--upload">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={backgroundBusy}
+                      onChange={e => { const file = e.target.files?.[0]; if (file) void changeBackground(file); e.currentTarget.value = '' }}
+                    />
+                    <span className="background-preset__preview"><ImagePlus size={22} /></span>
+                    <span><strong>{backgroundBusy ? 'Elaborazione…' : 'Foto personale'}</strong><small>Carica una tua immagine</small></span>
+                  </label>}
+                </div>
+
+                {prefs.backgroundPreset === 'color' ? <div className="solid-background-panel">
+                  <div className="appearance-inline-title"><strong>Scegli il colore di sfondo</strong><span>Puoi partire da una tinta pronta oppure usare il selettore.</span></div>
+                  <div className="solid-background-palette">
+                    {BACKGROUND_COLORS.map(item => <button
+                      type="button"
+                      key={item.value}
+                      className={String(prefs.backgroundColor || '').toUpperCase() === item.value ? 'is-active' : ''}
+                      onClick={() => applyBackgroundColor(item.value)}
+                      title={item.name}
+                      aria-label={`Sfondo ${item.name}`}
+                    ><span style={{ background: item.value }} /><small>{item.name}</small></button>)}
+                  </div>
+                  <Field label="Colore personalizzato dello sfondo">
+                    <div className="custom-accent-control">
+                      <input
+                        type="color"
+                        value={prefs.backgroundColor || '#EEF6FF'}
+                        aria-label="Colore personalizzato dello sfondo"
+                        onInput={e => applyBackgroundColor((e.currentTarget as HTMLInputElement).value)}
+                        onChange={e => applyBackgroundColor(e.currentTarget.value)}
+                      />
+                      <code>{String(prefs.backgroundColor || '#EEF6FF').toUpperCase()}</code>
+                    </div>
+                  </Field>
+                </div> : null}
+
+                <div className="appearance-divider-label"><span>Sfumature pronte</span><small>Alternative al colore pieno o alla foto</small></div>
+                <div className="background-preset-grid background-preset-grid--gradients">
+                  {BACKGROUND_PRESETS.filter(item => item.id !== 'none').map(item => {
+                    const selected = prefs.backgroundPreset === item.id
+                    return <button
+                      type="button"
+                      key={item.id}
+                      className={`background-preset ${selected ? 'is-active' : ''}`}
+                      onClick={() => updateCurrentPrefs({ backgroundPreset: item.id as any })}
+                    >
+                      <span className="background-preset__preview" style={{ backgroundImage: item.css }} />
+                      <span><strong>{item.name}</strong><small>{item.subtitle}</small></span>
+                      {selected ? <Check size={15} /> : null}
+                    </button>
+                  })}
+                </div>
+
+                {prefs.backgroundPreset !== 'none' && prefs.backgroundPreset !== 'color' ? <div className="wallpaper-controls">
+                  <Field label={`Intensità sfondo · ${Math.round(prefs.backgroundStrength)}%`} hint="Più alta = sfondo più visibile.">
+                    <input type="range" min="8" max="60" step="1" value={prefs.backgroundStrength} onChange={e => updateCurrentPrefs({ backgroundStrength: Number(e.target.value) })} />
+                  </Field>
+                  <Field label={`Sfocatura · ${Math.round(prefs.backgroundBlur)} px`} hint="Ammorbidisce foto e sfumature dietro alle card.">
+                    <input type="range" min="0" max="12" step="1" value={prefs.backgroundBlur} onChange={e => updateCurrentPrefs({ backgroundBlur: Number(e.target.value) })} />
+                  </Field>
+                </div> : null}
+
+                {prefs.backgroundImage ? <div className="wallpaper-custom-actions">
+                  {prefs.backgroundPreset !== 'custom' ? <Button size="sm" variant="ghost" onClick={() => updateCurrentPrefs({ backgroundPreset: 'custom' })}>Usa la mia foto</Button> : null}
+                  <label className="btn btn--ghost btn--sm"><ImagePlus size={14} /> Cambia foto<input type="file" accept="image/*" hidden disabled={backgroundBusy} onChange={e => { const file = e.target.files?.[0]; if (file) void changeBackground(file); e.currentTarget.value = '' }} /></label>
+                  <Button size="sm" variant="danger" onClick={removeCustomBackground}>Rimuovi foto</Button>
+                </div> : null}
+              </section>
+            </div>
+          </Card>
+        </div>
       </section>
 
       <section id="settings-daily" className="settings-section">
