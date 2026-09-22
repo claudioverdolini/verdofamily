@@ -153,6 +153,7 @@ type StoreValue = {
   upsertPantryItem: (item: Omit<PantryItem, 'id'> & { id?: number }) => void
   deletePantryItem: (id: number) => void
   changePantryQty: (id: number, delta: number) => void
+  reconcilePantryItems: (items: Array<{ name: string; brand?: string; variant?: string; packageSize?: string; barcode?: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>, defaultLocation?: PantryLocation) => void
   addShoppingItem: (item: Omit<ShoppingItem, 'id' | 'taken'>) => void
   toggleShoppingItem: (id: number) => void
   deleteShoppingItem: (id: number) => void
@@ -1230,6 +1231,45 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         residualPercent: item.packageState === 'opened' && Number.isFinite(Number(item.residualPercent)) ? Math.max(0, Math.min(100, Number(item.residualPercent))) : undefined,
         residualSource: item.packageState === 'opened' && ['manual','photo'].includes(String(item.residualSource || '')) ? item.residualSource : undefined
       }
+      const incomingBarcode = String(clean.barcode || clean.productInfo?.barcode || '').replace(/\D/g, '')
+      const incomingBrand = normalize(clean.brand || clean.productInfo?.brand || '')
+      const existing = prev.pantry.find(current => {
+        const currentBarcode = String(current.barcode || current.productInfo?.barcode || '').replace(/\D/g, '')
+        const sameSku = !!incomingBarcode && !!currentBarcode && incomingBarcode === currentBarcode
+        const sameNamedProduct = normalize(current.name) === normalize(clean.name)
+          && (!incomingBrand || !normalize(current.brand || current.productInfo?.brand || '') || incomingBrand === normalize(current.brand || current.productInfo?.brand || ''))
+        return (sameSku || sameNamedProduct)
+          && normalize(current.unit) === normalize(clean.unit)
+          && (current.location || 'pantry') === (clean.location || 'pantry')
+          && (current.expiryDate || '') === (clean.expiryDate || '')
+          && (current.packageState || 'sealed') === (clean.packageState || 'sealed')
+      })
+
+      if (existing) {
+        const addedQty = Number(clean.qty || 0)
+        const merged: PantryItem = {
+          ...existing,
+          qty: Number(existing.qty || 0) + addedQty,
+          category: clean.category || existing.category,
+          minQty: Math.max(Number(existing.minQty || 0), Number(clean.minQty || 0)),
+          autoRestock: clean.autoRestock !== false,
+          brand: clean.brand || existing.brand,
+          variant: clean.variant || existing.variant,
+          packageSize: clean.packageSize || existing.packageSize,
+          barcode: clean.barcode || existing.barcode,
+          productInfo: clean.productInfo || existing.productInfo,
+          remainingQty: clean.packageState === 'opened' ? clean.remainingQty : existing.remainingQty,
+          remainingUnit: clean.packageState === 'opened' ? clean.remainingUnit : existing.remainingUnit,
+          residualPercent: clean.packageState === 'opened' ? clean.residualPercent : existing.residualPercent,
+          residualSource: clean.packageState === 'opened' ? clean.residualSource : existing.residualSource
+        }
+        return {
+          ...prev,
+          pantry: prev.pantry.map(row => row.id === existing.id ? merged : row),
+          pantryMovements: movement(prev.pantryMovements, existing.id, addedQty, 'adjustment')
+        }
+      }
+
       return {
         ...prev,
         pantry: [...prev.pantry, clean],
@@ -1276,6 +1316,117 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           : p),
         pantryMovements: movement(prev.pantryMovements, id, actualDelta, 'manual')
       }
+    })
+  }
+
+  function reconcilePantryItems(
+    items: Array<{ name: string; brand?: string; variant?: string; packageSize?: string; barcode?: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
+    defaultLocation: PantryLocation = 'pantry'
+  ) {
+    setData(prev => {
+      let pantry = [...prev.pantry]
+      let pantryMovements = [...prev.pantryMovements]
+
+      for (const raw of items) {
+        const name = String(raw.name || '').trim()
+        if (!name) continue
+        const unit = raw.unit || 'pz'
+        const location = raw.location || defaultLocation
+        const observedQty = Math.max(0, Number(raw.qty || 0))
+        const incomingBarcode = String(raw.barcode || raw.productInfo?.barcode || '').replace(/\D/g, '')
+        const incomingName = normalize(name)
+
+        const matches = pantry
+          .map((item, index) => ({ item, index }))
+          .filter(({ item }) => {
+            const currentBarcode = String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+            const sameSku = !!incomingBarcode && !!currentBarcode && incomingBarcode === currentBarcode
+            const sameName = normalize(item.name) === incomingName
+            return (sameSku || sameName)
+              && normalize(item.unit) === normalize(unit)
+              && (item.location || 'pantry') === location
+          })
+          .sort((a, b) => (a.item.expiryDate || '9999-12-31').localeCompare(b.item.expiryDate || '9999-12-31'))
+
+        if (!matches.length) {
+          const id = nextId(pantry)
+          const clean: PantryItem = {
+            id,
+            name,
+            brand: String(raw.brand || raw.productInfo?.brand || '').trim().slice(0, 120) || undefined,
+            variant: String(raw.variant || '').trim().slice(0, 120) || undefined,
+            packageSize: String(raw.packageSize || raw.productInfo?.packageQuantity || '').trim().slice(0, 100) || undefined,
+            barcode: /^\d{8,14}$/.test(incomingBarcode) ? incomingBarcode : undefined,
+            qty: observedQty,
+            unit,
+            category: raw.category || 'Generico',
+            minQty: 0,
+            location,
+            expiryDate: raw.expiryDate || undefined,
+            autoRestock: true,
+            packageState: raw.packageState === 'opened' ? 'opened' : 'sealed',
+            remainingQty: raw.packageState === 'opened' && Number.isFinite(Number(raw.remainingQty)) ? Math.max(0, Number(raw.remainingQty)) : undefined,
+            remainingUnit: raw.packageState === 'opened' ? raw.remainingUnit : undefined,
+            residualPercent: raw.packageState === 'opened' && Number.isFinite(Number(raw.residualPercent)) ? Math.max(0, Math.min(100, Number(raw.residualPercent))) : undefined,
+            residualSource: raw.packageState === 'opened' ? raw.residualSource : undefined,
+            productInfo: raw.productInfo
+          }
+          pantry.push(clean)
+          pantryMovements = movement(pantryMovements, id, observedQty, 'adjustment')
+          continue
+        }
+
+        const currentTotal = matches.reduce((sum, row) => sum + Math.max(0, Number(pantry[row.index]?.qty || 0)), 0)
+        let delta = observedQty - currentTotal
+
+        const primaryIndex = matches[0].index
+        const primary = pantry[primaryIndex]
+        pantry[primaryIndex] = {
+          ...primary,
+          brand: String(raw.brand || raw.productInfo?.brand || primary.brand || '').trim().slice(0, 120) || undefined,
+          variant: String(raw.variant || primary.variant || '').trim().slice(0, 120) || undefined,
+          packageSize: String(raw.packageSize || raw.productInfo?.packageQuantity || primary.packageSize || '').trim().slice(0, 100) || undefined,
+          barcode: /^\d{8,14}$/.test(incomingBarcode) ? incomingBarcode : primary.barcode,
+          category: raw.category || primary.category,
+          productInfo: raw.productInfo || primary.productInfo,
+          packageState: raw.packageState === 'opened' ? 'opened' : primary.packageState,
+          remainingQty: raw.packageState === 'opened' ? raw.remainingQty : primary.remainingQty,
+          remainingUnit: raw.packageState === 'opened' ? raw.remainingUnit : primary.remainingUnit,
+          residualPercent: raw.packageState === 'opened' ? raw.residualPercent : primary.residualPercent,
+          residualSource: raw.packageState === 'opened' ? raw.residualSource : primary.residualSource
+        }
+
+        if (delta < 0) {
+          let toRemove = Math.abs(delta)
+          for (const row of matches) {
+            if (toRemove <= 0) break
+            const current = pantry[row.index]
+            const currentQty = Math.max(0, Number(current.qty || 0))
+            const decrease = Math.min(currentQty, toRemove)
+            if (!decrease) continue
+            const nextQty = currentQty - decrease
+            pantry[row.index] = {
+              ...current,
+              qty: nextQty,
+              ...(nextQty <= 0 ? {
+                packageState: 'sealed' as const,
+                remainingQty: undefined,
+                remainingUnit: undefined,
+                residualPercent: undefined,
+                residualSource: undefined
+              } : {})
+            }
+            pantryMovements = movement(pantryMovements, current.id, -decrease, 'adjustment')
+            toRemove -= decrease
+          }
+        } else if (delta > 0) {
+          const current = pantry[primaryIndex]
+          pantry[primaryIndex] = { ...current, qty: Math.max(0, Number(current.qty || 0)) + delta }
+          pantryMovements = movement(pantryMovements, current.id, delta, 'adjustment')
+        }
+      }
+
+      return { ...prev, pantry, pantryMovements }
     })
   }
 
@@ -2388,7 +2539,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertCalendarEvent, deleteCalendarEvent,
     upsertDeadline, toggleDeadline, deleteDeadline,
     addCategory, renameCategory, deleteCategory,
-    upsertPantryItem, deletePantryItem, changePantryQty,
+    upsertPantryItem, deletePantryItem, changePantryQty, reconcilePantryItems,
     addShoppingItem, toggleShoppingItem, deleteShoppingItem, moveTakenShoppingToPantry, importReceiptItems,
     upsertDish, deleteDish, upsertMealPlan, deleteMealPlan,
     addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
