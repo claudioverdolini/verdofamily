@@ -1,7 +1,7 @@
 export type Role = 'admin' | 'adulto' | 'bimbo'
 export type ThemeMode = 'system' | 'light' | 'dark'
 export type VisualStyle = 'violet' | 'ocean' | 'emerald' | 'sunset' | 'berry' | 'coral' | 'midnight' | 'electric' | 'custom'
-export type BackgroundPreset = 'none' | 'aurora' | 'sky' | 'sand' | 'forest' | 'sunset' | 'night' | 'lavender' | 'custom'
+export type BackgroundPreset = 'none' | 'color' | 'aurora' | 'sky' | 'sand' | 'forest' | 'sunset' | 'night' | 'lavender' | 'custom'
 
 export type PageKey =
   | 'home'
@@ -23,6 +23,7 @@ export type UserPrefs = {
   accent: string
   visualStyle: VisualStyle
   backgroundPreset: BackgroundPreset
+  backgroundColor: string
   backgroundImage?: string
   backgroundStrength: number
   backgroundBlur: number
