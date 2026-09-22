@@ -34,6 +34,52 @@ export async function imageFileToAvatarDataUrl(file: File, size = 320) {
   }
 }
 
+export async function imageFileToBackgroundDataUrl(file: File, maxSide = 1600) {
+  if (!file.type.startsWith('image/')) throw new Error('Seleziona un file immagine.')
+  if (file.size > 12 * 1024 * 1024) throw new Error('La foto è troppo grande. Massimo 12 MB.')
+
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('Impossibile leggere la foto.'))
+      img.src = objectUrl
+    })
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error('Foto non valida.')
+
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight))
+    const width = Math.max(1, Math.round(image.naturalWidth * scale))
+    const height = Math.max(1, Math.round(image.naturalHeight * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Impossibile elaborare la foto.')
+
+    ctx.drawImage(image, 0, 0, width, height)
+    let dataUrl = canvas.toDataURL('image/webp', .72)
+    if (!dataUrl.startsWith('data:image/webp')) dataUrl = canvas.toDataURL('image/jpeg', .72)
+
+    if (dataUrl.length > 1_150_000) {
+      const retryScale = Math.min(1, 1280 / Math.max(width, height))
+      const retry = document.createElement('canvas')
+      retry.width = Math.max(1, Math.round(width * retryScale))
+      retry.height = Math.max(1, Math.round(height * retryScale))
+      const retryCtx = retry.getContext('2d')
+      if (!retryCtx) throw new Error('Impossibile comprimere la foto.')
+      retryCtx.drawImage(canvas, 0, 0, retry.width, retry.height)
+      dataUrl = retry.toDataURL('image/webp', .62)
+      if (!dataUrl.startsWith('data:image/webp')) dataUrl = retry.toDataURL('image/jpeg', .64)
+    }
+
+    if (dataUrl.length > 1_200_000) throw new Error('La foto resta troppo pesante anche dopo la compressione. Prova con un’immagine più piccola.')
+    return dataUrl
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
 export function localDateISO(date = new Date()) {
   const y = date.getFullYear()
   const m = String(date.getMonth() + 1).padStart(2, '0')
@@ -527,6 +573,10 @@ export const DEFAULT_PREFS: UserPrefs = {
   theme: 'system',
   accent: '#635BFF',
   visualStyle: 'violet',
+  backgroundPreset: 'none',
+  backgroundImage: undefined,
+  backgroundStrength: 24,
+  backgroundBlur: 0,
   density: 'comfortable',
   showBalances: true,
   bottomTabs: ['home', 'calendar', 'shopping', 'meals'],
@@ -562,10 +612,24 @@ function normalizeHomeCards(input?: UserPrefs['homeCards']) {
 }
 
 export function mergePrefs(input?: Partial<UserPrefs>): UserPrefs {
+  const allowedBackgrounds = ['none','aurora','sky','sand','forest','sunset','night','lavender','custom']
+  const rawBackgroundImage = String(input?.backgroundImage || '')
+  const backgroundImage = /^data:image\/(?:webp|jpeg|png);base64,/i.test(rawBackgroundImage) && rawBackgroundImage.length <= 1_200_000
+    ? rawBackgroundImage
+    : undefined
+  const requestedPreset = allowedBackgrounds.includes(String(input?.backgroundPreset || ''))
+    ? input?.backgroundPreset
+    : DEFAULT_PREFS.backgroundPreset
+  const backgroundPreset = requestedPreset === 'custom' && !backgroundImage ? 'none' : requestedPreset
+
   return {
     ...DEFAULT_PREFS,
     ...(input || {}),
     visualStyle: input?.visualStyle || visualStyleFromAccent(input?.accent) || DEFAULT_PREFS.visualStyle,
+    backgroundPreset,
+    backgroundImage,
+    backgroundStrength: Math.max(8, Math.min(60, Number(input?.backgroundStrength ?? DEFAULT_PREFS.backgroundStrength) || DEFAULT_PREFS.backgroundStrength)),
+    backgroundBlur: Math.max(0, Math.min(12, Number(input?.backgroundBlur ?? DEFAULT_PREFS.backgroundBlur) || 0)),
     bottomTabs: input?.bottomTabs?.length ? input.bottomTabs : DEFAULT_PREFS.bottomTabs,
     homeCards: normalizeHomeCards(input?.homeCards),
     notifications: { ...DEFAULT_PREFS.notifications, ...(input?.notifications || {}) }
@@ -684,7 +748,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 20,
+    version: 21,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
