@@ -148,7 +148,10 @@ export default function VoiceAssistant() {
 
     const primaryUnit = candidates[0].unit || 'pz'
     const compatible = candidates.filter(item => unitFactor(item.unit || 'pz').family === unitFactor(primaryUnit).family)
-    const total = compatible.reduce((sum, item) => sum + Number(item.qty || 0), 0)
+    const total = compatible.reduce((sum, item) => {
+      const converted = convertQuantity(Math.max(0, Number(item.qty || 0)), item.unit || primaryUnit, primaryUnit)
+      return sum + Math.max(0, Number(converted || 0))
+    }, 0)
     const requestedInPrimary = finishAll
       ? total
       : convertQuantity(Math.max(0, Number(quantity || 1)), requestedUnit, primaryUnit)
@@ -159,12 +162,15 @@ export default function VoiceAssistant() {
 
     for (const item of compatible) {
       if (remaining <= 0) break
-      const current = Math.max(0, Number(item.qty || 0))
-      const decrease = Math.min(current, remaining)
-      if (!decrease) continue
-      changePantryQty(item.id, -decrease)
-      consumed += decrease
-      remaining -= decrease
+      const currentInPrimary = convertQuantity(Math.max(0, Number(item.qty || 0)), item.unit || primaryUnit, primaryUnit)
+      const available = Math.max(0, Number(currentInPrimary || 0))
+      const decreaseInPrimary = Math.min(available, remaining)
+      if (!decreaseInPrimary) continue
+      const decreaseInItemUnit = convertQuantity(decreaseInPrimary, primaryUnit, item.unit || primaryUnit)
+      if (decreaseInItemUnit === null || decreaseInItemUnit <= 0) continue
+      changePantryQty(item.id, -decreaseInItemUnit)
+      consumed += decreaseInPrimary
+      remaining -= decreaseInPrimary
     }
 
     return {
