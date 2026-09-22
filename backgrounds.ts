@@ -1,5 +1,6 @@
 export type BackgroundPresetId =
   | 'none'
+  | 'color'
   | 'aurora'
   | 'sky'
   | 'sand'
@@ -10,7 +11,7 @@ export type BackgroundPresetId =
   | 'custom'
 
 export const BACKGROUND_PRESETS: Array<{
-  id: Exclude<BackgroundPresetId, 'custom'>
+  id: Exclude<BackgroundPresetId, 'custom' | 'color'>
   name: string
   subtitle: string
   css: string
