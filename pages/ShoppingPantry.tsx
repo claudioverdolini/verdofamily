@@ -963,8 +963,11 @@ export default function ShoppingPantryPage() {
 
       {tab === 'shopping' ? (
         <div className="shopping-layout">
-          <Card className="shopping-compose">
-            <CardHeader title="Aggiunta rapida" subtitle="Scrivi, quantità, invio. Fine." />
+          <div className="shopping-quick-add" aria-label="Aggiunta rapida alla lista spesa">
+            <div className="shopping-quick-add__label">
+              <span><Plus size={16} /></span>
+              <div><strong>Aggiungi alla lista</strong><small>Scrivi il prodotto e premi Invio</small></div>
+            </div>
             <div className="quick-input-row">
               <input
                 autoComplete="off"
@@ -972,6 +975,7 @@ export default function ShoppingPantryPage() {
                 onChange={e => setShopName(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addQuickShopping() }}
                 placeholder="Cosa manca?"
+                aria-label="Prodotto da aggiungere"
               />
               <input type="number" min="0" step="1" value={shopQty} onChange={e => setShopQty(Number(e.target.value))} aria-label="Quantità" />
               <select value={shopUnit} onChange={e => setShopUnit(e.target.value)} aria-label="Unità">
@@ -979,9 +983,9 @@ export default function ShoppingPantryPage() {
               </select>
               <IconButton label="Aggiungi" onClick={addQuickShopping}><Plus size={20} /></IconButton>
             </div>
-          </Card>
+          </div>
 
-          <Card>
+          <Card className={`shopping-list-card ${data.shopping.length ? '' : 'is-empty'}`}>
             <CardHeader
               title="Da comprare"
               subtitle={pending.length ? `${pending.length} ${pending.length === 1 ? 'prodotto' : 'prodotti'} ancora da prendere` : 'Lista completata'}
