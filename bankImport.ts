@@ -12,6 +12,7 @@ export type BankColumnMapping = {
   amount: string
   debit: string
   credit: string
+  reference: string
 }
 
 function text(value: unknown) {
@@ -256,7 +257,8 @@ export function suggestBankMapping(headers: string[]): BankColumnMapping {
     description: find('descrizione','causale','description','movimento','beneficiario','esercente','dettagli','operazione'),
     amount: debit ? '' : find('importo','amount','valore','totale'),
     debit,
-    credit
+    credit,
+    reference: find('id operazione','id movimento','identificativo','riferimento','reference','transaction id','transactionid','cro','trn','numero operazione','n operazione')
   }
 }
 
@@ -305,6 +307,32 @@ export function parseBankDate(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10)
 }
 
+export function normalizeBankMerchant(value: string) {
+  return normalized(value)
+    .replace(/\b(?:pagamento|pagam|carta|bancomat|pos|contactless|operazione|movimento|addebito|sepa|sdd|bonifico|bonif|disposizione|commissione|rif|riferimento|codice|cod|transazione|trx|data|ora|italia)\b/g, ' ')
+    .replace(/\b\d{4,}\b/g, ' ')
+    .replace(/\b\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function bankMerchantSimilarity(left: string, right: string) {
+  const a = normalizeBankMerchant(left)
+  const b = normalizeBankMerchant(right)
+  if (!a || !b) return 0
+  if (a === b) return 1
+  if ((a.includes(b) || b.includes(a)) && Math.min(a.length, b.length) >= 5) return .94
+
+  const tokensA = Array.from(new Set(a.split(' ').filter(token => token.length >= 2)))
+  const tokensB = Array.from(new Set(b.split(' ').filter(token => token.length >= 2)))
+  if (!tokensA.length || !tokensB.length) return 0
+  const shared = tokensA.filter(token => tokensB.includes(token)).length
+  const union = new Set([...tokensA, ...tokensB]).size
+  const jaccard = union ? shared / union : 0
+  const coverage = shared / Math.max(1, Math.min(tokensA.length, tokensB.length))
+  return Math.max(jaccard, coverage * .9)
+}
+
 export function inferExpenseCategory(value: string): ExpenseCategory {
   const v = normalized(value)
   if (/supermerc|conad|coop|lidl|eurospin|esselunga|aliment|spesa|market|carrefour|pam\b|md\b/.test(v)) return 'groceries'
@@ -318,8 +346,9 @@ export function inferExpenseCategory(value: string): ExpenseCategory {
   return 'other'
 }
 
-export function bankSourceRef(date: string, description: string, amount: number) {
-  const value = `${date}|${normalized(description)}|${Math.abs(amount).toFixed(2)}`
+export function bankSourceRef(date: string, description: string, amount: number, discriminator = '') {
+  const suffix = discriminator ? `|${normalized(discriminator)}` : ''
+  const value = `${date}|${normalized(description)}|${Math.abs(amount).toFixed(2)}${suffix}`
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index)
