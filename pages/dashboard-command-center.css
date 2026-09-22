@@ -536,3 +536,239 @@
   .home-wallet-summary>span:first-child{grid-column:1/-1}
   .home-wallet-summary>span:nth-child(2){border-left:0}
 }
+
+
+/* Home visual polish v3 */
+.familywall-hero{
+  position:relative;
+  isolation:isolate;
+  padding:14px 16px 18px;
+  margin-bottom:10px;
+  border:1px solid color-mix(in srgb,var(--accent) 10%,var(--border));
+  border-radius:22px;
+  background:
+    radial-gradient(circle at 92% 18%,color-mix(in srgb,var(--accent2) 10%,transparent),transparent 28%),
+    radial-gradient(circle at 12% 8%,color-mix(in srgb,var(--accent) 7%,transparent),transparent 30%),
+    linear-gradient(145deg,color-mix(in srgb,var(--accent) 3%,var(--surface)),var(--surface));
+  box-shadow:0 8px 28px rgba(15,23,42,.045);
+  overflow:hidden;
+}
+.familywall-hero::after{
+  content:"";
+  position:absolute;
+  width:150px;
+  height:150px;
+  right:-72px;
+  bottom:-86px;
+  border-radius:50%;
+  border:24px solid color-mix(in srgb,var(--accent) 4%,transparent);
+  z-index:-1;
+}
+.familywall-hero__date{
+  width:max-content;
+  padding:4px 8px;
+  border-radius:999px;
+  background:color-mix(in srgb,var(--accent) 8%,transparent);
+}
+.home-view-switch{
+  border:1px solid color-mix(in srgb,var(--accent) 8%,var(--border));
+  background:color-mix(in srgb,var(--accent) 3%,var(--surface));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+}
+.home-view-switch button.is-active{
+  color:var(--accent);
+  background:var(--surface);
+  box-shadow:0 5px 15px color-mix(in srgb,var(--accent) 9%,transparent);
+}
+
+/* Quick actions: module color rather than neutral grey tiles. */
+.home-quick-action{
+  position:relative;
+  overflow:hidden;
+  border-color:color-mix(in srgb,var(--action-color) 13%,var(--border));
+  background:
+    linear-gradient(145deg,color-mix(in srgb,var(--action-color) 5%,var(--surface)),var(--surface));
+  box-shadow:0 4px 14px rgba(15,23,42,.025);
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease,background .16s ease;
+}
+.home-quick-action::after{
+  content:"";
+  position:absolute;
+  inset:auto -18px -24px auto;
+  width:62px;
+  height:62px;
+  border-radius:50%;
+  background:color-mix(in srgb,var(--action-color) 5%,transparent);
+  pointer-events:none;
+}
+.home-quick-action:hover{
+  transform:translateY(-2px);
+  border-color:color-mix(in srgb,var(--action-color) 28%,var(--border));
+  box-shadow:0 8px 22px color-mix(in srgb,var(--action-color) 8%,rgba(15,23,42,.04));
+}
+.home-quick-action>span{
+  color:var(--action-color);
+  background:transparent;
+}
+.home-quick-action>span svg{
+  width:22px;
+  height:22px;
+  stroke-width:2.25;
+  filter:drop-shadow(0 3px 7px color-mix(in srgb,var(--action-color) 18%,transparent));
+}
+.home-quick-action>svg{
+  color:color-mix(in srgb,var(--action-color) 48%,var(--muted));
+  transition:transform .16s ease;
+}
+.home-quick-action:hover>svg{transform:translateX(2px)}
+
+/* At-a-glance cards get a faint module tint and free-floating icons. */
+.home-glance__item{
+  position:relative;
+  overflow:hidden;
+  border-color:color-mix(in srgb,var(--glance-color) 13%,var(--border));
+  background:linear-gradient(145deg,color-mix(in srgb,var(--glance-color) 5%,var(--surface)),var(--surface));
+  box-shadow:0 4px 14px rgba(15,23,42,.025);
+  transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease;
+}
+.home-glance__item::after{
+  content:"";
+  position:absolute;
+  width:70px;
+  height:70px;
+  border-radius:50%;
+  right:-34px;
+  top:-34px;
+  background:color-mix(in srgb,var(--glance-color) 6%,transparent);
+}
+.home-glance__item:hover{
+  transform:translateY(-2px);
+  border-color:color-mix(in srgb,var(--glance-color) 28%,var(--border));
+  box-shadow:0 8px 22px color-mix(in srgb,var(--glance-color) 8%,rgba(15,23,42,.04));
+}
+.home-glance__icon{
+  background:transparent;
+  color:var(--glance-color);
+}
+.home-glance__icon svg{
+  width:22px;
+  height:22px;
+  stroke-width:2.25;
+  filter:drop-shadow(0 3px 7px color-mix(in srgb,var(--glance-color) 20%,transparent));
+}
+
+/* Widgets: colored identity, cleaner icons and softer interior rows. */
+.home-widget{
+  position:relative;
+  isolation:isolate;
+  border-color:color-mix(in srgb,var(--widget-color) 15%,var(--border));
+  background:
+    radial-gradient(circle at 100% 0,color-mix(in srgb,var(--widget-color) 7%,transparent),transparent 31%),
+    linear-gradient(160deg,color-mix(in srgb,var(--widget-color) 2.5%,var(--surface)),var(--surface) 46%);
+  box-shadow:0 8px 26px rgba(15,23,42,.035);
+  transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;
+}
+.home-widget::before{
+  content:"";
+  position:absolute;
+  left:0;
+  top:18px;
+  bottom:18px;
+  width:3px;
+  border-radius:0 99px 99px 0;
+  background:linear-gradient(180deg,var(--widget-color),color-mix(in srgb,var(--widget-color) 28%,transparent));
+  opacity:.72;
+}
+.home-widget:hover{
+  border-color:color-mix(in srgb,var(--widget-color) 25%,var(--border));
+  box-shadow:0 11px 30px color-mix(in srgb,var(--widget-color) 5%,rgba(15,23,42,.05));
+}
+.home-widget__icon{
+  color:var(--widget-color);
+  background:transparent;
+}
+.home-widget__icon svg{
+  width:24px;
+  height:24px;
+  stroke-width:2.2;
+  filter:drop-shadow(0 3px 7px color-mix(in srgb,var(--widget-color) 20%,transparent));
+}
+.home-widget__count{
+  background:color-mix(in srgb,var(--widget-color) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--widget-color) 12%,transparent);
+}
+.home-widget__head>button{
+  background:transparent;
+  color:color-mix(in srgb,var(--widget-color) 58%,var(--muted));
+  transition:background .16s ease,color .16s ease,transform .16s ease;
+}
+.home-widget__head>button:hover{
+  background:color-mix(in srgb,var(--widget-color) 8%,transparent);
+  color:var(--widget-color);
+  transform:translateX(1px);
+}
+.home-widget .empty-state__icon{
+  color:var(--widget-color)!important;
+}
+.command-simple-list button,
+.home-widget__chips button,
+.home-board-list button,
+.home-deadline-list button{
+  border:1px solid transparent;
+  background:color-mix(in srgb,var(--widget-color) 3.5%,var(--surface2));
+  transition:background .15s ease,border-color .15s ease,transform .15s ease;
+}
+.command-simple-list button:hover,
+.home-widget__chips button:hover,
+.home-board-list button:hover,
+.home-deadline-list button:hover{
+  border-color:color-mix(in srgb,var(--widget-color) 12%,transparent);
+  background:color-mix(in srgb,var(--widget-color) 7%,var(--surface2));
+  transform:translateY(-1px);
+}
+.command-simple-list button>svg:first-child,
+.home-board-list button>svg:first-child{
+  color:var(--widget-color);
+}
+.home-date-chip{
+  border-color:color-mix(in srgb,var(--widget-color) 15%,var(--border));
+  background:color-mix(in srgb,var(--widget-color) 7%,var(--surface));
+}
+.home-date-chip strong{color:var(--widget-color)}
+.home-meal-preview button{
+  border:1px solid color-mix(in srgb,var(--widget-color) 10%,transparent);
+  background:linear-gradient(145deg,color-mix(in srgb,var(--widget-color) 7%,var(--surface)),var(--surface));
+}
+.home-meal-preview button:hover{
+  border-color:color-mix(in srgb,var(--widget-color) 22%,transparent);
+}
+
+/* Week/family views follow the same softer card language. */
+.week-command-day,
+.family-member-card,
+.family-summary-card{
+  border-color:color-mix(in srgb,var(--accent) 10%,var(--border));
+  background:linear-gradient(155deg,color-mix(in srgb,var(--accent) 2.5%,var(--surface)),var(--surface));
+  box-shadow:0 5px 18px rgba(15,23,42,.025);
+}
+.week-command-day.is-today{
+  border-color:color-mix(in srgb,var(--accent) 42%,var(--border));
+  background:linear-gradient(155deg,color-mix(in srgb,var(--accent) 6%,var(--surface)),var(--surface));
+  box-shadow:0 7px 22px color-mix(in srgb,var(--accent) 8%,transparent);
+}
+
+@media(max-width:620px){
+  .familywall-hero{
+    padding:12px 13px 14px;
+    border-radius:19px;
+  }
+  .home-quick-action:hover,
+  .home-glance__item:hover,
+  .home-widget:hover{
+    transform:none;
+  }
+  .home-widget::before{
+    top:14px;
+    bottom:14px;
+  }
+}
