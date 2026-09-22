@@ -380,6 +380,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }, [data.users, sessionUserId, cloudUserId])
 
   useEffect(() => {
+    if (!authUser || authUser.role === 'bimbo') return
+    materializeRecurringExpenses(localDateISO())
+    const timer = window.setInterval(() => materializeRecurringExpenses(localDateISO()), 60 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [authUser?.id, data.recurringExpenses])
+
+  useEffect(() => {
     if (!cloudUserId && sessionUserId && !authUser) setSessionUserId(null)
   }, [sessionUserId, authUser, cloudUserId])
 
