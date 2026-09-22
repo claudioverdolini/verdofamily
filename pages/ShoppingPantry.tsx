@@ -1329,7 +1329,9 @@ export default function ShoppingPantryPage() {
                     </div> : null}
                   </div> : null}
                 </div>)}
-                <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se un prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
+                {photoStockMode === 'add'
+                  ? <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se un prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
+                  : <div className="callout"><strong>Aggiornamento scorte</strong><br />Vengono corrette solo le quantità dei prodotti riconosciuti nella foto. La lista spesa e gli articoli non visibili restano invariati.</div>}
                 {photoRows.some(rowNeedsResidual) ? <div className="callout callout--warning"><strong>Residuo da confermare</strong><br />{photoRows.filter(rowNeedsResidual).length} {photoRows.filter(rowNeedsResidual).length === 1 ? 'confezione richiede una foto dell’interno oppure l’indicazione del residuo.' : 'confezioni richiedono una foto dell’interno oppure l’indicazione del residuo.'}</div> : null}
                 <Button icon={<PackageOpen size={18} />} disabled={enrichmentBusy || photoRows.some(rowNeedsResidual)} onClick={importPhotoRecognition}>{enrichmentBusy ? 'Cerco informazioni…' : photoStockMode === 'reconcile' ? 'Aggiorna le scorte' : 'Conferma e carica'}</Button>
                 {enrichmentMessage ? <div className="product-enrichment-message"><Globe2 size={16} /><span>{enrichmentMessage}</span></div> : null}
