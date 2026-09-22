@@ -44,6 +44,7 @@ import UsersPage from './pages/Users'
 import SettingsPage from './pages/Settings'
 import VoiceAssistant from './components/VoiceAssistant'
 import UserGuide from './components/UserGuide'
+import { backgroundCssForPreset } from './backgrounds'
 
 const VISUAL_STYLE_TOKENS: Record<string, { secondary: string; glow: string }> = {
   violet: { secondary: '#A855F7', glow: '#8B5CF6' },
@@ -694,6 +695,14 @@ function AppShell() {
     root.style.setProperty('--accent', accent)
     root.style.setProperty('--accent2', style.secondary || accent)
     root.style.setProperty('--accent-glow', style.glow || accent)
+    const backgroundPreset = prefs.backgroundPreset || 'none'
+    const wallpaper = backgroundPreset === 'custom' && prefs.backgroundImage
+      ? `url("${prefs.backgroundImage}")`
+      : backgroundCssForPreset(backgroundPreset)
+    root.style.setProperty('--app-wallpaper', wallpaper)
+    root.style.setProperty('--wallpaper-strength', String(Math.max(0.08, Math.min(0.60, Number(prefs.backgroundStrength || 24) / 100))))
+    root.style.setProperty('--wallpaper-blur', `${Math.max(0, Math.min(12, Number(prefs.backgroundBlur || 0)))}px`)
+    root.dataset.wallpaper = wallpaper && wallpaper !== 'none' ? 'on' : 'off'
     root.dataset.visualStyle = prefs.visualStyle || 'violet'
     root.dataset.density = prefs.density || 'comfortable'
     const apply = () => {
@@ -705,7 +714,7 @@ function AppShell() {
     const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
     mq?.addEventListener?.('change', apply)
     return () => mq?.removeEventListener?.('change', apply)
-  }, [prefs?.accent, prefs?.visualStyle, prefs?.theme, prefs?.density])
+  }, [prefs?.accent, prefs?.visualStyle, prefs?.theme, prefs?.density, prefs?.backgroundPreset, prefs?.backgroundImage, prefs?.backgroundStrength, prefs?.backgroundBlur])
 
   useEffect(() => {
     const reset = () => contentRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' })
