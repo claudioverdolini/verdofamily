@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { addDays, calendarEventOccursOn, calendarOccurrencesBetween, cleanReceiptLine, medicineDepletionDate, medicineInventorySummary, medicineTherapyCoverage, migrateData, monthCells, normalize, parseIngredients, parseReceiptLines, similarity, therapyLineRequiredTablets, weekDates } from './utils'
 import { initialData } from './data'
+import { bankSourceRef, inferExpenseCategory, parseBankAmount, parseBankDate } from './bankImport'
 
 describe('date helpers', () => {
   it('returns seven days starting on Monday', () => {
@@ -44,6 +45,31 @@ describe('date helpers', () => {
     expect(result?.remainingDays).toBe(9)
     expect(result?.requiredTablets).toBe(18)
     expect(result?.sufficient).toBe(true)
+  })
+})
+
+describe('bank expense import helpers', () => {
+  it('parses Italian and signed bank amounts', () => {
+    expect(parseBankAmount('1.234,56 €')).toBe(1234.56)
+    expect(parseBankAmount('-42,80')).toBe(-42.8)
+    expect(parseBankAmount('(19,90)')).toBe(-19.9)
+  })
+
+  it('parses European dates and Excel serial dates', () => {
+    expect(parseBankDate('22/09/2026')).toBe('2026-09-22')
+    expect(parseBankDate('2026-09-22')).toBe('2026-09-22')
+    expect(parseBankDate('46387')).toMatch(/^2026-/)
+  })
+
+  it('infers common family expense categories', () => {
+    expect(inferExpenseCategory('CONAD SUPERMERCATO')).toBe('groceries')
+    expect(inferExpenseCategory('ENEL ENERGIA')).toBe('bills')
+    expect(inferExpenseCategory('Q8 CARBURANTE')).toBe('transport')
+  })
+
+  it('creates stable duplicate keys for bank movements', () => {
+    expect(bankSourceRef('2026-09-22', 'Conad', 42.8)).toBe(bankSourceRef('2026-09-22', 'Conad', 42.8))
+    expect(bankSourceRef('2026-09-22', 'Conad', 42.8)).not.toBe(bankSourceRef('2026-09-23', 'Conad', 42.8))
   })
 })
 
@@ -165,7 +191,7 @@ describe('data migration', () => {
   it('migrates legacy meals to dishes', () => {
     const migrated = migrateData({ users: initialData.users, meals: [{ id: 9, name: 'Riso', type: 'Primo', variant: '', ingredients: [] }] }, initialData)
     expect(migrated.dishes[0].name).toBe('Riso')
-    expect(migrated.version).toBe(19)
+    expect(migrated.version).toBe(20)
   })
 
   it('promotes pantry identity from the existing technical sheet', () => {
