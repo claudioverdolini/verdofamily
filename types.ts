@@ -372,6 +372,8 @@ export type BoardPost = {
 }
 
 export type ExpenseCategory = 'groceries' | 'home' | 'transport' | 'health' | 'school' | 'bills' | 'leisure' | 'clothing' | 'other'
+export type ExpenseSource = 'receipt' | 'manual' | 'voice' | 'recurring' | 'bank'
+export type RecurringExpenseFrequency = 'weekly' | 'monthly' | 'yearly'
 
 export type ExpenseItem = {
   id: string
@@ -389,12 +391,26 @@ export type ExpenseRecord = {
   merchant: string
   total: number
   category: ExpenseCategory
-  source: 'receipt' | 'manual'
+  source: ExpenseSource
   sourceRef?: string
   createdAt: string
   createdByUserId?: number
   notes?: string
   items: ExpenseItem[]
+}
+
+export type RecurringExpense = {
+  id: string
+  merchant: string
+  amount: number
+  category: ExpenseCategory
+  frequency: RecurringExpenseFrequency
+  startDate: string
+  endDate?: string
+  active: boolean
+  notes?: string
+  createdAt: string
+  createdByUserId?: number
 }
 
 export type FamilyData = {
@@ -421,4 +437,5 @@ export type FamilyData = {
   schoolItems: SchoolItem[]
   boardPosts: BoardPost[]
   expenses: ExpenseRecord[]
+  recurringExpenses: RecurringExpense[]
 }
