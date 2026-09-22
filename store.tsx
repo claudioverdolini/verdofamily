@@ -12,6 +12,7 @@ import type {
   MealPlan,
   PageKey,
   RecurringChore,
+  RecurringExpense,
   Routine,
   PantryLocation,
   PantryMovement,
@@ -192,7 +193,11 @@ type StoreValue = {
   addBoardAttachment: (postId: string, attachment: BoardAttachment) => void
   removeBoardAttachment: (postId: string, attachmentId: string) => void
   upsertExpense: (expense: Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) => string
+  importExpenses: (expenses: Array<Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }>) => { imported: number; duplicates: number }
   deleteExpense: (id: string) => Promise<void>
+  upsertRecurringExpense: (expense: Omit<RecurringExpense, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) => string
+  deleteRecurringExpense: (id: string) => Promise<void>
+  materializeRecurringExpenses: (referenceDate?: string) => number
   restoreRecycleItem: (id: string, payload: any) => Promise<boolean>
   recoverConflictDraft: (id: string, snapshot: any) => Promise<boolean>
   exportData: () => string
@@ -210,6 +215,37 @@ function confirmDeletion(target: string, detail?: string) {
   if (typeof window === 'undefined') return true
   const extra = detail ? '\n\n' + detail : ''
   return window.confirm('Confermi di voler eliminare ' + target + '?' + extra)
+}
+
+function recurringExpenseDates(rule: Pick<RecurringExpense, 'frequency' | 'startDate' | 'endDate'>, referenceDate: string) {
+  const start = new Date(`${rule.startDate}T12:00:00`)
+  const reference = new Date(`${referenceDate}T12:00:00`)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(reference.getTime()) || start > reference) return [] as string[]
+  const end = rule.endDate ? new Date(`${rule.endDate}T12:00:00`) : reference
+  const limit = end < reference ? end : reference
+  const result: string[] = []
+  const originalDay = start.getDate()
+  const originalMonth = start.getMonth()
+  const originalYear = start.getFullYear()
+
+  for (let index = 0; index < 600; index += 1) {
+    let candidate: Date
+    if (rule.frequency === 'weekly') {
+      candidate = new Date(start)
+      candidate.setDate(start.getDate() + index * 7)
+    } else if (rule.frequency === 'yearly') {
+      const year = originalYear + index
+      const lastDay = new Date(year, originalMonth + 1, 0, 12).getDate()
+      candidate = new Date(year, originalMonth, Math.min(originalDay, lastDay), 12)
+    } else {
+      const monthBase = new Date(originalYear, originalMonth + index, 1, 12)
+      const lastDay = new Date(monthBase.getFullYear(), monthBase.getMonth() + 1, 0, 12).getDate()
+      candidate = new Date(monthBase.getFullYear(), monthBase.getMonth(), Math.min(originalDay, lastDay), 12)
+    }
+    if (candidate > limit) break
+    result.push(localDateISO(candidate))
+  }
+  return result
 }
 
 function loadCachedData(): FamilyData {
@@ -1926,7 +1962,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   function upsertExpense(expense: Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) {
     if (!authUser || authUser.role === 'bimbo') return ''
     const existingBySource = !expense.id && expense.sourceRef
-      ? dataRef.current.expenses.find(item => item.source === 'receipt' && item.sourceRef === expense.sourceRef)
+      ? dataRef.current.expenses.find(item => item.sourceRef === expense.sourceRef)
       : undefined
     if (existingBySource) return existingBySource.id
 
@@ -1941,8 +1977,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         merchant: String(expense.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
         total: Math.max(0, Number(expense.total) || 0),
         category: allowedCategories.includes(String(expense.category)) ? expense.category : 'other',
-        source: expense.source === 'receipt' ? 'receipt' : 'manual',
-        sourceRef: expense.sourceRef ? String(expense.sourceRef).slice(0, 160) : undefined,
+        source: ['receipt','manual','voice','recurring','bank'].includes(String(expense.source)) ? expense.source : 'manual',
+        sourceRef: expense.sourceRef ? String(expense.sourceRef).slice(0, 200) : undefined,
         createdAt: existing?.createdAt || expense.createdAt || now,
         createdByUserId: existing?.createdByUserId || expense.createdByUserId || authUser.id,
         notes: expense.notes?.trim().slice(0, 2000) || undefined,
@@ -1974,6 +2010,122 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!confirmDeletion('la spesa “' + expense.merchant + '” del ' + expense.date)) return
     if (!await archiveDeletedItem('reports', expense.merchant + ' · ' + expense.date, { kind: 'expense', item: expense })) return
     setData(prev => ({ ...prev, expenses: prev.expenses.filter(item => item.id !== id) }))
+  }
+
+  function importExpenses(expenses: Array<Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }>) {
+    if (!authUser || authUser.role === 'bimbo') return { imported: 0, duplicates: expenses.length }
+    const existingRefs = new Set(dataRef.current.expenses.map(item => item.sourceRef).filter(Boolean))
+    const seenRefs = new Set(existingRefs)
+    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    const now = new Date().toISOString()
+    let duplicates = 0
+    const cleanRows: ExpenseRecord[] = []
+
+    for (const expense of expenses) {
+      const sourceRef = expense.sourceRef ? String(expense.sourceRef).slice(0, 200) : undefined
+      if (sourceRef && seenRefs.has(sourceRef)) {
+        duplicates += 1
+        continue
+      }
+      const total = Math.max(0, Number(expense.total) || 0)
+      if (total <= 0) continue
+      const row: ExpenseRecord = {
+        id: expense.id || crypto.randomUUID(),
+        date: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.date || '')) ? expense.date : localDateISO(),
+        merchant: String(expense.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
+        total,
+        category: allowedCategories.includes(String(expense.category)) ? expense.category : 'other',
+        source: ['receipt','manual','voice','recurring','bank'].includes(String(expense.source)) ? expense.source : 'manual',
+        sourceRef,
+        createdAt: expense.createdAt || now,
+        createdByUserId: expense.createdByUserId || authUser.id,
+        notes: expense.notes?.trim().slice(0, 2000) || undefined,
+        items: Array.isArray(expense.items) ? expense.items.map(item => ({
+          id: String(item.id || crypto.randomUUID()),
+          name: String(item.name || 'Articolo').trim().slice(0, 200) || 'Articolo',
+          qty: Math.max(0, Number(item.qty) || 0),
+          unit: String(item.unit || 'pz').slice(0, 20),
+          unitPrice: Number.isFinite(Number(item.unitPrice)) ? Math.max(0, Number(item.unitPrice)) : undefined,
+          totalPrice: Number.isFinite(Number(item.totalPrice)) ? Math.max(0, Number(item.totalPrice)) : undefined,
+          category: item.category ? String(item.category).slice(0, 100) : undefined
+        })) : []
+      }
+      cleanRows.push(row)
+      if (sourceRef) seenRefs.add(sourceRef)
+    }
+
+    if (cleanRows.length) setData(prev => ({ ...prev, expenses: [...cleanRows, ...prev.expenses] }))
+    return { imported: cleanRows.length, duplicates }
+  }
+
+  function upsertRecurringExpense(expense: Omit<RecurringExpense, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) {
+    if (!authUser || authUser.role === 'bimbo') return ''
+    const id = expense.id || crypto.randomUUID()
+    const now = new Date().toISOString()
+    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    const clean: RecurringExpense = {
+      id,
+      merchant: String(expense.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',
+      amount: Math.max(0, Number(expense.amount) || 0),
+      category: allowedCategories.includes(String(expense.category)) ? expense.category : 'other',
+      frequency: ['weekly','monthly','yearly'].includes(String(expense.frequency)) ? expense.frequency : 'monthly',
+      startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.startDate || '')) ? expense.startDate : localDateISO(),
+      endDate: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.endDate || '')) ? expense.endDate : undefined,
+      active: expense.active !== false,
+      notes: expense.notes?.trim().slice(0, 1000) || undefined,
+      createdAt: expense.createdAt || now,
+      createdByUserId: expense.createdByUserId || authUser.id
+    }
+    if (clean.amount <= 0) return ''
+    setData(prev => ({
+      ...prev,
+      recurringExpenses: prev.recurringExpenses.some(item => item.id === id)
+        ? prev.recurringExpenses.map(item => item.id === id ? { ...clean, createdAt: item.createdAt, createdByUserId: item.createdByUserId } : item)
+        : [clean, ...prev.recurringExpenses]
+    }))
+    return id
+  }
+
+  async function deleteRecurringExpense(id: string) {
+    if (!authUser || authUser.role === 'bimbo') return
+    const item = data.recurringExpenses.find(rule => rule.id === id)
+    if (!item) return
+    if (!confirmDeletion('la spesa ricorrente “' + item.merchant + '”', 'Le spese già generate restano nel Report.')) return
+    if (!await archiveDeletedItem('reports', 'Ricorrenza · ' + item.merchant, { kind: 'recurringExpense', item })) return
+    setData(prev => ({ ...prev, recurringExpenses: prev.recurringExpenses.filter(rule => rule.id !== id) }))
+  }
+
+  function materializeRecurringExpenses(referenceDate = localDateISO()) {
+    if (!authUser || authUser.role === 'bimbo') return 0
+    const current = dataRef.current
+    const existingRefs = new Set(current.expenses.map(item => item.sourceRef).filter(Boolean))
+    const generated: ExpenseRecord[] = []
+    const now = new Date().toISOString()
+
+    for (const rule of current.recurringExpenses || []) {
+      if (!rule.active || rule.amount <= 0) continue
+      for (const date of recurringExpenseDates(rule, referenceDate)) {
+        const sourceRef = `recurring:${rule.id}:${date}`
+        if (existingRefs.has(sourceRef)) continue
+        existingRefs.add(sourceRef)
+        generated.push({
+          id: crypto.randomUUID(),
+          date,
+          merchant: rule.merchant,
+          total: rule.amount,
+          category: rule.category,
+          source: 'recurring',
+          sourceRef,
+          createdAt: now,
+          createdByUserId: authUser.id,
+          notes: rule.notes || undefined,
+          items: []
+        })
+      }
+    }
+
+    if (generated.length) setData(prev => ({ ...prev, expenses: [...generated, ...prev.expenses] }))
+    return generated.length
   }
 
   function addBoardAttachment(postId: string, attachment: BoardAttachment) {
@@ -2109,6 +2261,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const result = addUnique(next.expenses, item)
       return { next: { ...next, expenses: result.list }, applied: result.added }
     }
+    if (kind === 'recurringExpense') {
+      const result = addUnique(next.recurringExpenses, item)
+      return { next: { ...next, recurringExpenses: result.list }, applied: result.added }
+    }
     if (kind === 'category') {
       const category = String(item || '').trim()
       if (!category || next.categories.some(existing => normalize(existing) === normalize(category))) return { next, applied: false }
@@ -2233,7 +2389,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
     upsertBoardPost, toggleBoardPin, deleteBoardPost, addBoardAttachment, removeBoardAttachment,
-    upsertExpense, deleteExpense,
+    upsertExpense, importExpenses, deleteExpense,
+    upsertRecurringExpense, deleteRecurringExpense, materializeRecurringExpenses,
     restoreRecycleItem, recoverConflictDraft,
     exportData, importData, resetData
   }
