@@ -1389,11 +1389,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           barcode: /^\d{8,14}$/.test(incomingBarcode) ? incomingBarcode : primary.barcode,
           category: raw.category || primary.category,
           productInfo: raw.productInfo || primary.productInfo,
-          packageState: raw.packageState === 'opened' ? 'opened' : primary.packageState,
-          remainingQty: raw.packageState === 'opened' ? raw.remainingQty : primary.remainingQty,
-          remainingUnit: raw.packageState === 'opened' ? raw.remainingUnit : primary.remainingUnit,
-          residualPercent: raw.packageState === 'opened' ? raw.residualPercent : primary.residualPercent,
-          residualSource: raw.packageState === 'opened' ? raw.residualSource : primary.residualSource
+          packageState: raw.packageState || primary.packageState || 'sealed',
+          remainingQty: raw.packageState === 'opened' ? raw.remainingQty : raw.packageState === 'sealed' ? undefined : primary.remainingQty,
+          remainingUnit: raw.packageState === 'opened' ? raw.remainingUnit : raw.packageState === 'sealed' ? undefined : primary.remainingUnit,
+          residualPercent: raw.packageState === 'opened' ? raw.residualPercent : raw.packageState === 'sealed' ? undefined : primary.residualPercent,
+          residualSource: raw.packageState === 'opened' ? raw.residualSource : raw.packageState === 'sealed' ? undefined : primary.residualSource
         }
 
         if (delta < 0) {
