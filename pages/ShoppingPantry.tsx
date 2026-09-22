@@ -94,6 +94,7 @@ export default function ShoppingPantryPage() {
     upsertPantryItem,
     deletePantryItem,
     changePantryQty,
+    reconcilePantryItems,
     addCategory,
     renameCategory,
     deleteCategory,
@@ -125,6 +126,7 @@ export default function ShoppingPantryPage() {
   const [removeFromShopping, setRemoveFromShopping] = useState(true)
 
   const [scanMode, setScanMode] = useState<'receipt' | 'pantry-photo'>('receipt')
+  const [photoStockMode, setPhotoStockMode] = useState<'add' | 'reconcile'>('add')
   const [visionStatus, setVisionStatus] = useState<{ configured: boolean; model?: string | null } | null>(null)
   const [photoBusy, setPhotoBusy] = useState(false)
   const [photoError, setPhotoError] = useState('')
@@ -668,7 +670,14 @@ export default function ShoppingPantryPage() {
     }))
     if (!selected.length) return
     const enriched = await enrichImportedItems(selected)
-    importReceiptItems(enriched, removeFromShopping, inventoryDestination)
+
+    if (photoStockMode === 'reconcile') {
+      const ok = window.confirm('Aggiornare le quantità dei prodotti riconosciuti in base alla foto? Gli articoli non visibili nella foto non verranno rimossi.')
+      if (!ok) return
+      reconcilePantryItems(enriched, inventoryDestination)
+    } else {
+      importReceiptItems(enriched, removeFromShopping, inventoryDestination)
+    }
     setPhotoRows([])
     setPhotoBatch([])
     setPhotoPreview('')
@@ -1130,6 +1139,16 @@ export default function ShoppingPantryPage() {
             <Segmented value={inventoryDestination} onChange={setInventoryDestination} options={[{ value: 'pantry', label: 'Dispensa' }, { value: 'fridge', label: 'Frigo' }, { value: 'freezer', label: 'Freezer' }]} />
           </div>
 
+          {scanMode === 'pantry-photo' ? <div className="inventory-photo-mode">
+            <div>
+              <strong>Come vuoi usare la foto?</strong>
+              <span>{photoStockMode === 'add'
+                ? 'Aggiunge ciò che riconosce alle quantità già presenti.'
+                : 'Allinea le quantità dei prodotti riconosciuti a ciò che vede nella foto. Gli articoli non visibili restano invariati.'}</span>
+            </div>
+            <Segmented value={photoStockMode} onChange={setPhotoStockMode} options={[{ value: 'add', label: 'Aggiungi prodotti' }, { value: 'reconcile', label: 'Aggiorna scorte' }]} />
+          </div> : null}
+
           {scanMode === 'receipt' ? <div className="scan-layout">
           <Card>
             <CardHeader title="1. Leggi lo scontrino" subtitle="Fotocamera su iPhone/Android oppure testo incollato." />
@@ -1312,7 +1331,7 @@ export default function ShoppingPantryPage() {
                 </div>)}
                 <label className="toggle-row"><input type="checkbox" checked={removeFromShopping} onChange={e => setRemoveFromShopping(e.target.checked)} /><span>Se un prodotto era nella lista spesa, rimuovilo automaticamente</span></label>
                 {photoRows.some(rowNeedsResidual) ? <div className="callout callout--warning"><strong>Residuo da confermare</strong><br />{photoRows.filter(rowNeedsResidual).length} {photoRows.filter(rowNeedsResidual).length === 1 ? 'confezione richiede una foto dell’interno oppure l’indicazione del residuo.' : 'confezioni richiedono una foto dell’interno oppure l’indicazione del residuo.'}</div> : null}
-                <Button icon={<PackageOpen size={18} />} disabled={enrichmentBusy || photoRows.some(rowNeedsResidual)} onClick={importPhotoRecognition}>{enrichmentBusy ? 'Cerco informazioni…' : 'Conferma e carica in dispensa'}</Button>
+                <Button icon={<PackageOpen size={18} />} disabled={enrichmentBusy || photoRows.some(rowNeedsResidual)} onClick={importPhotoRecognition}>{enrichmentBusy ? 'Cerco informazioni…' : photoStockMode === 'reconcile' ? 'Aggiorna le scorte' : 'Conferma e carica'}</Button>
                 {enrichmentMessage ? <div className="product-enrichment-message"><Globe2 size={16} /><span>{enrichmentMessage}</span></div> : null}
               </div> : <EmptyState icon={<Camera size={30} />} title="In attesa della foto" text="Dopo il riconoscimento vedrai qui i prodotti, le quantità stimate e le associazioni da confermare." />}
             </Card>
