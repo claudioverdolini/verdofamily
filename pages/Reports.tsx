@@ -322,10 +322,11 @@ export default function ReportsPage() {
     const amountIndex = mapping.amount ? table.headers.indexOf(mapping.amount) : -1
     const debitIndex = mapping.debit ? table.headers.indexOf(mapping.debit) : -1
     const creditIndex = mapping.credit ? table.headers.indexOf(mapping.credit) : -1
+    const referenceIndex = mapping.reference ? table.headers.indexOf(mapping.reference) : -1
 
     const rawAmounts = table.rows.slice(0, 250).map(row => amountIndex >= 0 ? parseBankAmount(row[amountIndex]) : undefined).filter((value): value is number => value !== undefined)
     const negativeAmountMode = amountIndex >= 0 && rawAmounts.some(value => value < 0)
-    const existingRefs = new Set((data.expenses || []).map(item => item.sourceRef).filter(Boolean))
+    const occurrenceBySignature = new Map<string, number>()
 
     const rows: BankPreviewRow[] = table.rows.slice(0, 1500).map((row, index) => {
       const date = parseBankDate(row[dateIndex])
@@ -347,22 +348,55 @@ export default function ReportsPage() {
       }
 
       const valid = !!date && !!merchant && total > 0
-      const sourceRef = valid ? bankSourceRef(date, merchant, total) : `invalid-${index}`
-      const duplicate = valid && existingRefs.has(sourceRef)
+      const rawReference = referenceIndex >= 0 ? cleanMerchant(row[referenceIndex]) : ''
+      const signatureBase = rawReference || row.map(value => String(value || '').trim()).join('|')
+      const occurrence = (occurrenceBySignature.get(signatureBase) || 0) + 1
+      occurrenceBySignature.set(signatureBase, occurrence)
+      const sourceKey = `${signatureBase}|occ:${occurrence}`
+      const sourceRef = valid ? bankSourceRef(date, merchant, total, sourceKey) : `invalid-${index}`
+      const legacySourceRef = valid ? bankSourceRef(date, merchant, total) : `invalid-legacy-${index}`
+      const assessment = valid ? duplicateAssessment(date, merchant, total, sourceRef, legacySourceRef) : { status: 'none' as BankDuplicateStatus, reason: '', match: undefined }
+
       return {
         id: `bank-${index}`,
-        include: valid && isExpense && !duplicate,
+        include: valid && isExpense && assessment.status === 'none',
         date,
         merchant,
         total,
         category: inferExpenseCategory(merchant),
         sourceRef,
-        duplicate,
-        valid
+        legacySourceRef,
+        sourceKey,
+        duplicateStatus: assessment.status,
+        duplicateReason: assessment.reason,
+        matchedExpense: assessment.match,
+        bankDouble: false,
+        valid: valid && isExpense
       }
-    }).filter(row => row.valid && row.total > 0)
+    }).filter(row => row.valid)
+
+    const indexesByAmount = new Map<string, number[]>()
+    rows.forEach((row, index) => {
+      const key = row.total.toFixed(2)
+      const candidates = indexesByAmount.get(key) || []
+      for (const previousIndex of candidates) {
+        const previous = rows[previousIndex]
+        const days = daysBetween(row.date, previous.date)
+        const similarity = bankMerchantSimilarity(row.merchant, previous.merchant)
+        if (days <= 1 && similarity >= .82) {
+          const reason = `Nel file bancario c’è un altro addebito di ${money(row.total)} con descrizione simile ${days ? 'a un giorno di distanza' : 'nello stesso giorno'}.`
+          row.bankDouble = true
+          row.bankDoubleReason = reason
+          previous.bankDouble = true
+          previous.bankDoubleReason = reason
+        }
+      }
+      candidates.push(index)
+      indexesByAmount.set(key, candidates)
+    })
 
     setBankRows(rows)
+    setBankFilter('all')
   }
 
   function updateBankMapping(patch: Partial<BankColumnMapping>) {
@@ -394,8 +428,10 @@ export default function ReportsPage() {
   }
 
   function importBankRows() {
-    const selected = bankRows.filter(row => row.include && row.valid && !row.duplicate)
+    const selected = bankRows.filter(row => row.include && row.valid && row.duplicateStatus !== 'exact')
     if (!selected.length) return
+    const reviewCount = selected.filter(row => row.duplicateStatus === 'likely' || row.duplicateStatus === 'possible').length
+    if (reviewCount && !window.confirm(`${reviewCount} movimenti selezionati risultano simili a spese già registrate. Vuoi importarli comunque?`)) return
     const result = importExpenses(selected.map(row => ({
       date: row.date,
       merchant: row.merchant,
@@ -403,12 +439,29 @@ export default function ReportsPage() {
       category: row.category,
       source: 'bank' as const,
       sourceRef: row.sourceRef,
-      notes: bankTable ? `Importato da ${bankTable.fileName}` : 'Importato da estratto conto',
+      notes: [
+        bankTable ? `Importato da ${bankTable.fileName}` : 'Importato da estratto conto',
+        row.bankDouble ? 'Possibile doppio addebito rilevato nel file bancario' : ''
+      ].filter(Boolean).join(' · '),
       items: []
     })))
-    setBankMessage(`Importate ${result.imported} spese${result.duplicates ? `; ${result.duplicates} doppioni ignorati` : ''}.`)
-    setBankRows(prev => prev.map(row => selected.some(item => item.id === row.id) ? { ...row, include: false, duplicate: true } : row))
+    setBankMessage(`Importate ${result.imported} spese${result.duplicates ? `; ${result.duplicates} movimenti già importati ignorati` : ''}.`)
+    setBankRows(prev => prev.map(row => selected.some(item => item.id === row.id) ? { ...row, include: false, duplicateStatus: 'exact', duplicateReason: 'Movimento appena importato.' } : row))
   }
+
+  const bankSummary = useMemo(() => ({
+    new: bankRows.filter(row => row.duplicateStatus === 'none').length,
+    exact: bankRows.filter(row => row.duplicateStatus === 'exact').length,
+    review: bankRows.filter(row => row.duplicateStatus === 'likely' || row.duplicateStatus === 'possible').length,
+    double: bankRows.filter(row => row.bankDouble).length
+  }), [bankRows])
+
+  const visibleBankRows = useMemo(() => bankRows.filter(row => {
+    if (bankFilter === 'new') return row.duplicateStatus === 'none'
+    if (bankFilter === 'review') return row.duplicateStatus === 'likely' || row.duplicateStatus === 'possible' || row.duplicateStatus === 'exact'
+    if (bankFilter === 'double') return row.bankDouble
+    return true
+  }), [bankRows, bankFilter])
 
   const periodTitle = period === 'month' ? monthLabel(cursor) : String(selectedYear)
 
