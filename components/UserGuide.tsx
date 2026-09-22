@@ -210,6 +210,7 @@ const SECTIONS: GuideSection[] = [
     keywords: 'voce assistente comando vocale nome microfono parlare',
     items: [
       'Puoi usare il comando vocale per impartire richieste rapide all’assistente di VerdoFamily.',
+      'Puoi registrare una spesa dicendo, per esempio, “Ho speso 42,80 euro alla Conad per la spesa”.',
       'Il nome dell’assistente può essere personalizzato dalle Impostazioni.',
       'Quando una richiesta comporta un’eliminazione, VerdoFamily deve sempre chiedere conferma prima di procedere.'
     ]
@@ -234,10 +235,13 @@ const SECTIONS: GuideSection[] = [
     subtitle: 'Scontrini, categorie e andamento nel tempo',
     icon: <BarChart3 size={20} />,
     page: 'reports',
-    keywords: 'report spese scontrini totale negozio categorie andamento mese anno ocr',
+    keywords: 'report spese scontrini totale negozio categorie andamento mese anno ocr banca csv excel xlsx ricorrenti voce spesa rapida',
     items: [
       'Gli scontrini importati possono alimentare automaticamente il registro spese con data, negozio, totale e articoli riconosciuti.',
-      'Puoi correggere i dati rilevati prima dell’importazione oppure aggiungere una spesa manuale.',
+      'La Spesa rapida registra in pochi secondi importo, causale e categoria; puoi anche dire a Verdo “Ho speso 42,80 euro alla Conad”.',
+      'Le spese ricorrenti permettono di registrare una sola volta affitto, abbonamenti, assicurazioni e costi periodici: le occorrenze dovute vengono generate senza duplicati.',
+      'Importa banca legge localmente file CSV ed Excel .xlsx, propone l’abbinamento delle colonne e mostra un’anteprima prima di salvare i movimenti.',
+      'I movimenti bancari vengono categorizzati automaticamente quando possibile e confrontati con quelli già presenti per evitare doppioni.',
       'Il Report mostra totale, media per spesa, spesa alimentare, ripartizione per categoria, negozi principali e andamento degli ultimi mesi.',
       'Le spese restano modificabili e ogni eliminazione richiede conferma.'
     ]
@@ -262,7 +266,7 @@ const DISCOVER = [
   'Le confezioni aperte possono avere quantità o percentuale residua e una stima da foto dell’interno.',
   'Le ricorrenze dei compiti possono essere assegnate a più persone con una sola configurazione.',
   'La Home è modulare: puoi scegliere quali riepiloghi mostrare.',
-  'Gli scontrini possono alimentare automaticamente il Report spese con negozio, data e totale.',
+  'Gli scontrini, i comandi vocali e gli estratti conto CSV/Excel possono alimentare automaticamente il Report spese.',
   'Le schede tecniche della dispensa possono recuperare automaticamente informazioni online.',
   'Le notifiche possono usare un contenuto discreto sulla schermata di blocco.'
 ]
