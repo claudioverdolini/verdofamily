@@ -684,7 +684,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 19,
+    version: 20,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -915,8 +915,8 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       merchant: String(item.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
       total: Math.max(0, Number(item.total) || 0),
       category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
-      source: item.source === 'receipt' ? 'receipt' : 'manual',
-      sourceRef: item.sourceRef ? String(item.sourceRef).slice(0, 160) : undefined,
+      source: ['receipt','manual','voice','recurring','bank'].includes(String(item.source)) ? item.source : 'manual',
+      sourceRef: item.sourceRef ? String(item.sourceRef).slice(0, 200) : undefined,
       createdAt: item.createdAt || new Date().toISOString(),
       createdByUserId: Number(item.createdByUserId || 0) || undefined,
       notes: item.notes ? String(item.notes).slice(0, 2000) : undefined,
@@ -929,6 +929,19 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         totalPrice: Number.isFinite(Number(row.totalPrice)) ? Math.max(0, Number(row.totalPrice)) : undefined,
         category: row.category ? String(row.category).slice(0, 100) : undefined
       })) : []
-    })).filter((item: any) => item.total > 0) : []
+    })).filter((item: any) => item.total > 0) : [],
+    recurringExpenses: Array.isArray(source.recurringExpenses) ? source.recurringExpenses.map((item: any) => ({
+      id: String(item.id || crypto.randomUUID()),
+      merchant: String(item.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',
+      amount: Math.max(0, Number(item.amount) || 0),
+      category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
+      frequency: ['weekly','monthly','yearly'].includes(String(item.frequency)) ? item.frequency : 'monthly',
+      startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.startDate || '')) ? String(item.startDate) : localDateISO(),
+      endDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.endDate || '')) ? String(item.endDate) : undefined,
+      active: item.active !== false,
+      notes: item.notes ? String(item.notes).slice(0, 1000) : undefined,
+      createdAt: item.createdAt || new Date().toISOString(),
+      createdByUserId: Number(item.createdByUserId || 0) || undefined
+    })).filter((item: any) => item.amount > 0) : []
   }
 }
