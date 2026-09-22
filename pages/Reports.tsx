@@ -609,26 +609,48 @@ export default function ReportsPage() {
             <Field label="Importo unico" hint="Usalo se il file ha una sola colonna importo."><select value={bankMapping.amount} onChange={e => updateBankMapping({ amount: e.target.value })}><option value="">Nessuna</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
             <Field label="Oppure colonna addebiti" hint="Per file con addebiti e accrediti separati."><select value={bankMapping.debit} onChange={e => updateBankMapping({ debit: e.target.value })}><option value="">Nessuna</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
             <Field label="Colonna accrediti" hint="Facoltativa: serve a escludere le entrate."><select value={bankMapping.credit} onChange={e => updateBankMapping({ credit: e.target.value })}><option value="">Nessuna</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
+            <Field label="ID / riferimento operazione" hint="Se presente, rende ancora più preciso il riconoscimento dei movimenti già importati."><select value={bankMapping.reference} onChange={e => updateBankMapping({ reference: e.target.value })}><option value="">Nessuno</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
           </div>
         </div> : null}
       </Card>
 
       {bankTable ? <Card>
         <CardHeader
-          title="Anteprima movimenti"
-          subtitle={bankRows.length ? `${bankRows.filter(row => row.include).length} spese selezionate · ${bankRows.filter(row => row.duplicate).length} già presenti` : 'Completa l’abbinamento delle colonne'}
+          title="Anteprima e controllo doppioni"
+          subtitle={bankRows.length ? `${bankRows.filter(row => row.include).length} selezionati · ${bankSummary.exact} già importati · ${bankSummary.review} da verificare` : 'Completa l’abbinamento delle colonne'}
           action={bankRows.some(row => row.include) ? <Button size="sm" icon={<Upload size={16} />} onClick={importBankRows}>Importa selezionati</Button> : null}
         />
-        {bankRows.length ? <div className="bank-preview-list">
-          {bankRows.slice(0, 500).map(row => <div key={row.id} className={`bank-preview-row ${row.duplicate ? 'is-duplicate' : ''}`}>
-            <input type="checkbox" checked={row.include} disabled={row.duplicate} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, include: e.target.checked } : item))} />
-            <input type="date" value={row.date} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, date: e.target.value, sourceRef: bankSourceRef(e.target.value, item.merchant, item.total) } : item))} />
-            <div className="bank-preview-row__merchant"><strong>{row.merchant}</strong>{row.duplicate ? <span><AlertTriangle size={13} />Già presente</span> : null}</div>
-            <strong className="bank-preview-row__amount">{money(row.total)}</strong>
-            <select value={row.category} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, category: e.target.value as ExpenseCategory } : item))}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-          </div>)}
-          {bankRows.length > 500 ? <div className="bank-preview-more">Mostro le prime 500 righe. Le altre verranno comunque considerate dall’importazione.</div> : null}
-        </div> : <EmptyState icon={<FileSpreadsheet size={30} />} title="Mappa le colonne" text="Servono almeno Data, Descrizione e Importo oppure Addebiti." />}
+        {bankRows.length ? <>
+          <div className="bank-analysis-grid">
+            <button type="button" className={bankFilter === 'new' ? 'is-active' : ''} onClick={() => setBankFilter(bankFilter === 'new' ? 'all' : 'new')}><span>Nuovi</span><strong>{bankSummary.new}</strong><small>non trovati nei Report</small></button>
+            <button type="button" className={bankFilter === 'review' ? 'is-active' : ''} onClick={() => setBankFilter(bankFilter === 'review' ? 'all' : 'review')}><span>Da verificare</span><strong>{bankSummary.review}</strong><small>somigliano a spese esistenti</small></button>
+            <button type="button" className={bankFilter === 'double' ? 'is-active' : ''} onClick={() => setBankFilter(bankFilter === 'double' ? 'all' : 'double')}><span>Possibili doppi pagamenti</span><strong>{bankSummary.double}</strong><small>due addebiti simili in banca</small></button>
+            <button type="button" className={bankFilter === 'all' ? 'is-active' : ''} onClick={() => setBankFilter('all')}><span>Già importati</span><strong>{bankSummary.exact}</strong><small>esclusi automaticamente</small></button>
+          </div>
+
+          <div className="bank-duplicate-legend">
+            <span><i className="is-archive" /> Già nei Report = non viene reimportato</span>
+            <span><i className="is-review" /> Simile a una spesa esistente = controlla tu</span>
+            <span><i className="is-double" /> Doppio in banca = può essere un vero doppio pagamento e resta importabile</span>
+          </div>
+
+          <div className="bank-preview-list">
+            {visibleBankRows.slice(0, 500).map(row => <div key={row.id} className={`bank-preview-row ${row.duplicateStatus === 'exact' ? 'is-duplicate' : ''} ${row.duplicateStatus === 'likely' || row.duplicateStatus === 'possible' ? 'is-review' : ''} ${row.bankDouble ? 'is-bank-double' : ''}`}>
+              <input type="checkbox" checked={row.include} disabled={row.duplicateStatus === 'exact'} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, include: e.target.checked } : item))} />
+              <input type="date" value={row.date} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, date: e.target.value, sourceRef: bankSourceRef(e.target.value, item.merchant, item.total, item.sourceKey), legacySourceRef: bankSourceRef(e.target.value, item.merchant, item.total) } : item))} />
+              <div className="bank-preview-row__merchant">
+                <strong>{row.merchant}</strong>
+                {row.duplicateStatus === 'exact' ? <span className="bank-match bank-match--archive"><CheckCircle2 size={13} />Già importato</span> : null}
+                {row.duplicateStatus === 'likely' || row.duplicateStatus === 'possible' ? <span className="bank-match bank-match--review"><AlertTriangle size={13} />{row.duplicateStatus === 'likely' ? 'Probabile doppione nei Report' : 'Possibile doppione nei Report'}{row.matchedExpense ? ` · ${row.matchedExpense.merchant} · ${row.matchedExpense.date.split('-').reverse().join('/')} · ${sourceLabel(row.matchedExpense.source)}` : ''}</span> : null}
+                {row.bankDouble ? <span className="bank-match bank-match--double"><AlertTriangle size={13} />Possibile doppio pagamento bancario</span> : null}
+                {row.duplicateReason ? <small>{row.duplicateReason}</small> : row.bankDoubleReason ? <small>{row.bankDoubleReason}</small> : null}
+              </div>
+              <strong className="bank-preview-row__amount">{money(row.total)}</strong>
+              <select value={row.category} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, category: e.target.value as ExpenseCategory } : item))}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+            </div>)}
+            {visibleBankRows.length > 500 ? <div className="bank-preview-more">Mostro le prime 500 righe del filtro corrente. Le altre verranno comunque considerate dall’importazione.</div> : null}
+          </div>
+        </> : <EmptyState icon={<FileSpreadsheet size={30} />} title="Mappa le colonne" text="Servono almeno Data, Descrizione e Importo oppure Addebiti." />}
       </Card> : null}
     </div> : null}
 
