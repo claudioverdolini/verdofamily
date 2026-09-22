@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Mic, MicOff, Send, Volume2, X } from 'lucide-react'
 import { useFamily } from '../store'
 import { localDateISO, normalize } from '../utils'
+import { inferExpenseCategory } from '../bankImport'
 
 function addDays(days: number) {
   const date = new Date()
@@ -20,7 +21,7 @@ function splitItems(value: string) {
 
 export default function VoiceAssistant() {
   const {
-    data, authUser, setActivePage, addShoppingItem, addTodo, upsertDeadline, upsertBoardPost
+    data, authUser, setActivePage, addShoppingItem, addTodo, upsertDeadline, upsertBoardPost, upsertExpense
   } = useFamily()
 
   const assistantName = data.assistantName || 'Verdo'
@@ -91,8 +92,8 @@ export default function VoiceAssistant() {
 
   function navigate(text: string) {
     const routes: Array<[string[], any]> = [
-      [['home'], 'home'], [['calendario', 'agenda'], 'calendar'], [['spesa', 'dispensa', 'frigo'], 'shopping'],
-      [['pasti', 'menu'], 'meals'], [['paghette', 'compiti'], 'chores'], [['scuola'], 'school'],
+      [['home'], 'home'], [['calendario', 'agenda'], 'calendar'], [['report', 'spese', 'uscite'], 'reports'],
+      [['spesa', 'dispensa', 'frigo'], 'shopping'], [['pasti', 'menu'], 'meals'], [['paghette', 'compiti'], 'chores'], [['scuola'], 'school'],
       [['bacheca'], 'board'], [['salute'], 'health'], [['scadenze'], 'deadlines'],
       [['da fare', 'todo'], 'todos'], [['membri', 'utenti'], 'users'], [['impostazioni'], 'settings']
     ]
@@ -119,6 +120,30 @@ export default function VoiceAssistant() {
     }
 
     if (/^(apri|vai|mostra)\b/.test(text) && navigate(text)) return
+
+    const expense = raw.match(/(?:ho\s+speso|registra(?:\s+una)?\s+spesa(?:\s+di)?|aggiungi(?:\s+una)?\s+spesa(?:\s+di)?|spesa\s+di)\s*(?:€\s*)?(\d+(?:[.,]\d{1,2})?)\s*(?:€|euro)?(?:\s+(?:da|al|alla|presso|per)\s+(.+))?/i)
+    if (expense) {
+      if (authUser.role === 'bimbo') {
+        speak('La registrazione delle spese è disponibile per gli adulti della famiglia.')
+        return
+      }
+      const total = Number(expense[1].replace(',', '.'))
+      const rawMerchant = String(expense[2] || 'Spesa').trim()
+      const merchant = (rawMerchant.includes(' per ') ? rawMerchant.split(/\s+per\s+/i)[0] : rawMerchant).trim() || 'Spesa'
+      const date = text.includes('ieri') ? addDays(-1) : addDays(0)
+      const category = inferExpenseCategory(raw)
+      upsertExpense({
+        date,
+        merchant,
+        total,
+        category,
+        source: 'voice',
+        notes: 'Registrato con comando vocale',
+        items: []
+      })
+      speak('Registrati ' + total.toFixed(2).replace('.', ',') + ' euro per ' + merchant + '.')
+      return
+    }
 
     const shopping = raw.match(/(?:aggiungi|metti)\s+(.+?)\s+(?:alla|nella)\s+(?:lista\s+della\s+)?spesa\b/i)
     if (shopping) {
@@ -184,7 +209,7 @@ export default function VoiceAssistant() {
       return
     }
 
-    speak('Non ho ancora capito questo comando. Prova con: aggiungi latte alla spesa, ricordami di chiamare il medico domani, scrivi in bacheca, apri scuola, cosa abbiamo domani, oppure quanto ho di paghetta.')
+    speak('Non ho ancora capito questo comando. Prova con: aggiungi latte alla spesa, ricordami di chiamare il medico domani, scrivi in bacheca, apri scuola, cosa abbiamo domani, oppure: ho speso 42 euro alla Conad.')
   }
 
   function startListening() {
