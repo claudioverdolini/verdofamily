@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  ApprovalRequest,
+  ApprovalRequestKind,
   BoardAttachment,
   BoardPost,
   CalendarEvent,
@@ -142,6 +144,8 @@ type StoreValue = {
   addUser: (user: Omit<FamilyUser, 'id' | 'balance' | 'prefs'> & { prefs?: Partial<UserPrefs> }) => void
   updateUser: (id: number, patch: Partial<FamilyUser>) => void
   deleteUser: (id: number) => void
+  approveApprovalRequest: (id: string) => void
+  rejectApprovalRequest: (id: string) => void
   upsertCalendarEvent: (event: Omit<CalendarEvent, 'id'> & { id?: number }) => void
   deleteCalendarEvent: (id: number) => void
   upsertDeadline: (deadline: Omit<Deadline, 'id' | 'done'> & { id?: number; done?: boolean }) => void
@@ -1078,7 +1082,149 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     setData(prev => prev.users.length <= 1 ? prev : ({ ...prev, users: prev.users.filter(u => u.id !== id) }))
   }
 
+  function childApprovalRequest(kind: ApprovalRequestKind, action: ApprovalRequest['action'], payload: Record<string, any>, summary: string) {
+    if (!authUser || authUser.role !== 'bimbo') return false
+    const request: ApprovalRequest = {
+      id: crypto.randomUUID(),
+      kind,
+      action,
+      requestedByUserId: authUser.id,
+      createdAt: new Date().toISOString(),
+      summary: String(summary || 'Richiesta').trim().slice(0, 240) || 'Richiesta',
+      payload: JSON.parse(JSON.stringify(payload || {}))
+    }
+    setData(prev => ({ ...prev, approvalRequests: [...(prev.approvalRequests || []), request] }))
+    return true
+  }
+
+  function approveApprovalRequest(id: string) {
+    if (!authUser || authUser.role === 'bimbo') return
+    setData(prev => {
+      const request = (prev.approvalRequests || []).find(item => item.id === id)
+      if (!request) return prev
+      const payload: any = request.payload || {}
+      let next = prev
+
+      if (request.kind === 'shopping') {
+        if (request.action === 'delete') {
+          next = { ...next, shopping: next.shopping.filter(item => item.id !== Number(payload.id)) }
+        } else {
+          const name = String(payload.name || '').trim()
+          const qty = Math.max(0, Number(payload.qty || 1))
+          const unit = String(payload.unit || 'pz')
+          if (name) {
+            const existing = next.shopping.find(item => !item.taken && normalize(item.name) === normalize(name) && normalize(item.unit) === normalize(unit))
+            next = existing
+              ? { ...next, shopping: next.shopping.map(item => item.id === existing.id ? { ...item, qty: Number(item.qty || 0) + qty } : item) }
+              : { ...next, shopping: [...next.shopping, { id: nextId(next.shopping), name, qty, unit, taken: false, category: payload.category || undefined }] }
+          }
+        }
+      }
+
+      if (request.kind === 'school') {
+        if (request.action === 'delete') {
+          next = { ...next, schoolItems: next.schoolItems.filter(item => item.id !== Number(payload.id)) }
+        } else {
+          const clean: SchoolItem = {
+            id: request.action === 'update' && Number(payload.id) > 0 ? Number(payload.id) : nextId(next.schoolItems),
+            userId: Number(payload.userId || request.requestedByUserId),
+            type: payload.type,
+            title: String(payload.title || '').trim(),
+            date: payload.date || localDateISO(),
+            subjectId: payload.subjectId ? Number(payload.subjectId) : undefined,
+            notes: payload.notes ? String(payload.notes).trim() : undefined,
+            amount: payload.amount === undefined || payload.amount === null ? undefined : Math.max(0, Number(payload.amount) || 0),
+            done: !!payload.done,
+            createdAt: payload.createdAt || localDateISO()
+          }
+          if (clean.title) {
+            const exists = next.schoolItems.some(item => item.id === clean.id)
+            next = { ...next, schoolItems: exists ? next.schoolItems.map(item => item.id === clean.id ? clean : item) : [...next.schoolItems, clean] }
+          }
+        }
+      }
+
+      if (request.kind === 'deadline') {
+        if (request.action === 'delete') {
+          next = { ...next, deadlines: next.deadlines.filter(item => item.id !== Number(payload.id)) }
+        } else {
+          const idValue = request.action === 'update' && Number(payload.id) > 0 ? Number(payload.id) : nextId(next.deadlines)
+          const clean: Deadline = {
+            ...payload,
+            id: idValue,
+            userId: Number(payload.userId || request.requestedByUserId),
+            title: String(payload.title || '').trim(),
+            date: payload.date || localDateISO(),
+            kind: 'general',
+            done: !!payload.done,
+            category: payload.category || 'other',
+            reminderDays: Array.from(new Set((Array.isArray(payload.reminderDays) ? payload.reminderDays : [90, 30, 7]).map(Number))).sort((a: number, b: number) => b - a),
+            repeatYearly: payload.repeatYearly === true,
+            notes: payload.notes ? String(payload.notes).trim() : ''
+          }
+          if (clean.title) {
+            const exists = next.deadlines.some(item => item.id === clean.id)
+            next = { ...next, deadlines: exists ? next.deadlines.map(item => item.id === clean.id ? clean : item) : [...next.deadlines, clean] }
+          }
+        }
+      }
+
+      if (request.kind === 'calendar') {
+        if (request.action === 'delete') {
+          next = { ...next, calendarEvents: next.calendarEvents.filter(item => item.id !== Number(payload.id)) }
+        } else {
+          const idValue = request.action === 'update' && Number(payload.id) > 0 ? Number(payload.id) : nextId(next.calendarEvents)
+          const userIds = Array.from(new Set((Array.isArray(payload.userIds) ? payload.userIds : [payload.userId || request.requestedByUserId]).map(Number).filter((value: number) => value > 0)))
+          const clean: CalendarEvent = {
+            ...payload,
+            id: idValue,
+            title: String(payload.title || '').trim(),
+            date: payload.date || localDateISO(),
+            time: payload.time || '',
+            userId: Number(userIds[0] || request.requestedByUserId),
+            userIds,
+            audience: payload.audience === 'family' ? 'family' : 'users'
+          }
+          if (clean.title) {
+            const exists = next.calendarEvents.some(item => item.id === clean.id)
+            next = { ...next, calendarEvents: exists ? next.calendarEvents.map(item => item.id === clean.id ? clean : item) : [...next.calendarEvents, clean] }
+          }
+        }
+      }
+
+      if (request.kind === 'todo') {
+        if (request.action === 'delete') {
+          next = { ...next, todos: next.todos.filter(item => item.id !== Number(payload.id)) }
+        } else {
+          const idValue = request.action === 'update' && Number(payload.id) > 0 ? Number(payload.id) : nextId(next.todos)
+          const clean: Todo = {
+            id: idValue,
+            title: String(payload.title || '').trim(),
+            userId: Number(payload.userId || request.requestedByUserId),
+            done: !!payload.done,
+            createdAt: payload.createdAt || localDateISO()
+          }
+          if (clean.title) {
+            const exists = next.todos.some(item => item.id === clean.id)
+            next = { ...next, todos: exists ? next.todos.map(item => item.id === clean.id ? clean : item) : [...next.todos, clean] }
+          }
+        }
+      }
+
+      return { ...next, approvalRequests: (next.approvalRequests || []).filter(item => item.id !== id) }
+    })
+  }
+
+  function rejectApprovalRequest(id: string) {
+    if (!authUser || authUser.role === 'bimbo') return
+    setData(prev => ({ ...prev, approvalRequests: (prev.approvalRequests || []).filter(item => item.id !== id) }))
+  }
+
   function upsertCalendarEvent(event: Omit<CalendarEvent, 'id'> & { id?: number }) {
+    if (authUser?.role === 'bimbo') {
+      childApprovalRequest('calendar', event.id ? 'update' : 'create', event as any, `${event.id ? 'Modifica' : 'Nuovo impegno'}: ${event.title || 'Calendario'} · ${event.date || ''}`)
+      return
+    }
     setData(prev => {
       if (!event.id) return { ...prev, calendarEvents: [...prev.calendarEvents, { ...event, id: nextId(prev.calendarEvents) }] }
       const exists = prev.calendarEvents.some(e => e.id === event.id)
@@ -1089,16 +1235,24 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     const event = data.calendarEvents.find(item => item.id === id)
     if (!event) return
     if (!confirmDeletion('l’impegno “' + (event.title || 'selezionato') + '”')) return
+    if (authUser?.role === 'bimbo') {
+      childApprovalRequest('calendar', 'delete', { id: event.id, title: event.title, date: event.date }, `Elimina impegno: ${event.title}`)
+      return
+    }
     if (!await archiveDeletedItem('calendar', event.title || 'Impegno', { kind: 'calendarEvent', item: event })) return
     setData(prev => ({ ...prev, calendarEvents: prev.calendarEvents.filter(e => e.id !== id) }))
   }
 
   function upsertDeadline(deadline: Omit<Deadline, 'id' | 'done'> & { id?: number; done?: boolean }) {
-    if (authUser?.role === 'bimbo' && isHealthDeadline(deadline)) return
+    if (authUser?.role === 'bimbo') {
+      if (isHealthDeadline(deadline)) return
+      childApprovalRequest('deadline', deadline.id ? 'update' : 'create', { ...deadline, userId: authUser.id }, `${deadline.id ? 'Modifica' : 'Nuova scadenza'}: ${deadline.title || 'Scadenza'} · ${deadline.date || ''}`)
+      return
+    }
     setData(prev => ({ ...prev, deadlines: deadline.id ? prev.deadlines.map(d => d.id === deadline.id ? { ...d, ...deadline, id: d.id, done: !!deadline.done } : d) : [...prev.deadlines, { ...deadline, id: nextId(prev.deadlines), done: !!deadline.done }] }))
   }
   function toggleDeadline(id: number) {
-    if (authUser?.role === 'bimbo' && isHealthDeadline(data.deadlines.find(item => item.id === id) || {})) return
+    if (authUser?.role === 'bimbo') return
     setData(prev => ({
       ...prev,
       deadlines: prev.deadlines.map(d => {
@@ -1121,10 +1275,14 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     }))
   }
   async function deleteDeadline(id: number) {
-    if (authUser?.role === 'bimbo' && isHealthDeadline(data.deadlines.find(item => item.id === id) || {})) return
     const deadline = data.deadlines.find(item => item.id === id)
     if (!deadline) return
+    if (authUser?.role === 'bimbo' && isHealthDeadline(deadline)) return
     if (!confirmDeletion('la scadenza “' + (deadline.title || 'selezionata') + '”')) return
+    if (authUser?.role === 'bimbo') {
+      childApprovalRequest('deadline', 'delete', { id: deadline.id, title: deadline.title, date: deadline.date }, `Elimina scadenza: ${deadline.title}`)
+      return
+    }
     const module = isHealthDeadline(deadline) ? 'health' : 'deadlines'
     if (!await archiveDeletedItem(module, deadline.title || 'Scadenza', { kind: 'deadline', item: deadline })) return
     setData(prev => ({ ...prev, deadlines: prev.deadlines.filter(d => d.id !== id) }))
@@ -1430,12 +1588,25 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     })
   }
 
-  function addShoppingItem(item: Omit<ShoppingItem, 'id' | 'taken'>) { setData(prev => ({ ...prev, shopping: [...prev.shopping, { ...item, id: nextId(prev.shopping), taken: false }] })) }
-  function toggleShoppingItem(id: number) { setData(prev => ({ ...prev, shopping: prev.shopping.map(s => s.id === id ? { ...s, taken: !s.taken } : s) })) }
+  function addShoppingItem(item: Omit<ShoppingItem, 'id' | 'taken'>) {
+    if (authUser?.role === 'bimbo') {
+      childApprovalRequest('shopping', 'create', item as any, `Aggiungi alla spesa: ${item.name} · ${item.qty} ${item.unit}`)
+      return
+    }
+    setData(prev => ({ ...prev, shopping: [...prev.shopping, { ...item, id: nextId(prev.shopping), taken: false }] }))
+  }
+  function toggleShoppingItem(id: number) {
+    if (authUser?.role === 'bimbo') return
+    setData(prev => ({ ...prev, shopping: prev.shopping.map(s => s.id === id ? { ...s, taken: !s.taken } : s) }))
+  }
   async function deleteShoppingItem(id: number) {
     const item = data.shopping.find(entry => entry.id === id)
     if (!item) return
     if (!confirmDeletion('“' + item.name + '” dalla lista della spesa')) return
+    if (authUser?.role === 'bimbo') {
+      childApprovalRequest('shopping', 'delete', { id: item.id, name: item.name }, `Rimuovi dalla spesa: ${item.name}`)
+      return
+    }
     if (!await archiveDeletedItem('shopping', item.name, { kind: 'shoppingItem', item })) return
     setData(prev => ({ ...prev, shopping: prev.shopping.filter(s => s.id !== id) }))
   }
@@ -1860,6 +2031,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function addTodo(todo: Omit<Todo, 'id' | 'done' | 'createdAt'>) {
+    if (authUser?.role === 'bimbo') {
+      childApprovalRequest('todo', 'create', { ...todo, userId: authUser.id }, `Nuovo promemoria: ${todo.title}`)
+      return
+    }
     setData(prev => ({ ...prev, todos: [...prev.todos, { ...todo, id: nextId(prev.todos), done: false, createdAt: localDateISO() }] }))
   }
 
@@ -1871,6 +2046,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     const todo = data.todos.find(item => item.id === id)
     if (!todo) return
     if (!confirmDeletion('“' + todo.title + '” dai Da fare')) return
+    if (authUser?.role === 'bimbo') {
+      childApprovalRequest('todo', 'delete', { id: todo.id, title: todo.title }, `Elimina promemoria: ${todo.title}`)
+      return
+    }
     if (!await archiveDeletedItem('todos', todo.title, { kind: 'todo', item: todo })) return
     setData(prev => ({ ...prev, todos: prev.todos.filter(t => t.id !== id) }))
   }
@@ -2023,7 +2202,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function upsertSchoolItem(item: Omit<SchoolItem, 'id' | 'done' | 'createdAt'> & { id?: number; done?: boolean; createdAt?: string }) {
-    if (authUser?.role === 'bimbo' && Number(item.userId) !== authUser.id) return
+    if (authUser?.role === 'bimbo') {
+      if (Number(item.userId) !== authUser.id) return
+      childApprovalRequest('school', item.id ? 'update' : 'create', { ...item, userId: authUser.id }, `${item.id ? 'Modifica scuola' : 'Nuova attività scuola'}: ${item.title || 'Attività'} · ${item.date || ''}`)
+      return
+    }
     setData(prev => {
       const clean: SchoolItem = {
         id: item.id || nextId(prev.schoolItems),
@@ -2063,6 +2246,10 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!target) return
     if (authUser.role === 'bimbo' && target.userId !== authUser.id) return
     if (!confirmDeletion('l’impegno scolastico “' + target.title + '”')) return
+    if (authUser.role === 'bimbo') {
+      childApprovalRequest('school', 'delete', { id: target.id, title: target.title, date: target.date, userId: target.userId }, `Elimina attività scuola: ${target.title}`)
+      return
+    }
     if (!await archiveDeletedItem('school', target.title, { kind: 'schoolItem', item: target })) return
     setData(prev => ({ ...prev, schoolItems: prev.schoolItems.filter(item => item.id !== id) }))
   }
@@ -2536,6 +2723,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     createCloudFamily, joinCloudFamily, createFamilyInvite, syncNow,
     updateCurrentPrefs, updateCurrentProfile, setAssistantName,
     addUser, updateUser, deleteUser,
+    approveApprovalRequest, rejectApprovalRequest,
     upsertCalendarEvent, deleteCalendarEvent,
     upsertDeadline, toggleDeadline, deleteDeadline,
     addCategory, renameCategory, deleteCategory,
