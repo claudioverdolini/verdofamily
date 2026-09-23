@@ -59,6 +59,8 @@ function reminderLabel(days: number[]) {
 export default function DeadlinesPage() {
   const { data, authUser, upsertDeadline, toggleDeadline, deleteDeadline } = useFamily()
   const today = localDateISO()
+  const isChild = authUser?.role === 'bimbo'
+  const pendingChildRequests = (data.approvalRequests || []).filter(request => request.requestedByUserId === authUser?.id && request.kind === 'deadline')
   const [editing, setEditing] = useState<any>(null)
   const [view, setView] = useState<'upcoming' | 'year'>('upcoming')
   const [category, setCategory] = useState<'all' | DeadlineCategory>('all')
@@ -106,13 +108,15 @@ export default function DeadlinesPage() {
 
   function save() {
     if (!editing?.title?.trim() || !editing?.date) return
-    const userIds = editing.id
-      ? [Number(editing.userId)]
-      : Array.from(new Set(
-          (Array.isArray(editing.userIds) && editing.userIds.length ? editing.userIds : [editing.userId])
-            .map(Number)
-            .filter((id: number) => id > 0)
-        ))
+    const userIds = isChild && authUser
+      ? [authUser.id]
+      : editing.id
+        ? [Number(editing.userId)]
+        : Array.from(new Set(
+            (Array.isArray(editing.userIds) && editing.userIds.length ? editing.userIds : [editing.userId])
+              .map(Number)
+              .filter((id: number) => id > 0)
+          ))
     if (!userIds.length) return
     userIds.forEach((userId: number, index: number) => upsertDeadline({
       ...editing,
@@ -152,9 +156,11 @@ export default function DeadlinesPage() {
     <PageIntro
       eyebrow="Centro annuale"
       title="Scadenze"
-      description="Documenti, assicurazioni, auto, scuola, abbonamenti, compleanni e manutenzioni con preavvisi automatici."
+      description={isChild ? 'Puoi segnalare una scadenza personale. Un genitore la controllerà prima di aggiungerla.' : 'Documenti, assicurazioni, auto, scuola, abbonamenti, compleanni e manutenzioni con preavvisi automatici.'}
       actions={<Button icon={<Plus size={18} />} onClick={openNew}>Nuova scadenza</Button>}
     />
+
+    {isChild ? <div className="child-approval-hint"><strong>Conferma genitore attiva</strong><span>{pendingChildRequests.length ? `${pendingChildRequests.length} richieste in attesa.` : 'Le scadenze che inserisci diventano definitive dopo l’approvazione.'}</span></div> : null}
 
     <div className="deadline-stats">
       <Card className="deadline-stat"><span>Scadute</span><strong>{stats.overdue}</strong><small>richiedono attenzione</small></Card>
@@ -263,7 +269,7 @@ export default function DeadlinesPage() {
       size="md"
       footer={<div className="modal-actions">
         <div>{editing?.id ? <Button variant="danger" onClick={() => { deleteDeadline(editing.id); setEditing(null) }}>Elimina</Button> : null}</div>
-        <div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button onClick={save}>Salva</Button></div>
+        <div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button onClick={save}>{isChild ? 'Invia al genitore' : 'Salva'}</Button></div>
       </div>}
     >
       <div className="form-grid form-grid--2">
@@ -273,7 +279,11 @@ export default function DeadlinesPage() {
         <Field label="Data">
           <input type="date" value={editing?.date || ''} onChange={e => setEditing({ ...editing, date: e.target.value })} />
         </Field>
-        {editing?.id ? <Field label="Per chi">
+        {isChild ? <Field label="Per chi">
+          <select value={authUser?.id || ''} disabled>
+            {authUser ? <option value={authUser.id}>{authUser.name}</option> : null}
+          </select>
+        </Field> : editing?.id ? <Field label="Per chi">
           <select value={editing?.userId || authUser?.id || ''} onChange={e => setEditing({ ...editing, userId: Number(e.target.value), userIds: [Number(e.target.value)] })}>
             {data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}
           </select>
