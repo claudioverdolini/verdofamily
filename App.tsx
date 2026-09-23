@@ -257,7 +257,7 @@ type AppNotification = {
   page: PageKey
   createdAt: string
   priority: number
-  kind: 'event' | 'deadline' | 'chore' | 'school' | 'board' | 'stock' | 'system' | 'update'
+  kind: 'event' | 'deadline' | 'chore' | 'school' | 'board' | 'stock' | 'approval' | 'system' | 'update'
   label?: string
 }
 
@@ -368,6 +368,31 @@ function NotificationCenter() {
     const today = localDateISO(now)
     const items: AppNotification[] = [...liveUpdates]
     const belongsToUser = (userId?: number) => !userId || userId === authUser.id
+
+    if (authUser.role !== 'bimbo') {
+      for (const request of data.approvalRequests || []) {
+        const child = data.users.find(user => user.id === request.requestedByUserId)
+        const kindLabel = request.kind === 'shopping'
+          ? 'Spesa'
+          : request.kind === 'school'
+            ? 'Scuola'
+            : request.kind === 'deadline'
+              ? 'Scadenza'
+              : request.kind === 'calendar'
+                ? 'Calendario'
+                : 'Da fare'
+        items.push({
+          id: `approval-${request.id}`,
+          title: `${child?.name || 'Un ragazzo'} chiede una conferma`,
+          detail: `${kindLabel} · ${request.summary}`,
+          page: 'home',
+          createdAt: request.createdAt,
+          priority: 96,
+          kind: 'approval',
+          label: 'Da confermare'
+        })
+      }
+    }
 
     if (authUser.prefs?.notifications?.board !== false) {
       for (const post of data.boardPosts) {
@@ -637,6 +662,7 @@ function NotificationCenter() {
     if (item.kind === 'school') return <GraduationCap size={17} />
     if (item.kind === 'board') return <Pin size={17} />
     if (item.kind === 'stock') return <ShoppingBasket size={17} />
+    if (item.kind === 'approval') return <CheckSquare2 size={17} />
     if (item.kind === 'system') return <CloudOff size={17} />
     return <RefreshCw size={17} />
   }
