@@ -130,6 +130,7 @@ function familyChangeModules(previous: any, next: any) {
     ["routines", previous?.routines, next?.routines],
     ["routines", previous?.routineCompletions, next?.routineCompletions],
     ["board", previous?.boardPosts, next?.boardPosts],
+    ["approvals", previous?.approvalRequests, next?.approvalRequests],
     ["settings", previous?.assistantName, next?.assistantName]
   ];
   for (const [module, before, after] of checks) {
@@ -149,6 +150,24 @@ function familyPushCategories(previous: any, next: any) {
     changed(previous?.pantry || [], next?.pantry || []) ||
     changed(previous?.pantryMovements || [], next?.pantryMovements || [])
   ) categories.push("shopping");
+
+  if (changed(previous?.approvalRequests || [], next?.approvalRequests || [])) {
+    const beforeIds = new Set(array(previous?.approvalRequests).map((item: any) => String(item?.id || "")));
+    const added = array(next?.approvalRequests).filter((item: any) => item?.id && !beforeIds.has(String(item.id)));
+    for (const request of added) {
+      const kind = String(request?.kind || "");
+      const topic = kind === "calendar"
+        ? "calendar"
+        : kind === "deadline"
+          ? "deadlines"
+          : kind === "school"
+            ? "school"
+            : kind === "shopping"
+              ? "shopping"
+              : "chores";
+      if (!categories.includes(topic)) categories.push(topic);
+    }
+  }
   return categories;
 }
 
@@ -367,6 +386,10 @@ function redactForChild(fullData: any, childId: number) {
     array(post?.userIds).map(n).includes(childId)
   );
 
+  data.approvalRequests = array(data.approvalRequests).filter((request: any) =>
+    n(request?.requestedByUserId) === childId
+  );
+
   return data;
 }
 
@@ -504,6 +527,45 @@ function mergeChildChanges(fullData: any, incomingData: any, childId: number) {
       };
     })
   ];
+
+  const allowedApprovalKinds = new Set(["calendar","shopping","deadline","todo","school"]);
+  const allowedApprovalActions = new Set(["create","update","delete"]);
+  const currentRequests = array(full.approvalRequests);
+  const incomingRequests = array(incoming.approvalRequests);
+  const currentById = new Map(currentRequests.map((request: any) => [String(request?.id || ""), request]));
+  const addedRequests: any[] = [];
+
+  if (incomingRequests.length > 500) throw new Error("approval_payload_limit");
+  for (const request of incomingRequests) {
+    const id = String(request?.id || "").trim();
+    const kind = String(request?.kind || "");
+    const action = String(request?.action || "");
+    const summary = String(request?.summary || "").trim();
+    const payload = request?.payload;
+
+    if (!id || n(request?.requestedByUserId) !== childId) throw new Error("forbidden_approval_request");
+    if (!allowedApprovalKinds.has(kind) || !allowedApprovalActions.has(action)) throw new Error("invalid_approval_request");
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("invalid_approval_request");
+    if (!summary || summary.length > 240) throw new Error("invalid_approval_request");
+
+    const existing = currentById.get(id);
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(request)) throw new Error("forbidden_approval_change");
+      continue;
+    }
+
+    addedRequests.push({
+      id,
+      kind,
+      action,
+      requestedByUserId: childId,
+      createdAt: String(request?.createdAt || new Date().toISOString()),
+      summary,
+      payload: clone(payload)
+    });
+  }
+
+  full.approvalRequests = [...currentRequests, ...addedRequests];
 
   full.version = Math.max(n(full.version), n(incoming.version));
   return stripPasswords(full);
