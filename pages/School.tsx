@@ -66,6 +66,7 @@ export default function SchoolPage() {
   } = useFamily()
 
   const isChild = authUser?.role === 'bimbo'
+  const pendingChildRequests = (data.approvalRequests || []).filter(request => request.requestedByUserId === authUser?.id && request.kind === 'school')
   const students = useMemo(() => {
     const children = data.users.filter(user => user.role === 'bimbo')
     if (isChild && authUser) return [authUser]
@@ -190,9 +191,11 @@ export default function SchoolPage() {
     <PageIntro
       eyebrow="Scuola"
       title="Centro scuola"
-      description="Orario, compiti, verifiche, materiale, circolari e pagamenti raccolti per ogni ragazzo."
+      description={isChild ? 'Puoi proporre compiti, verifiche, materiale e avvisi. Un genitore li confermerà prima che diventino definitivi.' : 'Orario, compiti, verifiche, materiale, circolari e pagamenti raccolti per ogni ragazzo.'}
       actions={<Button icon={<Plus size={18} />} onClick={() => openItem(undefined, view === 'tomorrow' ? tomorrow : today)}>Nuova attività</Button>}
     />
+
+    {isChild ? <div className="child-approval-hint"><strong>Conferma genitore attiva</strong><span>{pendingChildRequests.length ? `${pendingChildRequests.length} richieste scuola in attesa.` : 'Le attività che inserisci vengono inviate a un genitore.'}</span></div> : null}
 
     {!isChild && students.length > 1 ? <div className="school-student-switch">
       {students.map(user => <button key={user.id} className={studentId === user.id ? 'is-active' : ''} onClick={() => setStudentId(user.id)}>
@@ -336,7 +339,7 @@ export default function SchoolPage() {
       open={!!itemEditing}
       onClose={() => setItemEditing(null)}
       title={itemEditing?.id ? 'Modifica attività scolastica' : 'Nuova attività scolastica'}
-      footer={<div className="modal-actions"><div>{itemEditing?.id ? <Button variant="danger" onClick={() => { deleteSchoolItem(itemEditing.id); setItemEditing(null) }}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setItemEditing(null)}>Annulla</Button><Button onClick={saveItem}>Salva</Button></div></div>}
+      footer={<div className="modal-actions"><div>{itemEditing?.id ? <Button variant="danger" onClick={() => { deleteSchoolItem(itemEditing.id); setItemEditing(null) }}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setItemEditing(null)}>Annulla</Button><Button onClick={saveItem}>{isChild ? 'Invia al genitore' : 'Salva'}</Button></div></div>}
     >
       {itemEditing ? <div className="form-grid form-grid--2">
         <Field label="Tipo">
