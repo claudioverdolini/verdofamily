@@ -75,6 +75,8 @@ const emptyEvent = (date: string, userId: number) => ({
 export default function CalendarPage() {
   const { data, authUser, upsertCalendarEvent, deleteCalendarEvent } = useFamily()
   const today = localDateISO()
+  const isChild = authUser?.role === 'bimbo'
+  const pendingChildRequests = (data.approvalRequests || []).filter(request => request.requestedByUserId === authUser?.id && request.kind === 'calendar')
   const [view, setView] = useState<'month' | 'week' | 'agenda'>(() => window.matchMedia?.('(max-width: 820px)').matches ? 'agenda' : 'month')
   const [cursor, setCursor] = useState(today)
   const [editing, setEditing] = useState<any>(null)
@@ -188,8 +190,8 @@ export default function CalendarPage() {
     if (editing.recurrenceEndDate && nextOccurrence && editing.recurrenceEndDate < nextOccurrence) {
       return alert(`Con questa data finale l'evento non riuscirebbe a ripetersi. Scegli almeno ${nextOccurrence.split('-').reverse().join('/')} oppure lascia vuoto “Ripeti fino al”.`)
     }
-    const audience = editing.audience === 'family' ? 'family' : 'users'
-    const userIds = audience === 'family' ? data.users.map(user => user.id) : participantIds(editing)
+    const audience = isChild ? 'users' : (editing.audience === 'family' ? 'family' : 'users')
+    const userIds = isChild && authUser ? [authUser.id] : (audience === 'family' ? data.users.map(user => user.id) : participantIds(editing))
     if (!userIds.length) return alert('Seleziona almeno una persona oppure scegli Tutta la famiglia.')
     upsertCalendarEvent({
       ...editing,
@@ -209,6 +211,8 @@ export default function CalendarPage() {
   return (
     <div className="page">
       <PageIntro eyebrow="Organizzazione" title="Calendario" description="Impegni personali, condivisi tra più persone o per tutta la famiglia." actions={<Button icon={<CalendarPlus size={18} />} onClick={() => openNew(today)}>Nuovo impegno</Button>} />
+
+      {isChild ? <div className="child-approval-hint"><strong>Conferma genitore attiva</strong><span>{pendingChildRequests.length ? `${pendingChildRequests.length} richieste calendario in attesa.` : 'I nuovi impegni vengono inviati a un genitore.'}</span></div> : null}
 
       <Card className="calendar-card">
         <div className="calendar-toolbar">
@@ -271,7 +275,7 @@ export default function CalendarPage() {
         ) : null}
       </Card>
 
-      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? 'Modifica impegno' : 'Nuovo impegno'} subtitle="Puoi assegnarlo a una persona, più persone oppure a tutta la famiglia." footer={<div className="modal-actions">{editing?.id ? <Button variant="danger" icon={<Trash2 size={17} />} onClick={() => { deleteCalendarEvent(editing.id); setEditing(null) }}>Elimina</Button> : <span />}<div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button icon={<Pencil size={17} />} onClick={save}>{editing?.id ? 'Salva modifiche' : 'Crea impegno'}</Button></div></div>}>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? 'Modifica impegno' : 'Nuovo impegno'} subtitle="Puoi assegnarlo a una persona, più persone oppure a tutta la famiglia." footer={<div className="modal-actions">{editing?.id ? <Button variant="danger" icon={<Trash2 size={17} />} onClick={() => { deleteCalendarEvent(editing.id); setEditing(null) }}>Elimina</Button> : <span />}<div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button icon={<Pencil size={17} />} onClick={save}>{isChild ? 'Invia al genitore' : (editing?.id ? 'Salva modifiche' : 'Crea impegno')}</Button></div></div>}>
         {editing ? <div className="form-grid form-grid--2">
           <Field label="Titolo" className="field--wide"><input autoFocus value={editing.title} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="Es. Dentista, allenamento, riunione…" /></Field>
           <Field label="Data"><input type="date" value={editing.date} onChange={e => setEditing({ ...editing, date: e.target.value, recurrenceEndDate: editing.recurrenceEndDate && editing.recurrenceEndDate < e.target.value ? '' : editing.recurrenceEndDate })} /></Field>
@@ -311,13 +315,15 @@ export default function CalendarPage() {
               </button>)}
             </div>
           </Field>
-          <Field label="Partecipanti" className="field--wide" hint="Famiglia include automaticamente tutti i membri attivi.">
+          {isChild ? <Field label="Partecipante" className="field--wide">
+            <div className="callout">L’impegno verrà proposto per <strong>{authUser?.name || 'te'}</strong>. Un genitore potrà approvarlo o rifiutarlo.</div>
+          </Field> : <Field label="Partecipanti" className="field--wide" hint="Famiglia include automaticamente tutti i membri attivi.">
             <div className="calendar-family-toggle">
               <input id="calendar-family-audience" type="checkbox" checked={editing.audience === 'family'} onChange={e => setEditing({ ...editing, audience: e.target.checked ? 'family' : 'users' })} />
               <label htmlFor="calendar-family-audience">Tutta la famiglia</label>
             </div>
             {editing.audience !== 'family' ? <div className="settings-check-grid" style={{ marginTop: 10 }}>{data.users.map(user => { const selected = participantIds(editing).includes(user.id); return <label key={user.id} className={selected ? 'is-selected' : ''}><input type="checkbox" checked={selected} onChange={() => toggleParticipant(user.id)} /><span>{user.name}</span></label> })}</div> : <div className="callout" style={{ marginTop: 10 }}>Questo evento sarà visibile a tutti i membri della famiglia. Con Google Calendar potrà usare il calendario condiviso configurato nelle Impostazioni.</div>}
-          </Field>
+          </Field>}
           {editing.recurrence && editing.recurrence !== 'none' ? <div className="calendar-recurrence-summary field--wide"><Repeat2 size={17} /><span><strong>{recurrenceLabel(editing.recurrence)}</strong><small>{editing.recurrenceEndDate ? `fino al ${editing.recurrenceEndDate.split('-').reverse().join('/')}` : 'senza data finale'}</small></span></div> : null}
           <Field label="Note" className="field--wide"><textarea rows={4} value={editing.notes || ''} onChange={e => setEditing({ ...editing, notes: e.target.value })} placeholder="Dettagli utili…" /></Field>
         </div> : null}
