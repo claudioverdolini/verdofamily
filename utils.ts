@@ -754,7 +754,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 21,
+    version: 22,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -958,6 +958,15 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       done: !!item.done,
       createdAt: item.createdAt || localDateISO()
     })) : [],
+    approvalRequests: Array.isArray(source.approvalRequests) ? source.approvalRequests.map((item: any) => ({
+      id: String(item?.id || crypto.randomUUID()),
+      kind: ['calendar','shopping','deadline','todo','school'].includes(String(item?.kind)) ? item.kind : 'todo',
+      action: ['create','update','delete'].includes(String(item?.action)) ? item.action : 'create',
+      requestedByUserId: Math.max(0, Number(item?.requestedByUserId || 0)),
+      createdAt: item?.createdAt || new Date().toISOString(),
+      summary: String(item?.summary || 'Richiesta').trim().slice(0, 240) || 'Richiesta',
+      payload: item?.payload && typeof item.payload === 'object' && !Array.isArray(item.payload) ? item.payload : {}
+    })).filter((item: any) => item.requestedByUserId > 0) : [],
     boardPosts: Array.isArray(source.boardPosts) ? source.boardPosts.map((item: any): BoardPost => ({
       id: String(item.id || crypto.randomUUID()),
       type: ['note','message','reminder','photo'].includes(String(item.type)) ? item.type : 'note',
