@@ -35,6 +35,7 @@ export default function TodosPage() {
 
   const today = localDateISO()
   const isChild = authUser?.role === 'bimbo'
+  const pendingChildRequests = (data.approvalRequests || []).filter(request => request.requestedByUserId === authUser?.id && request.kind === 'todo')
   const [view, setView] = useState<'today' | 'routines' | 'archive'>('today')
   const [title, setTitle] = useState('')
   const [todoUserIds, setTodoUserIds] = useState<number[]>([authUser?.id || data.users[0]?.id || 1])
@@ -152,12 +153,14 @@ export default function TodosPage() {
       eyebrow="Organizzazione quotidiana"
       title="Da fare & routine"
       description={isChild
-        ? 'Qui trovi i tuoi promemoria e le routine che ti sono state assegnate.'
+        ? 'Qui trovi i tuoi promemoria e le routine. I nuovi promemoria che proponi vengono confermati da un genitore.'
         : 'Promemoria veloci e attività ricorrenti della famiglia, senza duplicare ogni volta le stesse cose.'}
       actions={!isChild && view === 'routines'
         ? <Button icon={<Repeat2 size={18} />} onClick={() => openRoutine()}>Nuova routine</Button>
         : null}
     />
+
+    {isChild ? <div className="child-approval-hint"><strong>Conferma genitore attiva</strong><span>{pendingChildRequests.length ? `${pendingChildRequests.length} promemoria in attesa.` : 'Puoi proporre un promemoria qui sotto.'}</span></div> : null}
 
     <div className="page-tabs-wrap page-tabs-wrap--todos">
       <Segmented value={view} onChange={setView} options={tabs} />
@@ -173,7 +176,7 @@ export default function TodosPage() {
             onKeyDown={e => { if (e.key === 'Enter') submit() }}
             placeholder="Aggiungi un promemoria…"
           />
-          <Button icon={<Plus size={17} />} onClick={submit} disabled={!title.trim() || (!isChild && !todoUserIds.length)}>Aggiungi</Button>
+          <Button icon={<Plus size={17} />} onClick={submit} disabled={!title.trim() || (!isChild && !todoUserIds.length)}>{isChild ? 'Invia' : 'Aggiungi'}</Button>
         </div>
         {!isChild ? <div className="todo-multi-assignees">
           <span>A chi?</span>
