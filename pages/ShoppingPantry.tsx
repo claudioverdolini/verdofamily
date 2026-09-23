@@ -87,6 +87,7 @@ function inspectReceiptText(text: string) {
 export default function ShoppingPantryPage() {
   const {
     data,
+    authUser,
     addShoppingItem,
     toggleShoppingItem,
     deleteShoppingItem,
@@ -104,6 +105,8 @@ export default function ShoppingPantryPage() {
     familyId
   } = useFamily()
 
+  const isChild = authUser?.role === 'bimbo'
+  const pendingChildRequests = (data.approvalRequests || []).filter(request => request.requestedByUserId === authUser?.id && request.kind === 'shopping')
   const [tab, setTab] = useState<'shopping' | 'pantry' | 'insights' | 'scan'>('shopping')
   const [shopName, setShopName] = useState('')
   const [shopQty, setShopQty] = useState(1)
@@ -941,8 +944,15 @@ export default function ShoppingPantryPage() {
         eyebrow="Casa"
         title="Spesa & Inventario"
         description="Lista spesa, dispensa, frigo e freezer con scadenze, consumi e suggerimenti automatici."
-        actions={<Button icon={<Plus size={18} />} onClick={() => tab === 'pantry' ? openNewPantry() : setTab('shopping')}>{tab === 'pantry' ? 'Nuovo prodotto' : 'Aggiungi prodotto'}</Button>}
+        actions={isChild
+          ? <Button icon={<Plus size={18} />} onClick={() => setTab('shopping')}>Aggiungi alla spesa</Button>
+          : <Button icon={<Plus size={18} />} onClick={() => tab === 'pantry' ? openNewPantry() : setTab('shopping')}>{tab === 'pantry' ? 'Nuovo prodotto' : 'Aggiungi prodotto'}</Button>}
       />
+
+      {isChild ? <div className="child-approval-hint">
+        <strong>Le tue aggiunte vengono controllate da un genitore</strong>
+        <span>{pendingChildRequests.length ? `${pendingChildRequests.length} richieste in attesa di conferma.` : 'Aggiungi ciò che manca: comparirà nella lista dopo la conferma.'}</span>
+      </div> : null}
 
       <div className="page-tabs-wrap page-tabs-wrap--shopping">
         <Segmented
@@ -952,12 +962,12 @@ export default function ShoppingPantryPage() {
             { value: 'shopping', label: `Spesa · ${pending.length}` },
             { value: 'pantry', label: `Dispensa · ${data.pantry.length}` },
             { value: 'insights', label: `Avvisi · ${restockSuggestions.length + expiringSoon.length}` },
-            { value: 'scan', label: 'Importa' }
-          ]}
+            ...(!isChild ? [{ value: 'scan', label: 'Importa' }] : [])
+          ] as any}
         />
       </div>
 
-      {tab !== 'scan' ? <div className="shopping-import-shortcuts" aria-label="Importazione rapida">
+      {!isChild && tab !== 'scan' ? <div className="shopping-import-shortcuts" aria-label="Importazione rapida">
         <button type="button" onClick={() => { setScanMode('pantry-photo'); setTab('scan') }}>
           <span className="shopping-import-shortcuts__icon"><Camera size={19} /></span>
           <span><strong>Foto prodotti</strong><small>Scatta o scegli una foto</small></span>
@@ -998,7 +1008,7 @@ export default function ShoppingPantryPage() {
             <CardHeader
               title="Da comprare"
               subtitle={pending.length ? `${pending.length} ${pending.length === 1 ? 'prodotto' : 'prodotti'} ancora da prendere` : 'Lista completata'}
-              action={taken.length ? <div className="shopping-stock-destination">
+              action={!isChild && taken.length ? <div className="shopping-stock-destination">
                 <select value={inventoryDestination} onChange={e => setInventoryDestination(e.target.value as PantryLocation)} aria-label="Destinazione inventario">
                   <option value="pantry">Dispensa</option>
                   <option value="fridge">Frigo</option>
@@ -1011,10 +1021,10 @@ export default function ShoppingPantryPage() {
               <div className="check-list">
                 {data.shopping.map(item => (
                   <div key={item.id} className={`check-item ${item.taken ? 'is-done' : ''}`}>
-                    <button className="check-item__check" onClick={() => toggleShoppingItem(item.id)} aria-label={item.taken ? 'Segna da comprare' : 'Segna acquistato'}>
+                    <button className="check-item__check" disabled={isChild} onClick={() => toggleShoppingItem(item.id)} aria-label={item.taken ? 'Segna da comprare' : 'Segna acquistato'}>
                       {item.taken ? <Check size={16} /> : null}
                     </button>
-                    <button className="check-item__copy" onClick={() => toggleShoppingItem(item.id)}>
+                    <button className="check-item__copy" disabled={isChild} onClick={() => toggleShoppingItem(item.id)}>
                       <strong>{item.name}</strong><span>{item.qty} {item.unit}</span>
                     </button>
                     <IconButton label="Elimina" onClick={() => deleteShoppingItem(item.id)}><Trash2 size={17} /></IconButton>
