@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import {
   AlertTriangle,
   CalendarDays,
+  Check,
   HeartPulse,
   CheckCircle2,
   ChevronRight,
@@ -15,10 +16,11 @@ import {
   ShoppingCart,
   Users,
   Utensils,
-  WalletCards
+  WalletCards,
+  X
 } from 'lucide-react'
 import { useFamily } from '../store'
-import { Card, CardHeader, EmptyState, ListRow } from '../ui'
+import { Avatar, Card, CardHeader, EmptyState, ListRow } from '../ui'
 import { addDays, dayLabel, localDateISO, money, pantryExpiryDays, pantryNeedsRestock, routineCompletedOn, routineDueOn, weekDates } from '../utils'
 import './dashboard-command-center.css'
 
@@ -29,7 +31,7 @@ function shortDate(date: string) {
 }
 
 export default function Dashboard() {
-  const { data, authUser, setActivePage } = useFamily()
+  const { data, authUser, setActivePage, approveApprovalRequest, rejectApprovalRequest } = useFamily()
   const [homeView, setHomeView] = useState<HomeView>('today')
   const today = localDateISO()
   const week = weekDates(today)
@@ -142,6 +144,23 @@ export default function Dashboard() {
     return map
   }, [data.chores, week.join('|')])
 
+  const pendingApprovals = useMemo(
+    () => authUser?.role === 'bimbo'
+      ? []
+      : (data.approvalRequests || []).slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [data.approvalRequests, authUser?.role]
+  )
+
+  const approvalKindLabel = (kind: string) => kind === 'shopping'
+    ? 'Spesa'
+    : kind === 'school'
+      ? 'Scuola'
+      : kind === 'deadline'
+        ? 'Scadenza'
+        : kind === 'calendar'
+          ? 'Calendario'
+          : 'Da fare'
+
   const showBalances = authUser?.prefs?.showBalances !== false
   const totalBalance = data.users.reduce((sum, u) => sum + Number(u.balance || 0), 0)
   const visibleHomeCards = new Set(authUser?.prefs?.homeCards?.length
@@ -184,7 +203,8 @@ export default function Dashboard() {
     dueRoutinesToday.length ? { label: `${dueRoutinesToday.length} routine da fare oggi`, page: 'todos' as const } : null,
     schoolTomorrow.length ? { label: `${schoolTomorrow.length} cose di scuola da preparare per domani`, page: 'school' as const } : null,
     boardDueSoon.length ? { label: `${boardDueSoon.length} promemoria in bacheca tra oggi e domani`, page: 'board' as const } : null,
-    authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? { label: `${choresAwaitingApproval.length} compiti da confermare`, page: 'chores' as const } : null
+    authUser?.role !== 'bimbo' && choresAwaitingApproval.length ? { label: `${choresAwaitingApproval.length} compiti da confermare`, page: 'chores' as const } : null,
+    authUser?.role !== 'bimbo' && pendingApprovals.length ? { label: `${pendingApprovals.length} proposte dei ragazzi da confermare`, page: 'home' as const } : null
   ].filter(Boolean) as Array<{ label: string; page: any }>
 
   return (
@@ -208,6 +228,31 @@ export default function Dashboard() {
         <button className="home-quick-action home-quick-action--meals" onClick={() => setActivePage('meals')}><span><Utensils size={20} /></span><strong>Pasto</strong><Plus size={16} /></button>
         <button className="home-quick-action home-quick-action--todos" onClick={() => setActivePage('todos')}><span><ListTodo size={20} /></span><strong>Da fare</strong><Plus size={16} /></button>
       </div>
+
+      {authUser?.role !== 'bimbo' && pendingApprovals.length ? <Card className="child-approval-center">
+        <div className="child-approval-center__head">
+          <div><span>Richieste dei ragazzi</span><strong>Da confermare</strong><small>Le modifiche diventano effettive solo dopo la tua approvazione.</small></div>
+          <b>{pendingApprovals.length}</b>
+        </div>
+        <div className="child-approval-center__list">
+          {pendingApprovals.slice(0, 6).map(request => {
+            const child = data.users.find(user => user.id === request.requestedByUserId)
+            return <div key={request.id} className="child-approval-request">
+              <Avatar user={child} size="sm" />
+              <div className="child-approval-request__copy">
+                <span>{approvalKindLabel(request.kind)} · {request.action === 'delete' ? 'eliminazione' : request.action === 'update' ? 'modifica' : 'nuovo'}</span>
+                <strong>{request.summary}</strong>
+                <small>{child?.name || 'Ragazzo'} · {new Date(request.createdAt).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</small>
+              </div>
+              <div className="child-approval-request__actions">
+                <button className="approve" onClick={() => approveApprovalRequest(request.id)}><Check size={16} /> Approva</button>
+                <button className="reject" onClick={() => rejectApprovalRequest(request.id)}><X size={16} /> Rifiuta</button>
+              </div>
+            </div>
+          })}
+          {pendingApprovals.length > 6 ? <div className="child-approval-center__more">+{pendingApprovals.length - 6} altre richieste in attesa</div> : null}
+        </div>
+      </Card> : null}
 
       {homeView === 'today' ? <>
         <div className="home-glance" aria-label="Riepilogo rapido">
