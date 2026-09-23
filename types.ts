@@ -419,6 +419,19 @@ export type RecurringExpense = {
   createdByUserId?: number
 }
 
+export type ApprovalRequestKind = 'calendar' | 'shopping' | 'deadline' | 'todo' | 'school'
+export type ApprovalRequestAction = 'create' | 'update' | 'delete'
+
+export type ApprovalRequest = {
+  id: string
+  kind: ApprovalRequestKind
+  action: ApprovalRequestAction
+  requestedByUserId: number
+  createdAt: string
+  summary: string
+  payload: Record<string, any>
+}
+
 export type FamilyData = {
   version: number
   storageModel?: 'normalized-v1' | 'normalized-v2'
@@ -442,6 +455,7 @@ export type FamilyData = {
   schoolTimetable: SchoolTimetableEntry[]
   schoolItems: SchoolItem[]
   boardPosts: BoardPost[]
+  approvalRequests: ApprovalRequest[]
   expenses: ExpenseRecord[]
   recurringExpenses: RecurringExpense[]
 }
