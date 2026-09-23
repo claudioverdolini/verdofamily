@@ -1289,6 +1289,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function addCategory(name: string) {
+    if (authUser?.role === 'bimbo') return false
     const clean = name.trim()
     if (!clean) return false
     let added = false
@@ -1301,6 +1302,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function renameCategory(oldName: string, newName: string) {
+    if (authUser?.role === 'bimbo') return false
     const clean = newName.trim()
     if (!clean || oldName === 'Generico') return false
     let renamed = false
@@ -1313,6 +1315,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function deleteCategory(name: string) {
+    if (authUser?.role === 'bimbo') return false
     if (name === 'Generico') return false
     if (!confirmDeletion('la categoria “' + name + '”', 'I prodotti associati verranno spostati nella categoria Generico.')) return false
     const affectedPantry = data.pantry.filter(item => item.category === name)
@@ -1334,6 +1337,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function upsertPantryItem(item: Omit<PantryItem, 'id'> & { id?: number }) {
+    if (authUser?.role === 'bimbo') return
     setData(prev => {
       if (item.id) {
         const old = prev.pantry.find(p => p.id === item.id)
@@ -1437,6 +1441,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function deletePantryItem(id: number) {
+    if (authUser?.role === 'bimbo') return
     const item = data.pantry.find(entry => entry.id === id)
     if (!item) return
     if (!confirmDeletion('“' + item.name + '” dalla dispensa', 'Verrà eliminata anche la cronologia dei movimenti associati.')) return
@@ -1450,6 +1455,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function changePantryQty(id: number, delta: number) {
+    if (authUser?.role === 'bimbo') return
     setData(prev => {
       const target = prev.pantry.find(p => p.id === id)
       if (!target) return prev
@@ -1481,6 +1487,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     items: Array<{ name: string; brand?: string; variant?: string; packageSize?: string; barcode?: string; qty: number; unit: string; category?: string; location?: PantryLocation; expiryDate?: string; packageState?: PantryItem['packageState']; remainingQty?: number; remainingUnit?: string; residualPercent?: number; residualSource?: PantryItem['residualSource']; productInfo?: PantryItem['productInfo'] }>,
     defaultLocation: PantryLocation = 'pantry'
   ) {
+    if (authUser?.role === 'bimbo') return
     setData(prev => {
       let pantry = [...prev.pantry]
       let pantryMovements = [...prev.pantryMovements]
@@ -1694,6 +1701,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function moveTakenShoppingToPantry(location: PantryLocation = 'pantry') {
+    if (authUser?.role === 'bimbo') return
     const count = data.shopping.filter(item => item.taken).length
     if (!count) return
     const target = count === 1 ? 'l’articolo acquistato dalla lista della spesa' : 'i ' + count + ' articoli acquistati dalla lista della spesa'
@@ -1717,6 +1725,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     removeFromShopping: boolean,
     defaultLocation: PantryLocation = 'pantry'
   ) {
+    if (authUser?.role === 'bimbo') return
     if (removeFromShopping) {
       const matching = data.shopping.filter(s => items.some(i => normalize(i.name) === normalize(s.name))).length
       if (matching) {
