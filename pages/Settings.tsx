@@ -560,14 +560,15 @@ export default function SettingsPage() {
   }
 
   function toggleBottomTab(key: PageKey) {
-    const current = prefs.bottomTabs || []
-    if (current.includes(key)) {
-      if (current.length <= 1) return
-      updateCurrentPrefs({ bottomTabs: current.filter(x => x !== key) })
-      return
-    }
-    if (current.length >= 4) return
-    updateCurrentPrefs({ bottomTabs: [...current, key] })
+    updateCurrentPrefs(currentPrefs => {
+      const current = currentPrefs.bottomTabs || []
+      if (current.includes(key)) {
+        if (current.length <= 1) return {}
+        return { bottomTabs: current.filter(x => x !== key) }
+      }
+      if (current.length >= 4) return {}
+      return { bottomTabs: [...current, key] }
+    })
   }
 
   function moveTab(index: number, dir: -1 | 1) {
@@ -580,13 +581,14 @@ export default function SettingsPage() {
   }
 
   function toggleHomeCard(key: typeof HOME_CARDS[number]['key']) {
-    const current = prefs.homeCards || []
-    if (current.includes(key)) {
-      if (current.length <= 1) return
-      updateCurrentPrefs({ homeCards: current.filter(x => x !== key) as any })
-    } else {
-      updateCurrentPrefs({ homeCards: [...current, key] as any })
-    }
+    updateCurrentPrefs(currentPrefs => {
+      const current = currentPrefs.homeCards || []
+      if (current.includes(key)) {
+        if (current.length <= 1) return {}
+        return { homeCards: current.filter(x => x !== key) as any }
+      }
+      return { homeCards: [...current, key] as any }
+    })
   }
 
   function historyLabel(type: string) {
@@ -953,7 +955,7 @@ export default function SettingsPage() {
                   ['board', 'Bacheca', 'Nuovi messaggi e promemoria familiari'],
                   ['shopping', 'Lista spesa', 'Aggiornamenti alla lista'],
                   ['whatsapp', 'WhatsApp', 'Canale preferito quando disponibile']
-                ].map(([key, label, sub]) => <label key={key}><div><strong>{label}</strong><span>{sub}</span></div><input type="checkbox" checked={(prefs.notifications as any)[key]} onChange={e => updateCurrentPrefs({ notifications: { ...prefs.notifications, [key]: e.target.checked } })} /></label>)}
+                ].map(([key, label, sub]) => <label key={key}><div><strong>{label}</strong><span>{sub}</span></div><input type="checkbox" checked={(prefs.notifications as any)[key]} onChange={e => { const checked = e.target.checked; updateCurrentPrefs(currentPrefs => ({ notifications: { ...currentPrefs.notifications, [key]: checked } })) }} /></label>)}
               </div>
             </section>
           </div>
