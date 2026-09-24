@@ -345,6 +345,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   const financeSyncHashRef = useRef('')
   const schoolSyncHashRef = useRef('')
   const familySyncHashRef = useRef('')
+  const lastSyncedSnapshotRef = useRef<FamilyData | null>(null)
+  const remoteRefreshInFlightRef = useRef(false)
   const pushCategoryHashesRef = useRef<Record<PushCategory, string> | null>(null)
 
   familyIdRef.current = familyId
@@ -462,6 +464,53 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       || healthHash(snapshot) !== healthSyncHashRef.current
   }
 
+  function remoteRefreshMustWait() {
+    return syncInFlightRef.current
+      || writeInFlightRef.current
+      || pendingSyncSnapshotRef.current !== null
+      || hasUnsyncedChanges(dataRef.current)
+  }
+
+  function rebaseUnsyncedLocalChanges(remote: FamilyData): FamilyData {
+    const base = lastSyncedSnapshotRef.current
+    const local = dataRef.current
+    if (!base || !hasUnsyncedChanges(local)) return remote
+
+    const merged = deepClone(remote)
+    const keys: Array<keyof FamilyData> = [
+      'assistantName',
+      'users',
+      'calendarEvents',
+      'deadlines',
+      'categories',
+      'pantry',
+      'pantryMovements',
+      'shopping',
+      'dishes',
+      'mealPlans',
+      'chores',
+      'recurringChores',
+      'transactions',
+      'todos',
+      'routines',
+      'routineCompletions',
+      'schoolSubjects',
+      'schoolTimetable',
+      'schoolItems',
+      'boardPosts',
+      'approvalRequests',
+      'expenses',
+      'recurringExpenses'
+    ]
+
+    for (const key of keys) {
+      if (JSON.stringify(base[key] ?? null) !== JSON.stringify(local[key] ?? null)) {
+        ;(merged as any)[key] = deepClone((local as any)[key])
+      }
+    }
+    return merged
+  }
+
   async function archiveDeletedItem(module: string, label: string, payload: any) {
     if (!supabase || !familyIdRef.current || !cloudUserId) return true
     try {
@@ -530,6 +579,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
     calendarSyncHashRef.current = JSON.stringify(linked.calendarEvents || [])
     pushCategoryHashesRef.current = pushCategoryHashes(linked)
+    lastSyncedSnapshotRef.current = deepClone(linked)
     suppressNextPushRef.current = true
     revisionRef.current = Number(result?.revision || 0)
     setFamilyId(targetFamilyId)
@@ -551,7 +601,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function refreshChildSnapshot(targetFamilyId: string) {
-    if (!supabase) return
+    if (!supabase || remoteRefreshInFlightRef.current) return
+    if (remoteRefreshMustWait()) {
+      deferredRemoteRefreshRef.current = true
+      return
+    }
+
+    remoteRefreshInFlightRef.current = true
     try {
       const [result, healthResult, financeResult, schoolResult] = await Promise.all([
         callFamilyGateway('read', targetFamilyId),
@@ -560,6 +616,17 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         callSchoolGateway('read', targetFamilyId).catch(() => null)
       ])
       if (!result?.ok) return
+
+      // A local interaction may have happened while the network request was in flight.
+      // Never replace it with an older cloud snapshot; wait until the pending save ends.
+      if (remoteRefreshMustWait()) {
+        deferredRemoteRefreshRef.current = true
+        return
+      }
+
+      const remoteRevision = Number(result.revision || 0)
+      if (remoteRevision < revisionRef.current) return
+
       const user = currentCloudUserRef.current
       const profile = user ? await fetchProfile(user.id) : null
       let remote = migrateData(result.data, deepClone(initialData))
@@ -572,16 +639,21 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const linked = user
         ? linkCloudIdentity(remote, profile || { id: user.id, display_name: user.email?.split('@')[0] }, result.role || 'child')
         : remote
-      revisionRef.current = Number(result.revision || revisionRef.current)
+
+      revisionRef.current = Math.max(revisionRef.current, remoteRevision)
       financeSyncHashRef.current = financeHash(linked)
       schoolSyncHashRef.current = schoolHash(linked)
+      healthSyncHashRef.current = healthHash(linked)
       familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
       pushCategoryHashesRef.current = pushCategoryHashes(linked)
+      lastSyncedSnapshotRef.current = deepClone(linked)
       suppressNextPushRef.current = true
       setData(linked)
       setCloudStatus('synced')
     } catch (error) {
       console.warn('refreshChildSnapshot', error)
+    } finally {
+      remoteRefreshInFlightRef.current = false
     }
   }
 
@@ -596,12 +668,18 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         const row = payload?.new
         const remoteRevision = Number(row?.revision || 0)
         if (!row || remoteRevision <= revisionRef.current) return
+
+        const activeUser = currentCloudUserRef.current
+        const isOwnWriteEcho = !!activeUser?.id && String(row?.updated_by || '') === String(activeUser.id)
+        if ((syncInFlightRef.current || writeInFlightRef.current) && isOwnWriteEcho) return
         if (syncInFlightRef.current || writeInFlightRef.current) {
           deferredRemoteRefreshRef.current = true
           return
         }
+
         const localSnapshot = dataRef.current
-        if (hasUnsyncedChanges(localSnapshot)) {
+        const hadUnsyncedChanges = hasUnsyncedChanges(localSnapshot)
+        if (hadUnsyncedChanges) {
           await saveConflictDraft(localSnapshot, revisionRef.current, remoteRevision)
         }
         revisionRef.current = remoteRevision
@@ -623,11 +701,15 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         const linked = user ? linkCloudIdentity(remote, profile || { id: user.id, display_name: user.email?.split('@')[0] }, membership?.role || 'adult') : remote
         financeSyncHashRef.current = financeHash(linked)
         schoolSyncHashRef.current = schoolHash(linked)
+        healthSyncHashRef.current = healthHash(linked)
         familySyncHashRef.current = JSON.stringify(cloudSafeData(linked))
         pushCategoryHashesRef.current = pushCategoryHashes(linked)
-        suppressNextPushRef.current = true
-        setData(linked)
-        setCloudStatus('synced')
+        lastSyncedSnapshotRef.current = deepClone(linked)
+
+        const rebased = hadUnsyncedChanges ? rebaseUnsyncedLocalChanges(linked) : linked
+        suppressNextPushRef.current = !hadUnsyncedChanges
+        setData(rebased)
+        setCloudStatus(hadUnsyncedChanges ? 'saving' : 'synced')
       })
       .subscribe()
   }
@@ -689,6 +771,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         stopRealtime()
         currentCloudUserRef.current = null
         revisionRef.current = 0
+        lastSyncedSnapshotRef.current = null
         suppressNextPushRef.current = true
         setCloudUserId(null)
         setCloudEmail('')
@@ -770,6 +853,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           schoolSyncHashRef.current = schoolHash(remote)
           familySyncHashRef.current = JSON.stringify(cloudSafeData(remote))
           pushCategoryHashesRef.current = pushCategoryHashes(remote)
+          lastSyncedSnapshotRef.current = deepClone(remote)
           setData(remote)
         }
         return false
@@ -828,6 +912,11 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         setData(familyOnly)
       }
 
+      const savedSnapshot = result.normalized && result.data
+        ? dataRef.current
+        : snapshot
+      lastSyncedSnapshotRef.current = deepClone(savedSnapshot)
+
       setCloudStatus('synced')
       const calendarHash = JSON.stringify(snapshot.calendarEvents || [])
       if (calendarHash !== calendarSyncHashRef.current) {
@@ -879,11 +968,16 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const pending = pendingSyncSnapshotRef.current
       pendingSyncSnapshotRef.current = null
 
-      if (deferredRemoteRefreshRef.current) {
+      if (pending && ok) {
+        // Preserve rapid consecutive taps: write the newest local snapshot first.
+        // A deferred remote refresh can safely run only after this queue is empty.
+        void pushDocument(pending)
+      } else if (deferredRemoteRefreshRef.current && ok) {
         deferredRemoteRefreshRef.current = false
         void refreshChildSnapshot(familyIdRef.current)
-      } else if (pending && ok) {
-        void pushDocument(pending)
+      } else if (!ok) {
+        // Never overwrite an unsaved local interaction after a failed save.
+        deferredRemoteRefreshRef.current = false
       }
     }
   }
@@ -895,7 +989,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       return
     }
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = window.setTimeout(() => pushDocument(data), 650)
+    saveTimerRef.current = window.setTimeout(() => pushDocument(data), 350)
     return () => {
       if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
     }
@@ -944,6 +1038,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (supabase && cloudUserId) await supabase.auth.signOut()
     stopRealtime()
     revisionRef.current = 0
+    lastSyncedSnapshotRef.current = null
     pushCategoryHashesRef.current = null
     suppressNextPushRef.current = true
     setCloudUserId(null)
@@ -979,6 +1074,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       schoolSyncHashRef.current = schoolHash(seed)
       familySyncHashRef.current = JSON.stringify(cloudSafeData(seed))
       pushCategoryHashesRef.current = pushCategoryHashes(seed)
+      lastSyncedSnapshotRef.current = deepClone(seed)
       revisionRef.current = Number(revision || 1)
       suppressNextPushRef.current = true
       setData(seed)
