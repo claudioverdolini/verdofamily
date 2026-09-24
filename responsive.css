@@ -5090,3 +5090,74 @@ html{
     grid-template-columns:minmax(0,1fr);
   }
 }
+
+
+/* Finance import sources, refunds and reconciliation */
+.report-reconciliation-note{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin:-2px 0 12px;
+  padding:8px 10px;
+  border:1px solid color-mix(in srgb,var(--success) 20%,var(--border));
+  border-radius:12px;
+  background:color-mix(in srgb,var(--success) 5%,var(--surface));
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.35;
+}
+.report-reconciliation-note>svg{flex:0 0 auto;color:var(--success)}
+.report-reconciliation-note strong{color:var(--text)}
+.expense-row__amount.is-refund>strong,
+.bank-preview-row__amount.is-refund{color:var(--success)}
+.expense-row__amount.is-excluded{opacity:.72}
+
+.bank-format-detected{
+  display:flex;
+  align-items:flex-start;
+  gap:9px;
+  margin-top:12px;
+  padding:10px 11px;
+  border:1px solid color-mix(in srgb,var(--success) 24%,var(--border));
+  border-radius:13px;
+  background:color-mix(in srgb,var(--success) 6%,var(--surface));
+}
+.bank-format-detected>svg{flex:0 0 auto;color:var(--success);margin-top:1px}
+.bank-format-detected>div{min-width:0;display:grid;gap:2px}
+.bank-format-detected strong{font-size:11.5px}
+.bank-format-detected span{color:var(--muted);font-size:9.5px;line-height:1.4}
+
+.bank-row-tags{
+  display:flex!important;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:4px!important;
+  margin-top:3px!important;
+}
+.bank-row-tags em{
+  padding:2px 6px;
+  border-radius:999px;
+  background:var(--surface3);
+  color:var(--muted);
+  font-size:8.5px;
+  font-style:normal;
+  font-weight:850;
+  line-height:1.35;
+}
+.bank-row-tags em.is-refund{
+  background:color-mix(in srgb,var(--success) 10%,var(--surface));
+  color:var(--success);
+}
+.bank-row-tags em.is-excluded{
+  background:color-mix(in srgb,var(--warning) 10%,var(--surface));
+  color:var(--warning);
+}
+
+@media(max-width:620px){
+  .report-reconciliation-note{
+    align-items:flex-start;
+  }
+  .bank-format-detected{
+    margin-top:10px;
+  }
+}
