@@ -754,7 +754,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 22,
+    version: 23,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -994,8 +994,11 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       merchant: String(item.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
       total: Math.max(0, Number(item.total) || 0),
       category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
-      source: ['receipt','manual','voice','recurring','bank'].includes(String(item.source)) ? item.source : 'manual',
+      source: ['receipt','manual','voice','recurring','bank','paypal'].includes(String(item.source)) ? item.source : 'manual',
       sourceRef: item.sourceRef ? String(item.sourceRef).slice(0, 200) : undefined,
+      flow: item.flow === 'refund' ? 'refund' : 'expense',
+      movementKind: ['purchase','fee','tax','bill','loan','cash','investment','card_settlement','transfer','paypal_repayment','refund','other'].includes(String(item.movementKind)) ? item.movementKind : (item.flow === 'refund' ? 'refund' : 'purchase'),
+      includeInStats: item.includeInStats !== false,
       createdAt: item.createdAt || new Date().toISOString(),
       createdByUserId: Number(item.createdByUserId || 0) || undefined,
       notes: item.notes ? String(item.notes).slice(0, 2000) : undefined,
