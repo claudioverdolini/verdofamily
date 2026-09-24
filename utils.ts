@@ -754,7 +754,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 23,
+    version: 24,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -999,6 +999,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       flow: item.flow === 'refund' ? 'refund' : 'expense',
       movementKind: ['purchase','fee','tax','bill','loan','cash','investment','card_settlement','transfer','paypal_repayment','refund','other'].includes(String(item.movementKind)) ? item.movementKind : (item.flow === 'refund' ? 'refund' : 'purchase'),
       includeInStats: item.includeInStats !== false,
+      evidenceRefs: Array.from(new Set((Array.isArray(item.evidenceRefs) ? item.evidenceRefs : []).map((value: any) => String(value || '').trim()).filter(Boolean))).slice(0, 20),
       createdAt: item.createdAt || new Date().toISOString(),
       createdByUserId: Number(item.createdByUserId || 0) || undefined,
       notes: item.notes ? String(item.notes).slice(0, 2000) : undefined,
@@ -1012,6 +1013,32 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         category: row.category ? String(row.category).slice(0, 100) : undefined
       })) : []
     })).filter((item: any) => item.total > 0) : [],
+    purchaseEvidence: Array.isArray(source.purchaseEvidence) ? source.purchaseEvidence.map((item: any) => {
+      const items = Array.isArray(item?.items) ? item.items.map((row: any) => ({
+        id: String(row?.id || crypto.randomUUID()),
+        name: String(row?.name || 'Articolo').trim().slice(0, 260) || 'Articolo',
+        qty: Math.max(0, Number(row?.qty) || 0),
+        unitPrice: Number.isFinite(Number(row?.unitPrice)) ? Math.max(0, Number(row.unitPrice)) : undefined,
+        totalPrice: Number.isFinite(Number(row?.totalPrice)) ? Math.max(0, Number(row.totalPrice)) : undefined,
+        category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(row?.category)) ? row.category : undefined
+      })).filter((row: any) => row.qty > 0) : []
+      const total = Math.max(0, Number(item?.total) || 0)
+      const externalId = String(item?.externalId || '').trim().slice(0, 120)
+      return {
+        id: String(item?.id || crypto.randomUUID()),
+        source: item?.source === 'amazon_email' ? 'amazon_email' : 'amazon_email',
+        externalId,
+        merchant: String(item?.merchant || 'Amazon.it').trim().slice(0, 160) || 'Amazon.it',
+        orderDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item?.orderDate || '')) ? String(item.orderDate) : localDateISO(),
+        total,
+        items,
+        status: ['matched','review'].includes(String(item?.status)) ? item.status : 'unmatched',
+        matchedExpenseId: item?.matchedExpenseId ? String(item.matchedExpenseId) : undefined,
+        matchConfidence: Number.isFinite(Number(item?.matchConfidence)) ? Math.max(0, Math.min(1, Number(item.matchConfidence))) : undefined,
+        importedAt: item?.importedAt || new Date().toISOString(),
+        notes: item?.notes ? String(item.notes).slice(0, 1200) : undefined
+      }
+    }).filter((item: any) => item.externalId && item.total > 0) : [],
     recurringExpenses: Array.isArray(source.recurringExpenses) ? source.recurringExpenses.map((item: any) => ({
       id: String(item.id || crypto.randomUUID()),
       merchant: String(item.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',
