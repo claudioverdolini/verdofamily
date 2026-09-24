@@ -419,7 +419,7 @@ export default function ReportsPage() {
         date,
         merchant,
         total,
-        category: inferExpenseCategory(`${merchant} ${details}`),
+        category: inferExpenseCategory(merchant),
         sourceRef,
         legacySourceRef,
         sourceKey,
