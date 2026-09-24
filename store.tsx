@@ -138,7 +138,7 @@ type StoreValue = {
   joinCloudFamily: (code: string) => Promise<AuthResult>
   createFamilyInvite: (role?: 'adult' | 'child') => Promise<{ ok: boolean; code?: string; error?: string }>
   syncNow: () => Promise<void>
-  updateCurrentPrefs: (patch: Partial<UserPrefs>) => void
+  updateCurrentPrefs: (patch: Partial<UserPrefs> | ((current: UserPrefs) => Partial<UserPrefs>)) => void
   updateCurrentProfile: (patch: Partial<FamilyUser>) => void
   setAssistantName: (name: string) => void
   addUser: (user: Omit<FamilyUser, 'id' | 'balance' | 'prefs'> & { prefs?: Partial<UserPrefs> }) => void
@@ -1132,11 +1132,23 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (familyId) await pushDocument(data)
   }
 
-  function updateCurrentPrefs(patch: Partial<UserPrefs>) {
+  function updateCurrentPrefs(patch: Partial<UserPrefs> | ((current: UserPrefs) => Partial<UserPrefs>)) {
     if (!authUser) return
     setData(prev => ({
       ...prev,
-      users: prev.users.map(u => u.id === authUser.id ? { ...u, prefs: mergePrefs({ ...u.prefs, ...patch, notifications: { ...u.prefs.notifications, ...(patch.notifications || {}) } }) } : u)
+      users: prev.users.map(u => {
+        if (u.id !== authUser.id) return u
+        const current = mergePrefs(u.prefs)
+        const resolved = typeof patch === 'function' ? patch(current) : patch
+        return {
+          ...u,
+          prefs: mergePrefs({
+            ...current,
+            ...resolved,
+            notifications: { ...current.notifications, ...(resolved.notifications || {}) }
+          })
+        }
+      })
     }))
   }
 
