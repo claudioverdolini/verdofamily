@@ -199,41 +199,51 @@ export default function ReportsPage() {
     : item.date.startsWith(String(selectedYear))
   ), [expenses, period, cursor, selectedYear])
 
+  const countedFiltered = useMemo(() => filtered.filter(countsInStats), [filtered])
+
   const stats = useMemo(() => {
-    const total = filtered.reduce((sum, item) => sum + Number(item.total || 0), 0)
-    const grocery = filtered.filter(item => item.category === 'groceries').reduce((sum, item) => sum + Number(item.total || 0), 0)
-    return { total, count: filtered.length, average: filtered.length ? total / filtered.length : 0, grocery }
-  }, [filtered])
+    const total = countedFiltered.reduce((sum, item) => sum + signedExpense(item), 0)
+    const grocery = countedFiltered.filter(item => item.category === 'groceries').reduce((sum, item) => sum + signedExpense(item), 0)
+    return {
+      total,
+      count: countedFiltered.length,
+      average: countedFiltered.length ? total / countedFiltered.length : 0,
+      grocery,
+      excluded: filtered.filter(item => !countsInStats(item)).length,
+      refunds: countedFiltered.filter(item => item.flow === 'refund').reduce((sum, item) => sum + Number(item.total || 0), 0)
+    }
+  }, [filtered, countedFiltered])
 
   const categoryRows = useMemo(() => {
     const totals = new Map<ExpenseCategory, number>()
-    filtered.forEach(item => totals.set(item.category, (totals.get(item.category) || 0) + Number(item.total || 0)))
+    countedFiltered.forEach(item => totals.set(item.category, (totals.get(item.category) || 0) + signedExpense(item)))
     return [...totals.entries()]
-      .map(([category, total]) => ({ category, total, pct: stats.total ? total / stats.total * 100 : 0 }))
+      .filter(([, total]) => Math.abs(total) >= .005)
+      .map(([category, total]) => ({ category, total, pct: stats.total > 0 ? Math.max(0, total) / stats.total * 100 : 0 }))
       .sort((a, b) => b.total - a.total)
-  }, [filtered, stats.total])
+  }, [countedFiltered, stats.total])
 
   const merchantRows = useMemo(() => {
     const totals = new Map<string, { total: number; count: number }>()
-    filtered.forEach(item => {
+    countedFiltered.forEach(item => {
       const key = item.merchant || 'Spesa'
       const current = totals.get(key) || { total: 0, count: 0 }
-      totals.set(key, { total: current.total + Number(item.total || 0), count: current.count + 1 })
+      totals.set(key, { total: current.total + signedExpense(item), count: current.count + 1 })
     })
     return [...totals.entries()]
       .map(([merchant, value]) => ({ merchant, ...value }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 8)
-  }, [filtered])
+  }, [countedFiltered])
 
   const trend = useMemo(() => {
     const months = Array.from({ length: 6 }, (_, index) => moveMonth(monthKey(), index - 5))
     const rows = months.map(month => ({
       month,
-      total: expenses.filter(item => item.date.startsWith(month)).reduce((sum, item) => sum + Number(item.total || 0), 0)
+      total: expenses.filter(item => item.date.startsWith(month) && countsInStats(item)).reduce((sum, item) => sum + signedExpense(item), 0)
     }))
-    const max = Math.max(1, ...rows.map(item => item.total))
-    return rows.map(item => ({ ...item, pct: item.total / max * 100 }))
+    const max = Math.max(1, ...rows.map(item => Math.max(0, item.total)))
+    return rows.map(item => ({ ...item, pct: Math.max(0, item.total) / max * 100 }))
   }, [expenses])
 
   function openNew() {
