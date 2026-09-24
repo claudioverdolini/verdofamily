@@ -155,13 +155,15 @@ export default function ReportsPage() {
     return Math.abs(Math.round((a - b) / 86400000))
   }
 
-  function duplicateAssessment(date: string, merchant: string, total: number, sourceRef: string, legacySourceRef: string) {
+  function duplicateAssessment(date: string, merchant: string, total: number, sourceRef: string, legacySourceRef: string, flow: 'expense' | 'refund' = 'expense') {
     const existing = data.expenses || []
     const exact = existing.find(item => item.sourceRef === sourceRef || item.sourceRef === legacySourceRef)
     if (exact) return { status: 'exact' as BankDuplicateStatus, reason: 'Questo movimento bancario risulta già importato.', match: exact }
 
     let best: { score: number; status: BankDuplicateStatus; reason: string; match: ExpenseRecord } | null = null
     for (const item of existing) {
+      const itemFlow = item.flow === 'refund' ? 'refund' : 'expense'
+      if (itemFlow !== flow) continue
       if (Math.abs(Number(item.total || 0) - total) > .01) continue
       const days = daysBetween(date, item.date)
       if (days > 3) continue
@@ -409,7 +411,7 @@ export default function ReportsPage() {
         ? (source === 'paypal' && rawReference ? `paypal:${rawReference}` : bankSourceRef(date, merchant, total, sourceKey))
         : `invalid-${index}`
       const legacySourceRef = valid ? bankSourceRef(date, merchant, total) : `invalid-legacy-${index}`
-      const assessment = valid ? duplicateAssessment(date, merchant, total, sourceRef, legacySourceRef) : { status: 'none' as BankDuplicateStatus, reason: '', match: undefined }
+      const assessment = valid ? duplicateAssessment(date, merchant, total, sourceRef, legacySourceRef, flow) : { status: 'none' as BankDuplicateStatus, reason: '', match: undefined }
 
       return {
         id: `bank-${index}`,
@@ -479,7 +481,7 @@ export default function ReportsPage() {
       setBankTable(table)
       setBankMapping(mapping)
       buildBankPreview(table, mapping)
-      setBankMessage(`${table.rows.length} righe lette da ${file.name}. Verifica le colonne e i movimenti prima di importare.`)
+      setBankMessage(`${table.rows.length} movimenti letti da ${file.name}${table.detectedLabel ? ` · formato riconosciuto: ${table.detectedLabel}` : ''}. Verifica l’anteprima prima di importare.`)
     } catch (error: any) {
       setBankTable(null)
       setBankMessage(error?.message || 'Non riesco a leggere questo file.')
@@ -498,11 +500,16 @@ export default function ReportsPage() {
       merchant: row.merchant,
       total: row.total,
       category: row.category,
-      source: 'bank' as const,
+      source: row.source,
       sourceRef: row.sourceRef,
+      flow: row.flow,
+      movementKind: row.movementKind,
+      includeInStats: row.includeInStats,
       notes: [
-        bankTable ? `Importato da ${bankTable.fileName}` : 'Importato da estratto conto',
-        row.bankDouble ? 'Possibile doppio addebito rilevato nel file bancario' : ''
+        bankTable ? `Importato da ${bankTable.fileName}` : 'Importato da movimenti',
+        row.details || '',
+        !row.includeInStats ? 'Movimento conservato ma escluso dalle statistiche di spesa per evitare doppi conteggi' : '',
+        row.bankDouble ? 'Possibile doppio addebito rilevato nel file' : ''
       ].filter(Boolean).join(' · '),
       items: []
     })))
@@ -530,7 +537,7 @@ export default function ReportsPage() {
     <PageIntro
       eyebrow="Analisi famiglia"
       title="Report"
-      description="Spese, scontrini, ricorrenze e movimenti bancari raccolti in un unico riepilogo."
+      description="Spese, scontrini, PayPal, banca e ricorrenze raccolti in un unico riepilogo, evitando i doppi conteggi."
       actions={canEdit && section === 'overview' ? <Button icon={<Plus size={18} />} onClick={openNew}>Nuova spesa</Button> : null}
     />
 
@@ -538,7 +545,7 @@ export default function ReportsPage() {
       <Segmented value={section} onChange={setSection} options={[
         { value: 'overview', label: 'Panoramica' },
         { value: 'recurring', label: 'Ricorrenti' },
-        { value: 'bank', label: 'Importa banca' }
+        { value: 'bank', label: 'Importa movimenti' }
       ]} />
     </div>
 
@@ -564,11 +571,19 @@ export default function ReportsPage() {
       </div>
 
       <div className="report-stats">
-        <Card className="report-stat report-stat--primary"><WalletCards size={20} /><span><small>Spesa totale</small><strong>{money(stats.total)}</strong></span></Card>
+        <Card className="report-stat report-stat--primary"><WalletCards size={20} /><span><small>Spesa netta</small><strong>{money(stats.total)}</strong></span></Card>
         <Card className="report-stat"><ReceiptText size={20} /><span><small>Movimenti</small><strong>{stats.count}</strong></span></Card>
         <Card className="report-stat"><BarChart3 size={20} /><span><small>Media per spesa</small><strong>{money(stats.average)}</strong></span></Card>
         <Card className="report-stat"><ShoppingBasket size={20} /><span><small>Alimentari</small><strong>{money(stats.grocery)}</strong></span></Card>
       </div>
+      {(stats.refunds > 0 || stats.excluded > 0) ? <div className="report-reconciliation-note">
+        <CheckCircle2 size={16} />
+        <span>
+          <strong>Totale ripulito dai doppi conteggi</strong>
+          {stats.refunds > 0 ? ` · rimborsi sottratti ${money(stats.refunds)}` : ''}
+          {stats.excluded > 0 ? ` · ${stats.excluded} movimenti tecnici/trasferimenti esclusi dalle statistiche` : ''}
+        </span>
+      </div> : null}
 
       <div className="report-grid">
         <Card>
@@ -615,10 +630,15 @@ export default function ReportsPage() {
             <div className="expense-row__date"><strong>{item.date.slice(8, 10)}</strong><span>{item.date.slice(5, 7)}</span></div>
             <div className="expense-row__copy">
               <strong>{item.merchant}</strong>
-              <span>{categoryLabel(item.category)} · {sourceLabel(item.source)}{item.items.length ? ` · ${item.items.length} articoli` : ''}</span>
+              <span>{categoryLabel(item.category)} · {sourceLabel(item.source)}{item.flow === 'refund' ? ' · Rimborso' : ''}{!countsInStats(item) ? ' · Non conteggiato' : ''}{item.items.length ? ` · ${item.items.length} articoli` : ''}</span>
               {item.notes ? <small>{item.notes}</small> : null}
             </div>
-            <div className="expense-row__amount"><strong>{money(item.total)}</strong><Badge tone={item.source === 'receipt' || item.source === 'bank' ? 'success' : undefined}>{sourceLabel(item.source)}</Badge></div>
+            <div className={`expense-row__amount ${item.flow === 'refund' ? 'is-refund' : ''} ${!countsInStats(item) ? 'is-excluded' : ''}`}>
+              <strong>{item.flow === 'refund' ? '− ' : ''}{money(item.total)}</strong>
+              <Badge tone={item.flow === 'refund' ? 'success' : !countsInStats(item) ? 'warning' : (item.source === 'receipt' || item.source === 'bank' || item.source === 'paypal' ? 'success' : undefined)}>
+                {item.flow === 'refund' ? 'Rimborso' : !countsInStats(item) ? 'Escluso' : sourceLabel(item.source)}
+              </Badge>
+            </div>
             {canEdit ? <div className="expense-row__actions">
               <IconButton label="Modifica" onClick={() => openEdit(item)}><Pencil size={16} /></IconButton>
               <IconButton label="Elimina" onClick={() => void deleteExpense(item.id)}><Trash2 size={16} /></IconButton>
@@ -653,16 +673,21 @@ export default function ReportsPage() {
 
     {section === 'bank' ? <div className="report-bank-layout">
       <Card>
-        <CardHeader title="Importa estratto conto" subtitle="CSV o Excel (.xlsx). Il file viene letto sul dispositivo e non viene caricato su servizi esterni." />
+        <CardHeader title="Importa banca / PayPal" subtitle="Supporta il CSV PayPal, CSV/Excel bancari e il PDF “Movimenti Globali” di Banca Centro Toscana-Umbria." />
         <label className="bank-file-drop">
-          <input type="file" accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => { const file = e.target.files?.[0]; if (file) void selectBankFile(file); e.currentTarget.value = '' }} />
+          <input type="file" accept=".csv,.txt,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => { const file = e.target.files?.[0]; if (file) void selectBankFile(file); e.currentTarget.value = '' }} />
           <FileSpreadsheet size={28} />
-          <strong>{bankBusy ? 'Sto leggendo il file…' : 'Scegli CSV o Excel'}</strong>
-          <span>VerdoFamily proverà a riconoscere automaticamente data, descrizione e importo.</span>
+          <strong>{bankBusy ? 'Sto leggendo il file…' : 'Scegli CSV, Excel o PDF'}</strong>
+          <span>I formati PayPal e Banca Centro riconosciuti vengono interpretati automaticamente; gli altri file restano configurabili tramite colonne.</span>
         </label>
         {bankMessage ? <div className="bank-import-message">{bankMessage}</div> : null}
 
-        {bankTable ? <div className="bank-mapping">
+        {bankTable ? (bankTable.kind && bankTable.kind !== 'generic'
+          ? <div className="bank-format-detected">
+              <CheckCircle2 size={18} />
+              <div><strong>{bankTable.detectedLabel || 'Formato riconosciuto'}</strong><span>Data, importo, origine e tipologia del movimento sono già configurati automaticamente.</span></div>
+            </div>
+          : <div className="bank-mapping">
           <div className="bank-mapping__head"><strong>Abbina le colonne</strong><span>Correggi solo se il riconoscimento automatico non è giusto.</span></div>
           <div className="form-grid form-grid--2">
             <Field label="Data"><select value={bankMapping.date} onChange={e => updateBankMapping({ date: e.target.value })}><option value="">Seleziona…</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
@@ -673,6 +698,7 @@ export default function ReportsPage() {
             <Field label="ID / riferimento operazione" hint="Se presente, rende ancora più preciso il riconoscimento dei movimenti già importati."><select value={bankMapping.reference} onChange={e => updateBankMapping({ reference: e.target.value })}><option value="">Nessuno</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
           </div>
         </div> : null}
+        ) : null}
       </Card>
 
       {bankTable ? <Card>
@@ -701,12 +727,18 @@ export default function ReportsPage() {
               <input type="date" value={row.date} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, date: e.target.value, sourceRef: bankSourceRef(e.target.value, item.merchant, item.total, item.sourceKey), legacySourceRef: bankSourceRef(e.target.value, item.merchant, item.total) } : item))} />
               <div className="bank-preview-row__merchant">
                 <strong>{row.merchant}</strong>
+                <span className="bank-row-tags">
+                  <em>{sourceLabel(row.source)}</em>
+                  {row.flow === 'refund' ? <em className="is-refund">Rimborso</em> : null}
+                  {!row.includeInStats ? <em className="is-excluded">Non conteggiato</em> : null}
+                </span>
                 {row.duplicateStatus === 'exact' ? <span className="bank-match bank-match--archive"><CheckCircle2 size={13} />Già importato</span> : null}
                 {row.duplicateStatus === 'likely' || row.duplicateStatus === 'possible' ? <span className="bank-match bank-match--review"><AlertTriangle size={13} />{row.duplicateStatus === 'likely' ? 'Probabile doppione nei Report' : 'Possibile doppione nei Report'}{row.matchedExpense ? ` · ${row.matchedExpense.merchant} · ${row.matchedExpense.date.split('-').reverse().join('/')} · ${sourceLabel(row.matchedExpense.source)}` : ''}</span> : null}
                 {row.bankDouble ? <span className="bank-match bank-match--double"><AlertTriangle size={13} />Possibile doppio pagamento bancario</span> : null}
+                {row.details ? <small>{row.details}</small> : null}
                 {row.duplicateReason ? <small>{row.duplicateReason}</small> : row.bankDoubleReason ? <small>{row.bankDoubleReason}</small> : null}
               </div>
-              <strong className="bank-preview-row__amount">{money(row.total)}</strong>
+              <strong className={`bank-preview-row__amount ${row.flow === 'refund' ? 'is-refund' : ''}`}>{row.flow === 'refund' ? '− ' : ''}{money(row.total)}</strong>
               <select value={row.category} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, category: e.target.value as ExpenseCategory } : item))}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
             </div>)}
             {visibleBankRows.length > 500 ? <div className="bank-preview-more">Mostro le prime 500 righe del filtro corrente. Le altre verranno comunque considerate dall’importazione.</div> : null}
@@ -719,7 +751,7 @@ export default function ReportsPage() {
       open={!!editing}
       onClose={() => setEditing(null)}
       title={editing?.id ? 'Modifica spesa' : 'Nuova spesa'}
-      subtitle={editing?.source === 'receipt' ? 'Generata da uno scontrino.' : editing?.source === 'bank' ? 'Importata dalla banca.' : 'Inserimento manuale'}
+      subtitle={editing?.source === 'receipt' ? 'Generata da uno scontrino.' : editing?.source === 'bank' ? 'Importata dalla banca.' : editing?.source === 'paypal' ? 'Importata da PayPal.' : 'Inserimento manuale'}
       footer={<div className="modal-actions"><span /><div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditing(null)}>Annulla</Button><Button onClick={save} disabled={!editing?.merchant?.trim() || Number(editing?.total) <= 0}>Salva</Button></div></div>}
     >
       {editing ? <div className="form-grid form-grid--2">
