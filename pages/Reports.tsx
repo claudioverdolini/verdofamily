@@ -357,9 +357,15 @@ export default function ReportsPage() {
     const debitIndex = mapping.debit ? table.headers.indexOf(mapping.debit) : -1
     const creditIndex = mapping.credit ? table.headers.indexOf(mapping.credit) : -1
     const referenceIndex = mapping.reference ? table.headers.indexOf(mapping.reference) : -1
+    const sourceIndex = table.headers.indexOf('Origine')
+    const flowIndex = table.headers.indexOf('Flusso')
+    const countIndex = table.headers.indexOf('Conteggia')
+    const movementKindIndex = table.headers.indexOf('Tipo movimento')
+    const detailsIndex = table.headers.indexOf('Dettagli')
+    const normalizedImport = flowIndex >= 0 || sourceIndex >= 0
 
     const rawAmounts = table.rows.slice(0, 250).map(row => amountIndex >= 0 ? parseBankAmount(row[amountIndex]) : undefined).filter((value): value is number => value !== undefined)
-    const negativeAmountMode = amountIndex >= 0 && rawAmounts.some(value => value < 0)
+    const negativeAmountMode = !normalizedImport && amountIndex >= 0 && rawAmounts.some(value => value < 0)
     const occurrenceBySignature = new Map<string, number>()
 
     const rows: BankPreviewRow[] = table.rows.slice(0, 1500).map((row, index) => {
@@ -370,34 +376,48 @@ export default function ReportsPage() {
       else rawAmount = amountIndex >= 0 ? parseBankAmount(row[amountIndex]) : undefined
       const credit = creditIndex >= 0 ? parseBankAmount(row[creditIndex]) : undefined
 
-      let isExpense = false
+      const flow = flowIndex >= 0 && String(row[flowIndex] || '').toLowerCase() === 'refund' ? 'refund' as const : 'expense' as const
+      const source = sourceIndex >= 0 && String(row[sourceIndex] || '').toLowerCase() === 'paypal' ? 'paypal' as const : 'bank' as const
+      const includeInStats = countIndex < 0 || !/^(?:no|false|0)$/i.test(String(row[countIndex] || '').trim())
+      const movementKindRaw = movementKindIndex >= 0 ? String(row[movementKindIndex] || '') : ''
+      const movementKind = (['purchase','fee','tax','bill','loan','cash','investment','card_settlement','transfer','paypal_repayment','refund','other'].includes(movementKindRaw)
+        ? movementKindRaw
+        : (flow === 'refund' ? 'refund' : 'purchase')) as ExpenseRecord['movementKind']
+      const details = detailsIndex >= 0 ? cleanMerchant(row[detailsIndex]) : ''
+
+      let isRelevant = false
       let total = 0
-      if (debitIndex >= 0) {
+      if (normalizedImport && rawAmount !== undefined) {
+        total = Math.abs(rawAmount)
+        isRelevant = total > 0
+      } else if (debitIndex >= 0) {
         total = Math.abs(Number(rawAmount || 0))
-        isExpense = total > 0
+        isRelevant = total > 0
       } else if (rawAmount !== undefined) {
         total = Math.abs(rawAmount)
-        isExpense = negativeAmountMode ? rawAmount < 0 : rawAmount > 0
-        if (credit !== undefined && credit > 0) isExpense = false
+        isRelevant = negativeAmountMode ? rawAmount < 0 : rawAmount > 0
+        if (credit !== undefined && credit > 0) isRelevant = false
       }
 
-      const valid = !!date && !!merchant && total > 0
+      const valid = !!date && !!merchant && total > 0 && isRelevant
       const rawReference = referenceIndex >= 0 ? cleanMerchant(row[referenceIndex]) : ''
       const signatureBase = rawReference || row.map(value => String(value || '').trim()).join('|')
       const occurrence = (occurrenceBySignature.get(signatureBase) || 0) + 1
       occurrenceBySignature.set(signatureBase, occurrence)
       const sourceKey = `${signatureBase}|occ:${occurrence}`
-      const sourceRef = valid ? bankSourceRef(date, merchant, total, sourceKey) : `invalid-${index}`
+      const sourceRef = valid
+        ? (source === 'paypal' && rawReference ? `paypal:${rawReference}` : bankSourceRef(date, merchant, total, sourceKey))
+        : `invalid-${index}`
       const legacySourceRef = valid ? bankSourceRef(date, merchant, total) : `invalid-legacy-${index}`
       const assessment = valid ? duplicateAssessment(date, merchant, total, sourceRef, legacySourceRef) : { status: 'none' as BankDuplicateStatus, reason: '', match: undefined }
 
       return {
         id: `bank-${index}`,
-        include: valid && isExpense && assessment.status === 'none',
+        include: valid && assessment.status === 'none',
         date,
         merchant,
         total,
-        category: inferExpenseCategory(merchant),
+        category: inferExpenseCategory(`${merchant} ${details}`),
         sourceRef,
         legacySourceRef,
         sourceKey,
@@ -405,20 +425,27 @@ export default function ReportsPage() {
         duplicateReason: assessment.reason,
         matchedExpense: assessment.match,
         bankDouble: false,
-        valid: valid && isExpense
+        source,
+        flow,
+        movementKind,
+        includeInStats,
+        details,
+        valid
       }
     }).filter(row => row.valid)
 
     const indexesByAmount = new Map<string, number[]>()
     rows.forEach((row, index) => {
-      const key = row.total.toFixed(2)
+      if (row.flow !== 'expense') return
+      const key = `${row.source}|${row.total.toFixed(2)}`
       const candidates = indexesByAmount.get(key) || []
       for (const previousIndex of candidates) {
         const previous = rows[previousIndex]
+        if (previous.flow !== row.flow) continue
         const days = daysBetween(row.date, previous.date)
         const similarity = bankMerchantSimilarity(row.merchant, previous.merchant)
         if (days <= 1 && similarity >= .82) {
-          const reason = `Nel file bancario c’è un altro addebito di ${money(row.total)} con descrizione simile ${days ? 'a un giorno di distanza' : 'nello stesso giorno'}.`
+          const reason = `Nel file c’è un altro addebito di ${money(row.total)} con descrizione simile ${days ? 'a un giorno di distanza' : 'nello stesso giorno'}.`
           row.bankDouble = true
           row.bankDoubleReason = reason
           previous.bankDouble = true
