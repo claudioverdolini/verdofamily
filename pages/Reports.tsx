@@ -127,12 +127,13 @@ export default function ReportsPage() {
     upsertExpense,
     importExpenses,
     deleteExpense,
+    reconcilePurchaseEvidence,
     upsertRecurringExpense,
     deleteRecurringExpense,
     materializeRecurringExpenses,
     setActivePage
   } = useFamily()
-  const [section, setSection] = useState<'overview' | 'recurring' | 'bank'>('overview')
+  const [section, setSection] = useState<'overview' | 'recurring' | 'amazon' | 'bank'>('overview')
   const [period, setPeriod] = useState<'month' | 'year'>('month')
   const [cursor, setCursor] = useState(monthKey())
   const [editing, setEditing] = useState<any>(null)
@@ -531,13 +532,21 @@ export default function ReportsPage() {
     return true
   }), [bankRows, bankFilter])
 
+  const amazonEvidence = useMemo(() => (data.purchaseEvidence || []).slice().sort((a, b) => b.orderDate.localeCompare(a.orderDate) || b.importedAt.localeCompare(a.importedAt)), [data.purchaseEvidence])
+  const amazonSummary = useMemo(() => ({
+    total: amazonEvidence.reduce((sum, item) => sum + Number(item.total || 0), 0),
+    matched: amazonEvidence.filter(item => item.status === 'matched').length,
+    review: amazonEvidence.filter(item => item.status === 'review').length,
+    unmatched: amazonEvidence.filter(item => item.status === 'unmatched').length
+  }), [amazonEvidence])
+
   const periodTitle = period === 'month' ? monthLabel(cursor) : String(selectedYear)
 
   return <div className="page page--reports">
     <PageIntro
       eyebrow="Analisi famiglia"
       title="Report"
-      description="Spese, scontrini, PayPal, banca e ricorrenze raccolti in un unico riepilogo, evitando i doppi conteggi."
+      description="Spese, Amazon, PayPal, banca e ricorrenze raccolti in un unico riepilogo, evitando i doppi conteggi."
       actions={canEdit && section === 'overview' ? <Button icon={<Plus size={18} />} onClick={openNew}>Nuova spesa</Button> : null}
     />
 
@@ -545,6 +554,7 @@ export default function ReportsPage() {
       <Segmented value={section} onChange={setSection} options={[
         { value: 'overview', label: 'Panoramica' },
         { value: 'recurring', label: 'Ricorrenti' },
+        { value: 'amazon', label: 'Amazon' },
         { value: 'bank', label: 'Importa movimenti' }
       ]} />
     </div>
@@ -576,12 +586,14 @@ export default function ReportsPage() {
         <Card className="report-stat"><BarChart3 size={20} /><span><small>Media per spesa</small><strong>{money(stats.average)}</strong></span></Card>
         <Card className="report-stat"><ShoppingBasket size={20} /><span><small>Alimentari</small><strong>{money(stats.grocery)}</strong></span></Card>
       </div>
-      {(stats.refunds > 0 || stats.excluded > 0) ? <div className="report-reconciliation-note">
+      {(stats.refunds > 0 || stats.excluded > 0 || amazonSummary.unmatched > 0 || amazonSummary.review > 0) ? <div className="report-reconciliation-note">
         <CheckCircle2 size={16} />
         <span>
           <strong>Totale ripulito dai doppi conteggi</strong>
           {stats.refunds > 0 ? ` · rimborsi sottratti ${money(stats.refunds)}` : ''}
           {stats.excluded > 0 ? ` · ${stats.excluded} movimenti tecnici/trasferimenti esclusi dalle statistiche` : ''}
+          {amazonSummary.unmatched > 0 ? ` · ${amazonSummary.unmatched} ordini Amazon in attesa del movimento di pagamento` : ''}
+          {amazonSummary.review > 0 ? ` · ${amazonSummary.review} ordini Amazon da verificare` : ''}
         </span>
       </div> : null}
 
@@ -670,6 +682,52 @@ export default function ReportsPage() {
         </div>)}
       </div> : <EmptyState icon={<Repeat2 size={30} />} title="Nessuna spesa ricorrente" text="Aggiungi affitto, abbonamenti, assicurazioni, bollette fisse o altre uscite periodiche." action={canEdit ? <Button onClick={() => openRecurring()}>Crea la prima</Button> : undefined} />}
     </Card> : null}
+
+    {section === 'amazon' ? <div className="amazon-evidence-layout">
+      <Card className="amazon-evidence-hero">
+        <CardHeader
+          title="Amazon via Outlook"
+          subtitle="Le email servono come prova d’acquisto e dettaglio articoli. Non vengono conteggiate come una seconda spesa: il totale entra nei Report solo quando viene riconciliato con un movimento di pagamento."
+          action={canEdit ? <Button size="sm" icon={<CheckCircle2 size={16} />} onClick={() => reconcilePurchaseEvidence()}>Riconcilia con banca</Button> : null}
+        />
+        <div className="amazon-evidence-stats">
+          <div><small>Ordini acquisiti</small><strong>{amazonEvidence.length}</strong></div>
+          <div><small>Valore documentato</small><strong>{money(amazonSummary.total)}</strong></div>
+          <div><small>Riconciliati</small><strong>{amazonSummary.matched}</strong></div>
+          <div><small>In attesa / verifica</small><strong>{amazonSummary.unmatched + amazonSummary.review}</strong></div>
+        </div>
+        <div className="amazon-security-note">
+          <CheckCircle2 size={16} />
+          <span><strong>Privacy:</strong> VerdoFamily conserva solo ordine, data, importo e articoli necessari ai Report. Il contenuto completo delle email e le credenziali Outlook non vengono salvati nell’app.</span>
+        </div>
+      </Card>
+
+      {amazonEvidence.length ? <div className="amazon-order-list">
+        {amazonEvidence.map(order => {
+          const matched = order.matchedExpenseId ? data.expenses.find(expense => expense.id === order.matchedExpenseId) : undefined
+          const tone = order.status === 'matched' ? 'success' : order.status === 'review' ? 'warning' : undefined
+          return <Card key={order.id} className={`amazon-order-card is-${order.status}`}>
+            <div className="amazon-order-card__head">
+              <div>
+                <strong>Ordine {order.externalId}</strong>
+                <span>{order.orderDate.split('-').reverse().join('/')} · {order.items.length} {order.items.length === 1 ? 'articolo' : 'articoli'}</span>
+              </div>
+              <div className="amazon-order-card__amount">
+                <strong>{money(order.total)}</strong>
+                <Badge tone={tone}>{order.status === 'matched' ? 'Riconciliato' : order.status === 'review' ? 'Da verificare' : 'In attesa'}</Badge>
+              </div>
+            </div>
+            {matched ? <div className="amazon-match-line"><CheckCircle2 size={14} /><span>Collegato a {matched.merchant} del {matched.date.split('-').reverse().join('/')} · {money(matched.total)}</span></div> : order.status === 'review' ? <div className="amazon-match-line is-review"><AlertTriangle size={14} /><span>Possibile movimento trovato: verifica prima di considerarlo collegato.</span></div> : null}
+            <div className="amazon-item-list">
+              {order.items.map(item => <div key={item.id}>
+                <div><strong>{item.name}</strong><span>{item.category ? categoryLabel(item.category) : 'Categoria da definire'} · q.tà {item.qty}</span></div>
+                <b>{item.totalPrice !== undefined ? money(item.totalPrice) : item.unitPrice !== undefined ? money(item.unitPrice * Math.max(1, item.qty)) : '—'}</b>
+              </div>)}
+            </div>
+          </Card>
+        })}
+      </div> : <Card><EmptyState icon={<ReceiptText size={30} />} title="Nessun ordine Amazon acquisito" text="Quando analizziamo le email inoltrate dalla casella dedicata, qui compariranno solo i dati strutturati utili alla riconciliazione." /></Card>}
+    </div> : null}
 
     {section === 'bank' ? <div className="report-bank-layout">
       <Card>
