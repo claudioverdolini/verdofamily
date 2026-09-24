@@ -255,6 +255,9 @@ export default function ReportsPage() {
       category: 'other' as ExpenseCategory,
       notes: '',
       source: 'manual',
+      flow: 'expense',
+      movementKind: 'purchase',
+      includeInStats: true,
       items: []
     })
   }
@@ -274,6 +277,9 @@ export default function ReportsPage() {
       category: editing.category || 'other',
       source: editing.source || 'manual',
       sourceRef: editing.sourceRef,
+      flow: editing.flow === 'refund' ? 'refund' : 'expense',
+      movementKind: editing.movementKind || (editing.flow === 'refund' ? 'refund' : 'purchase'),
+      includeInStats: editing.includeInStats !== false,
       createdAt: editing.createdAt,
       createdByUserId: editing.createdByUserId,
       notes: editing.notes || '',
@@ -292,6 +298,9 @@ export default function ReportsPage() {
       total,
       category: quick.category,
       source: 'manual',
+      flow: 'expense',
+      movementKind: 'purchase',
+      includeInStats: true,
       notes: 'Inserimento rapido',
       items: []
     })
