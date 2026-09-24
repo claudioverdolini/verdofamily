@@ -382,6 +382,8 @@ export type ExpenseSource = 'receipt' | 'manual' | 'voice' | 'recurring' | 'bank
 export type ExpenseFlow = 'expense' | 'refund'
 export type ExpenseMovementKind = 'purchase' | 'fee' | 'tax' | 'bill' | 'loan' | 'cash' | 'investment' | 'card_settlement' | 'transfer' | 'paypal_repayment' | 'refund' | 'other'
 export type RecurringExpenseFrequency = 'weekly' | 'monthly' | 'yearly'
+export type PurchaseEvidenceSource = 'amazon_email'
+export type PurchaseEvidenceStatus = 'unmatched' | 'matched' | 'review'
 
 export type ExpenseItem = {
   id: string
@@ -404,10 +406,35 @@ export type ExpenseRecord = {
   flow?: ExpenseFlow
   movementKind?: ExpenseMovementKind
   includeInStats?: boolean
+  evidenceRefs?: string[]
   createdAt: string
   createdByUserId?: number
   notes?: string
   items: ExpenseItem[]
+}
+
+export type PurchaseEvidenceItem = {
+  id: string
+  name: string
+  qty: number
+  unitPrice?: number
+  totalPrice?: number
+  category?: ExpenseCategory
+}
+
+export type PurchaseEvidence = {
+  id: string
+  source: PurchaseEvidenceSource
+  externalId: string
+  merchant: string
+  orderDate: string
+  total: number
+  items: PurchaseEvidenceItem[]
+  status: PurchaseEvidenceStatus
+  matchedExpenseId?: string
+  matchConfidence?: number
+  importedAt: string
+  notes?: string
 }
 
 export type RecurringExpense = {
@@ -462,5 +489,6 @@ export type FamilyData = {
   boardPosts: BoardPost[]
   approvalRequests: ApprovalRequest[]
   expenses: ExpenseRecord[]
+  purchaseEvidence: PurchaseEvidence[]
   recurringExpenses: RecurringExpense[]
 }
