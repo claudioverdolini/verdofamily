@@ -697,7 +697,7 @@ export default function ReportsPage() {
             <Field label="Colonna accrediti" hint="Facoltativa: serve a escludere le entrate."><select value={bankMapping.credit} onChange={e => updateBankMapping({ credit: e.target.value })}><option value="">Nessuna</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
             <Field label="ID / riferimento operazione" hint="Se presente, rende ancora più preciso il riconoscimento dei movimenti già importati."><select value={bankMapping.reference} onChange={e => updateBankMapping({ reference: e.target.value })}><option value="">Nessuno</option>{bankTable.headers.map(h => <option key={h}>{h}</option>)}</select></Field>
           </div>
-        </div> : null}
+        </div>
         ) : null}
       </Card>
 
@@ -724,7 +724,7 @@ export default function ReportsPage() {
           <div className="bank-preview-list">
             {visibleBankRows.slice(0, 500).map(row => <div key={row.id} className={`bank-preview-row ${row.duplicateStatus === 'exact' ? 'is-duplicate' : ''} ${row.duplicateStatus === 'likely' || row.duplicateStatus === 'possible' ? 'is-review' : ''} ${row.bankDouble ? 'is-bank-double' : ''}`}>
               <input type="checkbox" checked={row.include} disabled={row.duplicateStatus === 'exact'} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, include: e.target.checked } : item))} />
-              <input type="date" value={row.date} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, date: e.target.value, sourceRef: bankSourceRef(e.target.value, item.merchant, item.total, item.sourceKey), legacySourceRef: bankSourceRef(e.target.value, item.merchant, item.total) } : item))} />
+              <input type="date" value={row.date} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, date: e.target.value, sourceRef: item.source === 'paypal' ? item.sourceRef : bankSourceRef(e.target.value, item.merchant, item.total, item.sourceKey), legacySourceRef: bankSourceRef(e.target.value, item.merchant, item.total) } : item))} />
               <div className="bank-preview-row__merchant">
                 <strong>{row.merchant}</strong>
                 <span className="bank-row-tags">
