@@ -64,7 +64,17 @@ function sourceLabel(source: ExpenseRecord['source']) {
   if (source === 'voice') return 'Voce'
   if (source === 'recurring') return 'Ricorrente'
   if (source === 'bank') return 'Banca'
+  if (source === 'paypal') return 'PayPal'
   return 'Manuale'
+}
+
+function countsInStats(item: ExpenseRecord) {
+  return item.includeInStats !== false
+}
+
+function signedExpense(item: ExpenseRecord) {
+  const total = Number(item.total || 0)
+  return item.flow === 'refund' ? -total : total
 }
 
 function monthKey(date = localDateISO()) {
@@ -102,6 +112,11 @@ type BankPreviewRow = {
   matchedExpense?: ExpenseRecord
   bankDouble: boolean
   bankDoubleReason?: string
+  source: ExpenseRecord['source']
+  flow: 'expense' | 'refund'
+  movementKind: ExpenseRecord['movementKind']
+  includeInStats: boolean
+  details?: string
   valid: boolean
 }
 
