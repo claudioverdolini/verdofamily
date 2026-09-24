@@ -4,6 +4,8 @@ export type BankTable = {
   fileName: string
   headers: string[]
   rows: string[][]
+  kind?: 'generic' | 'paypal' | 'banca-centro-pdf'
+  detectedLabel?: string
 }
 
 export type BankColumnMapping = {
@@ -127,6 +129,272 @@ function parseCsv(value: string, fileName: string) {
   return tableFromRows(fileName, candidates[0].rows)
 }
 
+const NORMALIZED_HEADERS = ['Data', 'Descrizione', 'Importo', 'ID operazione', 'Origine', 'Flusso', 'Conteggia', 'Tipo movimento', 'Dettagli']
+
+function headerIndex(headers: string[], name: string) {
+  return headers.findIndex(header => normalized(header) === normalized(name))
+}
+
+function looksLikePayPal(table: BankTable) {
+  const wanted = ['Data','Orario','Nome','Tipo','Stato','Valuta','Importo','Totale','Codice transazione']
+  const available = new Set(table.headers.map(normalized))
+  return wanted.filter(name => available.has(normalized(name))).length >= 8
+}
+
+function normalizePayPalTable(table: BankTable): BankTable {
+  const idx = {
+    date: headerIndex(table.headers, 'Data'),
+    name: headerIndex(table.headers, 'Nome'),
+    type: headerIndex(table.headers, 'Tipo'),
+    status: headerIndex(table.headers, 'Stato'),
+    total: headerIndex(table.headers, 'Totale'),
+    transaction: headerIndex(table.headers, 'Codice transazione'),
+    description: headerIndex(table.headers, 'Descrizione')
+  }
+
+  const ignoredTypes = new Set([
+    'Versamento generico con carta',
+    'Prelievo generico con carta',
+    'Trasferimento generico tra conti',
+    'Autorizzazione generica',
+    'Blocco conto per autorizzazione aperta',
+    'Storno di blocco conto generico',
+    'Annullamento autorizzazione',
+    'Pagamento con credito acquirenti PayPal',
+    'Altro'
+  ])
+
+  const purchaseTypes = new Set([
+    'Pagamento preautorizzato utenza',
+    'Pagamento Express Checkout',
+    'Pagamento da cellulare',
+    'Pagamento generico'
+  ])
+
+  const rows: string[][] = []
+  for (const row of table.rows) {
+    const status = text(row[idx.status])
+    const type = text(row[idx.type])
+    const total = parseBankAmount(row[idx.total])
+    const name = text(row[idx.name])
+    const description = text(row[idx.description])
+    if (status !== 'Completata' || total === undefined || total === 0) continue
+    if (ignoredTypes.has(type)) continue
+
+    let flow: 'expense' | 'refund' = 'expense'
+    let countInStats = true
+    let movementKind = 'purchase'
+
+    if (type === 'Rimborso di pagamento') {
+      if (total > 0 && name) {
+        flow = 'refund'
+        movementKind = 'refund'
+      } else {
+        countInStats = false
+        movementKind = 'transfer'
+      }
+    } else if (total > 0) {
+      continue
+    } else if (type === 'Pagamento generico' && /paypal\s*\(europe\)/i.test(name)) {
+      countInStats = false
+      movementKind = 'paypal_repayment'
+    } else if (!purchaseTypes.has(type)) {
+      countInStats = false
+      movementKind = 'other'
+    }
+
+    const merchant = name || (movementKind === 'paypal_repayment' ? 'PayPal - rata/finanziamento' : 'Movimento PayPal')
+    const details = [type, description].filter(Boolean).join(' · ')
+    rows.push([
+      text(row[idx.date]),
+      merchant,
+      Math.abs(total).toFixed(2),
+      text(row[idx.transaction]),
+      'paypal',
+      flow,
+      countInStats ? 'si' : 'no',
+      movementKind,
+      details
+    ])
+  }
+
+  if (!rows.length) throw new Error('Il CSV PayPal non contiene movimenti completati utilizzabili.')
+  return {
+    fileName: table.fileName,
+    headers: NORMALIZED_HEADERS,
+    rows,
+    kind: 'paypal',
+    detectedLabel: 'PayPal CSV'
+  }
+}
+
+const BANCA_CENTRO_CAUSES = [
+  'Prelevamento a mezzo nostro sportello automatico',
+  'Pagamento tramite POS',
+  'Bonifico a Vostro favore',
+  'Pagamento utilizzo carte',
+  'Effetti ritirati (pagati)',
+  'Rimborso finanziamenti',
+  'Vostra disposizione',
+  'Imposte e tasse',
+  'Commissioni'
+]
+
+function bancaCentroMerchant(cause: string, description: string) {
+  const d = text(description).replace(/\s+/g, ' ')
+  if (cause === 'Commissioni') return 'Commissioni bancarie'
+  if (cause === 'Imposte e tasse') return 'Imposte e tasse'
+  if (cause.startsWith('Prelevamento')) return 'Prelievo contanti'
+  if (cause === 'Rimborso finanziamenti') return 'Rata mutuo'
+  if (cause === 'Pagamento utilizzo carte') {
+    const card = d.match(/\*+([0-9]{3,4})/)
+    return card ? `Saldo carta *${card[1]}` : 'Saldo carta di credito'
+  }
+
+  if (cause === 'Pagamento tramite POS') {
+    return d
+      .replace(/^Operazione POS Eurozona Del \d{2}\.\d{2}\.\d{2} \d{2}:\d{2} Carta \*\d+\s*/i, '')
+      .replace(/^Pagamenti PagoBancomat DEL \d{2}\.\d{2}\.\d{2} \d{2}:\d{2}\s*/i, '')
+      .replace(/\s+CARTA\s+\d[\d-]*$/i, '')
+      .replace(/\s+ITA$/i, '')
+      .trim() || 'Pagamento POS'
+  }
+
+  if (cause === 'Effetti ritirati (pagati)') {
+    if (/MercedesBenzFiSerIT/i.test(d)) return 'Mercedes-Benz Financial Services'
+    if (/METLIFE EUROPE/i.test(d)) return 'MetLife Europe'
+    if (/BALEARIA SRL/i.test(d)) return 'Balearia'
+    if (/Amazon\.it|AMAZON EU/i.test(d)) return 'Amazon.it'
+    if (/AMERICAN EXPRESS/i.test(d)) return 'American Express'
+    if (/UNIPOL ASSICURAZIONI/i.test(d)) return 'Unipol Assicurazioni'
+    if (/BNP PARIBAS/i.test(d)) return 'BNP Paribas - Investiper'
+    const stripped = d.replace(/^SDD\s+(?:Core|Finanziario)?\s*-?\s*(?:Richiesta|Rich\.)?\s*Incasso\s*SEPA?\s*/i, '')
+    return stripped.slice(0, 120) || 'Addebito SEPA'
+  }
+
+  if (cause === 'Vostra disposizione') {
+    const ben = d.match(/\bBEN\s+(.+?)(?:Saldo|$)/i)
+    if (ben?.[1]) return ben[1].trim().slice(0, 120)
+    const fav = d.match(/a favore di\s+\*?(.+)$/i)
+    if (fav?.[1]) return fav[1].trim().slice(0, 120)
+    return 'Bonifico disposto'
+  }
+
+  return d.slice(0, 120) || cause || 'Movimento bancario'
+}
+
+function bancaCentroMeta(cause: string, description: string) {
+  const d = normalized(description)
+  if (cause === 'Pagamento utilizzo carte') return { count: false, movementKind: 'card_settlement' }
+  if (cause.startsWith('Prelevamento')) return { count: false, movementKind: 'cash' }
+  if (cause === 'Effetti ritirati (pagati)' && /investiper|bnp paribas/.test(d)) return { count: false, movementKind: 'investment' }
+  if (cause === 'Effetti ritirati (pagati)' && /american express/.test(d)) return { count: false, movementKind: 'card_settlement' }
+  if (cause === 'Vostra disposizione' && /verdolini chiara|girofondi/.test(d)) return { count: false, movementKind: 'transfer' }
+  if (cause === 'Commissioni') return { count: true, movementKind: 'fee' }
+  if (cause === 'Imposte e tasse') return { count: true, movementKind: 'tax' }
+  if (cause === 'Rimborso finanziamenti') return { count: true, movementKind: 'loan' }
+  if (cause === 'Effetti ritirati (pagati)') return { count: true, movementKind: 'bill' }
+  return { count: true, movementKind: 'purchase' }
+}
+
+async function parseBancaCentroPdf(file: File): Promise<BankTable> {
+  let pdfjs: any
+  try {
+    const url = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs'
+    pdfjs = await import(/* @vite-ignore */ url)
+    if (pdfjs?.GlobalWorkerOptions) {
+      pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs'
+    }
+  } catch {
+    throw new Error('Non riesco a caricare il lettore PDF. Verifica la connessione e riprova.')
+  }
+
+  const document = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
+  const parsed: Array<{ account: string; accountingDate: string; valueDate: string; amount: number; cause: string; description: string }> = []
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber)
+    const content = await page.getTextContent()
+    const items = (content.items || [])
+      .filter((item: any) => item?.str && item?.transform)
+      .map((item: any) => ({ text: String(item.str).trim(), x: Number(item.transform[4] || 0), y: Number(item.transform[5] || 0) }))
+      .filter((item: any) => item.text)
+
+    const lines: Array<{ y: number; items: Array<{ text: string; x: number; y: number }> }> = []
+    for (const item of items) {
+      let line = lines.find(entry => Math.abs(entry.y - item.y) <= 1.6)
+      if (!line) {
+        line = { y: item.y, items: [] }
+        lines.push(line)
+      }
+      line.items.push(item)
+    }
+    lines.sort((a, b) => b.y - a.y)
+    lines.forEach(line => line.items.sort((a, b) => a.x - b.x))
+
+    let current: { account: string; accountingDate: string; valueDate: string; amount: number; cause: string; description: string } | null = null
+    const col = (line: { items: Array<{ text: string; x: number }> }, min: number, max = Number.POSITIVE_INFINITY) =>
+      line.items.filter(item => item.x >= min && item.x < max).map(item => item.text).join(' ').replace(/\s+/g, ' ').trim()
+
+    for (const line of lines) {
+      const account = col(line, 185, 310)
+      const accountingDate = col(line, 310, 356)
+      const valueDate = col(line, 356, 430)
+      const amountText = col(line, 430, 464)
+      const causeText = col(line, 464, 577)
+      const descriptionText = col(line, 577)
+      const amount = parseBankAmount(amountText)
+
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(accountingDate) && /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(valueDate) && amount !== undefined) {
+        if (current) parsed.push(current)
+        current = {
+          account,
+          accountingDate,
+          valueDate,
+          amount,
+          cause: causeText,
+          description: descriptionText
+        }
+        continue
+      }
+
+      if (current) {
+        if (causeText && !/^(Causale|Movimenti Globali)$/i.test(causeText)) current.cause = `${current.cause} ${causeText}`.trim()
+        if (descriptionText && !/^Descrizione$/i.test(descriptionText)) current.description = `${current.description} ${descriptionText}`.trim()
+      }
+    }
+    if (current) parsed.push(current)
+  }
+
+  const outflows = parsed.filter(row => row.amount < 0)
+  if (!outflows.length) throw new Error('Non riconosco movimenti in uscita nel PDF della banca.')
+
+  const rows = outflows.map(row => {
+    const meta = bancaCentroMeta(row.cause, row.description)
+    const merchant = bancaCentroMerchant(row.cause, row.description)
+    const reference = [row.account, row.accountingDate, row.valueDate, row.amount.toFixed(2), row.cause, row.description].join('|')
+    return [
+      row.valueDate,
+      merchant,
+      Math.abs(row.amount).toFixed(2),
+      reference,
+      'bank',
+      'expense',
+      meta.count ? 'si' : 'no',
+      meta.movementKind,
+      [row.cause, row.description].filter(Boolean).join(' · ')
+    ]
+  })
+
+  return {
+    fileName: file.name,
+    headers: NORMALIZED_HEADERS,
+    rows,
+    kind: 'banca-centro-pdf',
+    detectedLabel: 'Banca Centro Toscana-Umbria · Movimenti Globali PDF'
+  }
+}
+
 async function unzipXlsx(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer)
   const view = new DataView(buffer)
@@ -239,10 +507,12 @@ async function parseXlsx(file: File) {
 
 export async function readBankFile(file: File): Promise<BankTable> {
   const lower = file.name.toLowerCase()
+  if (lower.endsWith('.pdf')) return parseBancaCentroPdf(file)
   if (lower.endsWith('.xlsx')) return parseXlsx(file)
   if (lower.endsWith('.xls')) throw new Error('Il vecchio formato .xls non è supportato. Salvalo come .xlsx oppure CSV.')
   const value = await file.text()
-  return parseCsv(value.replace(/^\uFEFF/, ''), file.name)
+  const table = parseCsv(value.replace(/^\uFEFF/, ''), file.name)
+  return looksLikePayPal(table) ? normalizePayPalTable(table) : table
 }
 
 export function suggestBankMapping(headers: string[]): BankColumnMapping {
@@ -335,14 +605,14 @@ export function bankMerchantSimilarity(left: string, right: string) {
 
 export function inferExpenseCategory(value: string): ExpenseCategory {
   const v = normalized(value)
-  if (/supermerc|conad|coop|lidl|eurospin|esselunga|aliment|spesa|market|carrefour|pam\b|md\b/.test(v)) return 'groceries'
-  if (/benz|carbur|eni\b|q8\b|ip\b|tamoil|autostr|telepass|parcheg|tren|bus|taxi|uber|auto|officina/.test(v)) return 'transport'
+  if (/supermerc|conad|coop|lidl|eurospin|esselunga|aliment|spesa|market|carrefour|pam\b|md\b|gala\b|degustabox/.test(v)) return 'groceries'
+  if (/benz|carbur|eni\b|q8\b|ip\b|tamoil|autostr|telepass|parcheg|tren|bus|taxi|uber|auto|officina|distributore|staz servizio|easypark|mercedes benz|balearia|enel x/.test(v)) return 'transport'
   if (/farmac|medic|dent|clinic|ospedal|sanit|ottic/.test(v)) return 'health'
   if (/scuol|libri|cartoler|mensa|universit|corso/.test(v)) return 'school'
-  if (/enel|eni plenitude|hera|acea|a2a|gas|luce|energia|telefono|tim\b|vodafone|wind|iliad|internet|fibra|acqua|tari|utenza|bollett/.test(v)) return 'bills'
-  if (/ikea|leroy|brico|casa|arredo|ferrament|casaling/.test(v)) return 'home'
-  if (/zara|h&m|ovs|decathlon|abbigli|scarpe|calzatur/.test(v)) return 'clothing'
-  if (/ristor|pizzeria|bar\b|cinema|teatro|netflix|spotify|booking|hotel|vacanz|amazon prime/.test(v)) return 'leisure'
+  if (/enel|eni plenitude|hera|acea|a2a|gas|luce|energia|telefono|tim\b|telecom|vodafone|wind|iliad|spusu|fastweb|internet|fibra|acqua|tari|utenza|bollett|metlife|unipol|aruba|mooney|commissioni bancarie/.test(v)) return 'bills'
+  if (/ikea|aosom|leroy|brico|casa|arredo|ferrament|casaling|rata mutuo/.test(v)) return 'home'
+  if (/zara|h&m|ovs|decathlon|adidas|infinite styles|abbigli|scarpe|calzatur/.test(v)) return 'clothing'
+  if (/ristor|pizzeria|bella napoli|deliveroo|bar\b|cinema|teatro|netflix|spotify|booking|hotel|vacanz|camping|fantacalcio|sony interactive|apple services|google payment|microsoft payments|canva|trophy hunt|amazon prime/.test(v)) return 'leisure'
   return 'other'
 }
 
