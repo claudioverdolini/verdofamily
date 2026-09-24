@@ -9,6 +9,7 @@ import type {
   Deadline,
   Dish,
   ExpenseRecord,
+  PurchaseEvidence,
   FamilyData,
   FamilyUser,
   MealPlan,
@@ -200,6 +201,9 @@ type StoreValue = {
   upsertExpense: (expense: Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) => string
   importExpenses: (expenses: Array<Omit<ExpenseRecord, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }>) => { imported: number; duplicates: number }
   deleteExpense: (id: string) => Promise<void>
+  upsertPurchaseEvidence: (evidence: Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }) => string
+  importPurchaseEvidence: (evidence: Array<Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }>) => { imported: number; duplicates: number }
+  reconcilePurchaseEvidence: () => { matched: number; review: number }
   upsertRecurringExpense: (expense: Omit<RecurringExpense, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) => string
   deleteRecurringExpense: (id: string) => Promise<void>
   materializeRecurringExpenses: (referenceDate?: string) => number
@@ -2444,6 +2448,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         flow: expense.flow === 'refund' ? 'refund' : 'expense',
         movementKind: ['purchase','fee','tax','bill','loan','cash','investment','card_settlement','transfer','paypal_repayment','refund','other'].includes(String(expense.movementKind)) ? expense.movementKind : (expense.flow === 'refund' ? 'refund' : 'purchase'),
         includeInStats: expense.includeInStats !== false,
+        evidenceRefs: Array.from(new Set((expense.evidenceRefs || existing?.evidenceRefs || []).map(value => String(value || '').trim()).filter(Boolean))).slice(0, 20),
         createdAt: existing?.createdAt || expense.createdAt || now,
         createdByUserId: existing?.createdByUserId || expense.createdByUserId || authUser.id,
         notes: expense.notes?.trim().slice(0, 2000) || undefined,
@@ -2505,6 +2510,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         flow: expense.flow === 'refund' ? 'refund' : 'expense',
         movementKind: ['purchase','fee','tax','bill','loan','cash','investment','card_settlement','transfer','paypal_repayment','refund','other'].includes(String(expense.movementKind)) ? expense.movementKind : (expense.flow === 'refund' ? 'refund' : 'purchase'),
         includeInStats: expense.includeInStats !== false,
+        evidenceRefs: Array.from(new Set((expense.evidenceRefs || []).map(value => String(value || '').trim()).filter(Boolean))).slice(0, 20),
         createdAt: expense.createdAt || now,
         createdByUserId: expense.createdByUserId || authUser.id,
         notes: expense.notes?.trim().slice(0, 2000) || undefined,
@@ -2524,6 +2530,160 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
     if (cleanRows.length) setData(prev => ({ ...prev, expenses: [...cleanRows, ...prev.expenses] }))
     return { imported: cleanRows.length, duplicates }
+  }
+
+  function cleanPurchaseEvidence(input: Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }, existing?: PurchaseEvidence): PurchaseEvidence | null {
+    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    const total = Math.max(0, Number(input.total) || 0)
+    const externalId = String(input.externalId || '').trim().slice(0, 120)
+    if (!externalId || total <= 0) return null
+    return {
+      id: input.id || existing?.id || crypto.randomUUID(),
+      source: 'amazon_email',
+      externalId,
+      merchant: String(input.merchant || 'Amazon.it').trim().slice(0, 160) || 'Amazon.it',
+      orderDate: /^\d{4}-\d{2}-\d{2}$/.test(String(input.orderDate || '')) ? String(input.orderDate) : localDateISO(),
+      total,
+      items: Array.isArray(input.items) ? input.items.map(item => ({
+        id: String(item.id || crypto.randomUUID()),
+        name: String(item.name || 'Articolo').trim().slice(0, 260) || 'Articolo',
+        qty: Math.max(0, Number(item.qty) || 0),
+        unitPrice: Number.isFinite(Number(item.unitPrice)) ? Math.max(0, Number(item.unitPrice)) : undefined,
+        totalPrice: Number.isFinite(Number(item.totalPrice)) ? Math.max(0, Number(item.totalPrice)) : undefined,
+        category: allowedCategories.includes(String(item.category)) ? item.category : undefined
+      })).filter(item => item.qty > 0) : [],
+      status: input.status === 'matched' || input.status === 'review' ? input.status : 'unmatched',
+      matchedExpenseId: input.matchedExpenseId ? String(input.matchedExpenseId) : undefined,
+      matchConfidence: Number.isFinite(Number(input.matchConfidence)) ? Math.max(0, Math.min(1, Number(input.matchConfidence))) : undefined,
+      importedAt: existing?.importedAt || input.importedAt || new Date().toISOString(),
+      notes: input.notes?.trim().slice(0, 1200) || undefined
+    }
+  }
+
+  function upsertPurchaseEvidence(evidence: Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }) {
+    if (!authUser || authUser.role === 'bimbo') return ''
+    const existing = dataRef.current.purchaseEvidence.find(item => item.id === evidence.id || (item.source === 'amazon_email' && item.externalId === evidence.externalId))
+    const clean = cleanPurchaseEvidence(evidence, existing)
+    if (!clean) return ''
+    setData(prev => ({
+      ...prev,
+      purchaseEvidence: existing
+        ? prev.purchaseEvidence.map(item => item.id === existing.id ? clean : item)
+        : [clean, ...prev.purchaseEvidence]
+    }))
+    return clean.id
+  }
+
+  function importPurchaseEvidence(rows: Array<Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }>) {
+    if (!authUser || authUser.role === 'bimbo') return { imported: 0, duplicates: rows.length }
+    const existingKeys = new Set(dataRef.current.purchaseEvidence.map(item => item.source + ':' + item.externalId))
+    const seen = new Set(existingKeys)
+    const cleanRows: PurchaseEvidence[] = []
+    let duplicates = 0
+    for (const row of rows) {
+      const key = 'amazon_email:' + String(row.externalId || '').trim()
+      if (seen.has(key)) {
+        duplicates += 1
+        continue
+      }
+      const clean = cleanPurchaseEvidence(row)
+      if (!clean) continue
+      cleanRows.push(clean)
+      seen.add(key)
+    }
+    if (cleanRows.length) setData(prev => ({ ...prev, purchaseEvidence: [...cleanRows, ...prev.purchaseEvidence] }))
+    return { imported: cleanRows.length, duplicates }
+  }
+
+  function evidenceDaysBetween(left: string, right: string) {
+    const a = new Date(left + 'T12:00:00').getTime()
+    const b = new Date(right + 'T12:00:00').getTime()
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return 999
+    return Math.abs(Math.round((a - b) / 86400000))
+  }
+
+  function dominantEvidenceCategory(items: PurchaseEvidence['items']) {
+    const totals = new Map<string, number>()
+    for (const item of items) {
+      if (!item.category) continue
+      const amount = Number(item.totalPrice ?? ((item.unitPrice || 0) * Math.max(1, Number(item.qty || 1))))
+      totals.set(item.category, (totals.get(item.category) || 0) + Math.max(0, amount))
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] as ExpenseRecord['category'] | undefined
+  }
+
+  function reconcilePurchaseEvidence() {
+    if (!authUser || authUser.role === 'bimbo') return { matched: 0, review: 0 }
+    let matched = 0
+    let review = 0
+    setData(prev => {
+      let expenses = prev.expenses.map(item => ({ ...item, evidenceRefs: Array.isArray(item.evidenceRefs) ? [...item.evidenceRefs] : [] }))
+      const evidence = prev.purchaseEvidence.map(item => {
+        if (item.status === 'matched' && item.matchedExpenseId && expenses.some(expense => expense.id === item.matchedExpenseId)) return item
+
+        const candidates = expenses
+          .filter(expense => (expense.flow || 'expense') === 'expense')
+          .map(expense => {
+            const amountDiff = Math.abs(Number(expense.total || 0) - Number(item.total || 0))
+            const days = evidenceDaysBetween(expense.date, item.orderDate)
+            const merchant = normalize(expense.merchant)
+            const amazonMerchant = /amazon/.test(merchant)
+            const exactAmount = amountDiff <= .02
+            let score = 0
+            if (exactAmount) score += 70
+            else if (amountDiff <= Math.max(.5, item.total * .02)) score += 30
+            if (days === 0) score += 20
+            else if (days <= 2) score += 14
+            else if (days <= 5) score += 8
+            else if (days <= 8) score += 3
+            if (amazonMerchant) score += 20
+            return { expense, score, exactAmount, days, amazonMerchant }
+          })
+          .filter(candidate => candidate.score >= 70)
+          .sort((a, b) => b.score - a.score)
+
+        const best = candidates[0]
+        if (!best) return { ...item, status: 'unmatched' as const, matchedExpenseId: undefined, matchConfidence: undefined }
+
+        const autoMatch = best.exactAmount && best.days <= 8 && best.amazonMerchant
+        if (!autoMatch) {
+          review += 1
+          return {
+            ...item,
+            status: 'review' as const,
+            matchedExpenseId: best.expense.id,
+            matchConfidence: Math.min(.89, best.score / 110)
+          }
+        }
+
+        const category = dominantEvidenceCategory(item.items)
+        expenses = expenses.map(expense => expense.id === best.expense.id ? {
+          ...expense,
+          merchant: /amazon/i.test(expense.merchant) ? expense.merchant : 'Amazon.it',
+          category: category || expense.category,
+          evidenceRefs: Array.from(new Set([...(expense.evidenceRefs || []), item.id])),
+          items: item.items.map(row => ({
+            id: row.id,
+            name: row.name,
+            qty: row.qty,
+            unit: 'pz',
+            unitPrice: row.unitPrice,
+            totalPrice: row.totalPrice,
+            category: row.category
+          })),
+          notes: [expense.notes, 'Dettaglio Amazon ordine ' + item.externalId].filter(Boolean).join(' · ').slice(0, 2000)
+        } : expense)
+        matched += 1
+        return {
+          ...item,
+          status: 'matched' as const,
+          matchedExpenseId: best.expense.id,
+          matchConfidence: 1
+        }
+      })
+      return { ...prev, expenses, purchaseEvidence: evidence }
+    })
+    return { matched, review }
   }
 
   function upsertRecurringExpense(expense: Omit<RecurringExpense, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) {
@@ -2862,6 +3022,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
     upsertBoardPost, toggleBoardPin, deleteBoardPost, addBoardAttachment, removeBoardAttachment,
     upsertExpense, importExpenses, deleteExpense,
+    upsertPurchaseEvidence, importPurchaseEvidence, reconcilePurchaseEvidence,
     upsertRecurringExpense, deleteRecurringExpense, materializeRecurringExpenses,
     restoreRecycleItem, recoverConflictDraft,
     exportData, importData, resetData
