@@ -40,6 +40,15 @@ function recipeSource(urlValue: string) {
   }
 }
 
+function dishVariantOptions(value?: string) {
+  return Array.from(new Set(
+    String(value || '')
+      .split(/[;,]/)
+      .map(item => item.trim())
+      .filter(Boolean)
+  ))
+}
+
 export default function MealsPage() {
   const { data, authUser, upsertDish, deleteDish, upsertMealPlan, deleteMealPlan, addShoppingItem } = useFamily()
   const today = localDateISO()
@@ -240,21 +249,41 @@ export default function MealsPage() {
     }
   }
 
+  function variantForDishSelection(dishId: number | string, current?: string) {
+    const dish = data.dishes.find(item => item.id === Number(dishId))
+    const variants = dishVariantOptions(dish?.variant)
+    if (current && variants.includes(current)) return current
+    return variants.length === 1 ? variants[0] : ''
+  }
+
   function openPlan(date = today, slot = 'Pranzo', plan?: any, dishId?: number) {
     const defaultUserId = smartUserId || authUser?.id || data.users[0]?.id || 1
-    setEditingPlan(plan ? { ...plan, userIds: [Number(plan.userId)], addMissingToShopping: false } : {
+    const selectedDishId = plan?.dishId || dishId || data.dishes[0]?.id || ''
+    setEditingPlan(plan ? {
+      ...plan,
+      variant: variantForDishSelection(selectedDishId, plan.variant),
+      userIds: [Number(plan.userId)],
+      addMissingToShopping: false
+    } : {
       id: undefined,
       date,
       slot,
       userId: defaultUserId,
       userIds: [defaultUserId],
-      dishId: dishId || data.dishes[0]?.id || '',
+      dishId: selectedDishId,
+      variant: variantForDishSelection(selectedDishId),
       addMissingToShopping: true
     })
   }
 
   function savePlan() {
     if (!editingPlan?.dishId || !editingPlan?.date) return
+    const selectedDish = data.dishes.find(item => item.id === Number(editingPlan.dishId))
+    const availableVariants = dishVariantOptions(selectedDish?.variant)
+    if (availableVariants.length > 1 && !editingPlan.variant) {
+      alert('Scegli quale variante vuoi pianificare.')
+      return
+    }
     const { addMissingToShopping: shouldAddMissing, userIds: rawUserIds, ...plan } = editingPlan
     const userIds = editingPlan.id
       ? [Number(editingPlan.userId)]
@@ -329,7 +358,7 @@ export default function MealsPage() {
                     {list.map(plan => {
                       const dish = data.dishes.find(d => d.id === plan.dishId)
                       const user = data.users.find(u => u.id === plan.userId)
-                      return <button key={plan.id} className="meal-plan-pill" onClick={() => openPlan(date, slot, plan)} style={{ '--meal-color': user?.color || '#5B5BD6' } as React.CSSProperties}><strong>{dish?.name || 'Piatto'}</strong>{dish?.sourceUrl ? <span>🔗 {dish.sourceLabel || 'Ricetta online'}</span> : dish?.variant ? <span>{dish.variant}</span> : null}</button>
+                      return <button key={plan.id} className="meal-plan-pill" onClick={() => openPlan(date, slot, plan)} style={{ '--meal-color': user?.color || '#5B5BD6' } as React.CSSProperties}><strong>{dish?.name || 'Piatto'}</strong>{dish?.sourceUrl ? <span>🔗 {dish.sourceLabel || 'Ricetta online'}</span> : (plan.variant || dish?.variant) ? <span>{plan.variant || dish?.variant}</span> : null}</button>
                     })}
                     <button className="meal-add" onClick={() => openPlan(date, slot)}>+</button>
                   </div>
@@ -383,7 +412,7 @@ export default function MealsPage() {
                           <span className="meal-mobile-plan__dot" />
                           <span className="meal-mobile-plan__copy">
                             <strong>{dish?.name || 'Piatto'}</strong>
-                            <small>{dish?.variant || dish?.sourceLabel || user?.name || 'Pasto pianificato'}</small>
+                            <small>{plan.variant || dish?.variant || dish?.sourceLabel || user?.name || 'Pasto pianificato'}</small>
                           </span>
                           {user ? <Avatar user={user} size="xs" /> : <ChevronRight size={17} />}
                         </button>
@@ -519,7 +548,7 @@ export default function MealsPage() {
             <Field label="Note"><input value={editingDish.notes || ''} onChange={e => setEditingDish({ ...editingDish, notes: e.target.value })} placeholder="Es. Piace a tutti, raddoppiare le dosi…" /></Field>
           </> : null}
           <Field label="Tipologia"><select value={editingDish.type} onChange={e => setEditingDish({ ...editingDish, type: e.target.value })}>{MEAL_TYPES.map(type => <option key={type}>{type}</option>)}</select></Field>
-          <Field label="Variante"><input value={editingDish.variant} onChange={e => setEditingDish({ ...editingDish, variant: e.target.value })} placeholder="Es. Pomodoro, Carbonara…" /></Field>
+          <Field label="Variante/i" hint="Se il piatto ha più varianti, separale con una virgola: es. Pomodoro, Carbonara, Pesto."><input value={editingDish.variant} onChange={e => setEditingDish({ ...editingDish, variant: e.target.value })} placeholder="Es. Pomodoro, Carbonara, Pesto" /></Field>
           <Field label="Tempo di preparazione"><input type="number" min="0" step="5" value={editingDish.prepMinutes || ''} onChange={e => setEditingDish({ ...editingDish, prepMinutes: Number(e.target.value) })} placeholder="30" /></Field>
           <Field label="Preferito da" className="field--wide" hint="Facoltativo: aiuta VerdoFamily a personalizzare i suggerimenti.">
             <div className="meal-preference-picker">{data.users.map(user => {
@@ -532,10 +561,25 @@ export default function MealsPage() {
       </Modal>
 
       <Modal open={!!editingPlan} onClose={() => setEditingPlan(null)} title={editingPlan?.id ? 'Modifica pianificazione' : 'Pianifica pasto'} footer={<div className="modal-actions"><div>{editingPlan?.id ? <Button variant="danger" icon={<Trash2 size={17} />} onClick={() => { deleteMealPlan(editingPlan.id); setEditingPlan(null) }}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditingPlan(null)}>Annulla</Button><Button onClick={savePlan}>Salva</Button></div></div>}>
-        {editingPlan ? <div className="form-grid form-grid--2"><Field label="Data"><input type="date" value={editingPlan.date} onChange={e => setEditingPlan({ ...editingPlan, date: e.target.value })} /></Field><Field label="Momento"><select value={editingPlan.slot} onChange={e => setEditingPlan({ ...editingPlan, slot: e.target.value })}>{MEAL_SLOTS.map(slot => <option key={slot}>{slot}</option>)}</select></Field>{editingPlan.id ? <Field label="Per chi"><select value={editingPlan.userId} onChange={e => setEditingPlan({ ...editingPlan, userId: Number(e.target.value), userIds: [Number(e.target.value)] })}>{data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field> : <Field label="Per chi" className="field--wide" hint="Puoi pianificare lo stesso pasto per più persone con un’unica operazione."><MultiAssigneePicker users={data.users} selectedIds={editingPlan.userIds || [editingPlan.userId].filter(Boolean)} onChange={userIds => setEditingPlan({ ...editingPlan, userIds, userId: userIds[0] || 0 })} /></Field>}<Field label="Piatto / ricetta"><select value={editingPlan.dishId} onChange={e => setEditingPlan({ ...editingPlan, dishId: Number(e.target.value) })}>
+        {editingPlan ? <div className="form-grid form-grid--2"><Field label="Data"><input type="date" value={editingPlan.date} onChange={e => setEditingPlan({ ...editingPlan, date: e.target.value })} /></Field><Field label="Momento"><select value={editingPlan.slot} onChange={e => setEditingPlan({ ...editingPlan, slot: e.target.value })}>{MEAL_SLOTS.map(slot => <option key={slot}>{slot}</option>)}</select></Field>{editingPlan.id ? <Field label="Per chi"><select value={editingPlan.userId} onChange={e => setEditingPlan({ ...editingPlan, userId: Number(e.target.value), userIds: [Number(e.target.value)] })}>{data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field> : <Field label="Per chi" className="field--wide" hint="Puoi pianificare lo stesso pasto per più persone con un’unica operazione."><MultiAssigneePicker users={data.users} selectedIds={editingPlan.userIds || [editingPlan.userId].filter(Boolean)} onChange={userIds => setEditingPlan({ ...editingPlan, userIds, userId: userIds[0] || 0 })} /></Field>}<Field label="Piatto / ricetta"><select value={editingPlan.dishId} onChange={e => {
+            const dishId = Number(e.target.value)
+            setEditingPlan({ ...editingPlan, dishId, variant: variantForDishSelection(dishId) })
+          }}>
             {linkedRecipes.length ? <optgroup label="Ricette online">{linkedRecipes.map(d => <option key={d.id} value={d.id}>{d.sourceLabel || 'Online'} · {d.name}{d.variant ? ` (${d.variant})` : ''}</option>)}</optgroup> : null}
             <optgroup label="Piatti">{data.dishes.filter(d => !d.sourceUrl).map(d => <option key={d.id} value={d.id}>{d.type} · {d.name}{d.variant ? ` (${d.variant})` : ''}</option>)}</optgroup>
           </select></Field>
+          {(() => {
+            const variants = dishVariantOptions(data.dishes.find(d => d.id === Number(editingPlan.dishId))?.variant)
+            return variants.length > 1 ? <Field label="Variante" hint="Scegli quale versione del piatto vuoi inserire nel planner.">
+              <select
+                value={editingPlan.variant || ''}
+                onChange={e => setEditingPlan({ ...editingPlan, variant: e.target.value })}
+              >
+                <option value="">Scegli variante…</option>
+                {variants.map(variant => <option key={variant} value={variant}>{variant}</option>)}
+              </select>
+            </Field> : null
+          })()}
           <Field label="Lista spesa" className="field--wide">
             <label className="settings-switch">
               <span><strong>Aggiungi ingredienti mancanti alla spesa</strong><small>VerdoFamily confronta la ricetta con le quantità presenti in dispensa.</small></span>
