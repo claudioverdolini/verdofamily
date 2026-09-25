@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Mic, MicOff, Send, Volume2, X } from 'lucide-react'
 import { useFamily } from '../store'
 import { localDateISO, normalize } from '../utils'
-import { inferExpenseCategory } from '../bankImport'
+import { inferExpenseCategory, inferExpenseSubcategory } from '../bankImport'
 
 function addDays(days: number) {
   const date = new Date()
@@ -209,11 +209,13 @@ export default function VoiceAssistant() {
       const merchant = (rawMerchant.includes(' per ') ? rawMerchant.split(/\s+per\s+/i)[0] : rawMerchant).trim() || 'Spesa'
       const date = text.includes('ieri') ? addDays(-1) : addDays(0)
       const category = inferExpenseCategory(raw)
+      const subcategory = inferExpenseSubcategory(raw, category)
       upsertExpense({
         date,
         merchant,
         total,
         category,
+        subcategory,
         source: 'voice',
         notes: 'Registrato con comando vocale',
         items: []
