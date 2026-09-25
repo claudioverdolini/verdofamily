@@ -1,4 +1,4 @@
-import type { BoardPost, CalendarEvent, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
+import type { BoardPost, CalendarEvent, CurrencyCode, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
@@ -504,8 +504,59 @@ export function dayLabel(dateStr: string, long = false) {
     : { weekday: 'short', day: '2-digit' })
 }
 
-export function money(value: number) {
-  return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(value || 0)
+export const SUPPORTED_CURRENCIES: CurrencyCode[] = ['EUR', 'USD', 'GBP', 'CHF']
+
+export function normalizeCurrency(value: unknown): CurrencyCode {
+  const code = String(value || 'EUR').trim().toUpperCase()
+  return SUPPORTED_CURRENCIES.includes(code as CurrencyCode) ? code as CurrencyCode : 'EUR'
+}
+
+export function currencySymbol(currency: CurrencyCode = 'EUR') {
+  const safeCurrency = normalizeCurrency(currency)
+  const parts = new Intl.NumberFormat('it-IT', {
+    style: 'currency',
+    currency: safeCurrency,
+    currencyDisplay: 'narrowSymbol',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).formatToParts(0)
+  return parts.find(part => part.type === 'currency')?.value || safeCurrency
+}
+
+export function money(value: number, currency: CurrencyCode = 'EUR') {
+  return new Intl.NumberFormat('it-IT', {
+    style: 'currency',
+    currency: normalizeCurrency(currency),
+    currencyDisplay: 'narrowSymbol'
+  }).format(value || 0)
+}
+
+export function sanitizeDecimalInput(value: unknown, maxDecimals = 2) {
+  let raw = String(value ?? '').replace(/\s/g, '').replace(/\./g, ',').replace(/[^\d,]/g, '')
+  const commaIndex = raw.indexOf(',')
+  if (commaIndex >= 0) {
+    raw = raw.slice(0, commaIndex + 1) + raw.slice(commaIndex + 1).replace(/,/g, '')
+    const [whole = '', decimals = ''] = raw.split(',')
+    const cleanWhole = whole.replace(/^0+(?=\d)/, '') || '0'
+    return `${cleanWhole},${decimals.slice(0, Math.max(0, maxDecimals))}`
+  }
+  return raw.replace(/^0+(?=\d)/, '')
+}
+
+export function parseDecimalInput(value: unknown) {
+  const raw = String(value ?? '').trim().replace(/\s/g, '')
+  if (!raw) return 0
+  const normalized = raw.includes(',')
+    ? raw.replace(/\./g, '').replace(',', '.')
+    : raw
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.round(parsed * 100) / 100
+}
+
+export function formatDecimalInput(value: unknown) {
+  const parsed = parseDecimalInput(value)
+  return String(parsed).replace('.', ',')
 }
 
 export function nextId<T extends { id: number }>(list: T[]) {
@@ -755,13 +806,14 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 26,
+    version: 27,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
         ? 'normalized-v1'
         : undefined,
     assistantName: String(source.assistantName || fallback.assistantName || 'Verdo').trim().slice(0, 24) || 'Verdo',
+    currency: normalizeCurrency(source.currency || fallback.currency),
     users: Array.isArray(source.users) && source.users.length
       ? source.users.map((u: any): FamilyUser => ({
           id: Number(u.id),
