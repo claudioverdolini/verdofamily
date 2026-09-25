@@ -1,4 +1,5 @@
 import type { BoardPost, CalendarEvent, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
+import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
@@ -754,7 +755,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 25,
+    version: 26,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -993,7 +994,8 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       date: /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || '')) ? String(item.date) : localDateISO(),
       merchant: String(item.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
       total: Math.max(0, Number(item.total) || 0),
-      category: ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
+      category: isExpenseCategory(item.category) ? item.category : 'other',
+      subcategory: isExpenseSubcategory(item.subcategory) && subcategoryBelongsToCategory(item.subcategory, isExpenseCategory(item.category) ? item.category : 'other') ? item.subcategory : undefined,
       source: ['receipt','manual','voice','recurring','bank','paypal'].includes(String(item.source)) ? item.source : 'manual',
       sourceRef: item.sourceRef ? String(item.sourceRef).slice(0, 200) : undefined,
       flow: item.flow === 'refund' ? 'refund' : 'expense',
@@ -1020,7 +1022,8 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         qty: Math.max(0, Number(row?.qty) || 0),
         unitPrice: Number.isFinite(Number(row?.unitPrice)) ? Math.max(0, Number(row.unitPrice)) : undefined,
         totalPrice: Number.isFinite(Number(row?.totalPrice)) ? Math.max(0, Number(row.totalPrice)) : undefined,
-        category: ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other'].includes(String(row?.category)) ? row.category : undefined
+        category: isExpenseCategory(row?.category) ? row.category : undefined,
+        subcategory: isExpenseCategory(row?.category) && isExpenseSubcategory(row?.subcategory) && subcategoryBelongsToCategory(row.subcategory, row.category) ? row.subcategory : undefined
       })).filter((row: any) => row.qty > 0) : []
       const total = Math.max(0, Number(item?.total) || 0)
       const externalId = String(item?.externalId || '').trim().slice(0, 120)
@@ -1053,7 +1056,8 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       id: String(item.id || crypto.randomUUID()),
       merchant: String(item.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',
       amount: Math.max(0, Number(item.amount) || 0),
-      category: ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
+      category: isExpenseCategory(item.category) ? item.category : 'other',
+      subcategory: isExpenseSubcategory(item.subcategory) && subcategoryBelongsToCategory(item.subcategory, isExpenseCategory(item.category) ? item.category : 'other') ? item.subcategory : undefined,
       frequency: ['weekly','monthly','yearly'].includes(String(item.frequency)) ? item.frequency : 'monthly',
       startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.startDate || '')) ? String(item.startDate) : localDateISO(),
       endDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.endDate || '')) ? String(item.endDate) : undefined,
