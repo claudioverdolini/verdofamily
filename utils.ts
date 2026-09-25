@@ -754,7 +754,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
   if (!raw || typeof raw !== 'object') return fallback
   const source = raw.data && raw.data.users ? raw.data : raw
   return {
-    version: 24,
+    version: 25,
     storageModel: source.storageModel === 'normalized-v2'
       ? 'normalized-v2'
       : source.storageModel === 'normalized-v1'
@@ -1039,6 +1039,16 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         notes: item?.notes ? String(item.notes).slice(0, 1200) : undefined
       }
     }).filter((item: any) => item.externalId && item.total > 0) : [],
+    amazonMailSync: {
+      enabled: source.amazonMailSync?.enabled !== false,
+      status: ['idle','pending','running','success','error'].includes(String(source.amazonMailSync?.status)) ? source.amazonMailSync.status : 'idle',
+      lastRunAt: source.amazonMailSync?.lastRunAt ? String(source.amazonMailSync.lastRunAt) : undefined,
+      lastRequestedAt: source.amazonMailSync?.lastRequestedAt ? String(source.amazonMailSync.lastRequestedAt) : undefined,
+      requestedByUserId: Number(source.amazonMailSync?.requestedByUserId || 0) || undefined,
+      lastImported: Number.isFinite(Number(source.amazonMailSync?.lastImported)) ? Math.max(0, Number(source.amazonMailSync.lastImported)) : undefined,
+      lastScanned: Number.isFinite(Number(source.amazonMailSync?.lastScanned)) ? Math.max(0, Number(source.amazonMailSync.lastScanned)) : undefined,
+      lastError: source.amazonMailSync?.lastError ? String(source.amazonMailSync.lastError).slice(0, 500) : undefined
+    },
     recurringExpenses: Array.isArray(source.recurringExpenses) ? source.recurringExpenses.map((item: any) => ({
       id: String(item.id || crypto.randomUUID()),
       merchant: String(item.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',
