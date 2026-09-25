@@ -5327,3 +5327,59 @@ html{
     align-items:center;
   }
 }
+
+
+/* Amazon mailbox scheduling and on-demand sync */
+.amazon-sync-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:7px;
+  flex-wrap:wrap;
+}
+.amazon-sync-status{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  padding:9px 10px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:var(--surface2);
+  color:var(--muted);
+  font-size:9.5px;
+  line-height:1.45;
+}
+.amazon-sync-status svg{
+  flex:0 0 auto;
+  margin-top:1px;
+}
+.amazon-sync-status strong{color:var(--text)}
+.amazon-sync-status.is-success,
+.amazon-sync-status.is-idle{
+  border-color:color-mix(in srgb,var(--success) 20%,var(--border));
+  background:color-mix(in srgb,var(--success) 5%,var(--surface));
+}
+.amazon-sync-status.is-success svg,
+.amazon-sync-status.is-idle svg{color:var(--success)}
+.amazon-sync-status.is-pending,
+.amazon-sync-status.is-running{
+  border-color:color-mix(in srgb,var(--accent) 22%,var(--border));
+  background:color-mix(in srgb,var(--accent) 6%,var(--surface));
+}
+.amazon-sync-status.is-pending svg,
+.amazon-sync-status.is-running svg{color:var(--accent)}
+.amazon-sync-status.is-error{
+  border-color:color-mix(in srgb,#ef4444 22%,var(--border));
+  background:color-mix(in srgb,#ef4444 5%,var(--surface));
+}
+.amazon-sync-status.is-error svg{color:#ef4444}
+@media(max-width:620px){
+  .amazon-sync-actions{
+    width:100%;
+    justify-content:stretch;
+  }
+  .amazon-sync-actions .button,
+  .amazon-sync-actions button{
+    flex:1 1 150px;
+  }
+}
