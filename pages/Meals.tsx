@@ -441,6 +441,13 @@ export default function MealsPage() {
 
               <div className="smart-meal-actions">
                 <Button onClick={() => openPlan(smartDate, smartSlot, undefined, dish.id)}>Pianifica</Button>
+                <Button
+                  variant="ghost"
+                  icon={<Pencil size={15} />}
+                  onClick={() => dish.sourceUrl ? openRecipe(dish) : openDish(dish)}
+                >
+                  Modifica
+                </Button>
                 {suggestion.missing.length ? <Button variant="soft" icon={<ShoppingCart size={15} />} onClick={() => addMissingToShopping(suggestion)}>Aggiungi mancanti</Button> : null}
               </div>
             </Card>
