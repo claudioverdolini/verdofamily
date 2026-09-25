@@ -29,6 +29,7 @@ import type {
 } from './types'
 import { initialData } from './data'
 import { localDateISO, materializeRecurringChores, mergePrefs, migrateData, nextId, normalize } from './utils'
+import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
 import type { PushTopics } from './pushNotifications'
 
@@ -2435,7 +2436,6 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
     const id = expense.id || crypto.randomUUID()
     const now = new Date().toISOString()
-    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     setData(prev => {
       const existing = prev.expenses.find(item => item.id === id)
       const clean: ExpenseRecord = {
@@ -2443,7 +2443,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         date: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.date || '')) ? expense.date : localDateISO(),
         merchant: String(expense.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
         total: Math.max(0, Number(expense.total) || 0),
-        category: allowedCategories.includes(String(expense.category)) ? expense.category : 'other',
+        category: isExpenseCategory(expense.category) ? expense.category : 'other',
+        subcategory: isExpenseCategory(expense.category) && isExpenseSubcategory(expense.subcategory) && subcategoryBelongsToCategory(expense.subcategory, expense.category) ? expense.subcategory : undefined,
         source: ['receipt','manual','voice','recurring','bank','paypal'].includes(String(expense.source)) ? expense.source : 'manual',
         sourceRef: expense.sourceRef ? String(expense.sourceRef).slice(0, 200) : undefined,
         flow: expense.flow === 'refund' ? 'refund' : 'expense',
@@ -2487,7 +2488,6 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!authUser || authUser.role === 'bimbo') return { imported: 0, duplicates: expenses.length }
     const existingRefs = new Set(dataRef.current.expenses.map(item => item.sourceRef).filter(Boolean))
     const seenRefs = new Set(existingRefs)
-    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     const now = new Date().toISOString()
     let duplicates = 0
     const cleanRows: ExpenseRecord[] = []
@@ -2505,7 +2505,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         date: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.date || '')) ? expense.date : localDateISO(),
         merchant: String(expense.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
         total,
-        category: allowedCategories.includes(String(expense.category)) ? expense.category : 'other',
+        category: isExpenseCategory(expense.category) ? expense.category : 'other',
+        subcategory: isExpenseCategory(expense.category) && isExpenseSubcategory(expense.subcategory) && subcategoryBelongsToCategory(expense.subcategory, expense.category) ? expense.subcategory : undefined,
         source: ['receipt','manual','voice','recurring','bank','paypal'].includes(String(expense.source)) ? expense.source : 'manual',
         sourceRef,
         flow: expense.flow === 'refund' ? 'refund' : 'expense',
@@ -2534,7 +2535,6 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function cleanPurchaseEvidence(input: Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }, existing?: PurchaseEvidence): PurchaseEvidence | null {
-    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     const total = Math.max(0, Number(input.total) || 0)
     const externalId = String(input.externalId || '').trim().slice(0, 120)
     if (!externalId || total <= 0) return null
@@ -2551,7 +2551,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         qty: Math.max(0, Number(item.qty) || 0),
         unitPrice: Number.isFinite(Number(item.unitPrice)) ? Math.max(0, Number(item.unitPrice)) : undefined,
         totalPrice: Number.isFinite(Number(item.totalPrice)) ? Math.max(0, Number(item.totalPrice)) : undefined,
-        category: allowedCategories.includes(String(item.category)) ? item.category : undefined
+        category: isExpenseCategory(item.category) ? item.category : undefined,
+        subcategory: isExpenseCategory(item.category) && isExpenseSubcategory(item.subcategory) && subcategoryBelongsToCategory(item.subcategory, item.category) ? item.subcategory : undefined
       })).filter(item => item.qty > 0) : [],
       status: input.status === 'matched' || input.status === 'review' ? input.status : 'unmatched',
       matchedExpenseId: input.matchedExpenseId ? String(input.matchedExpenseId) : undefined,
@@ -2613,6 +2614,16 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] as ExpenseRecord['category'] | undefined
   }
 
+  function dominantEvidenceSubcategory(items: PurchaseEvidence['items']) {
+    const totals = new Map<string, number>()
+    for (const item of items) {
+      if (!item.subcategory) continue
+      const amount = Number(item.totalPrice ?? ((item.unitPrice || 0) * Math.max(1, Number(item.qty || 1))))
+      totals.set(item.subcategory, (totals.get(item.subcategory) || 0) + Math.max(0, amount))
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] as ExpenseRecord['subcategory'] | undefined
+  }
+
   function reconcilePurchaseEvidence() {
     if (!authUser || authUser.role === 'bimbo') return { matched: 0, review: 0 }
     let matched = 0
@@ -2658,10 +2669,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         }
 
         const category = dominantEvidenceCategory(item.items)
+        const subcategory = dominantEvidenceSubcategory(item.items)
         expenses = expenses.map(expense => expense.id === best.expense.id ? {
           ...expense,
           merchant: /amazon/i.test(expense.merchant) ? expense.merchant : 'Amazon.it',
           category: category || expense.category,
+          subcategory: subcategory || (category && category !== expense.category ? undefined : expense.subcategory),
           evidenceRefs: Array.from(new Set([...(expense.evidenceRefs || []), item.id])),
           items: item.items.map(row => ({
             id: row.id,
@@ -2670,7 +2683,8 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
             unit: 'pz',
             unitPrice: row.unitPrice,
             totalPrice: row.totalPrice,
-            category: row.category
+            category: row.category,
+            subcategory: row.subcategory
           })),
           notes: [expense.notes, 'Dettaglio Amazon ordine ' + item.externalId].filter(Boolean).join(' · ').slice(0, 2000)
         } : expense)
@@ -2715,12 +2729,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!authUser || authUser.role === 'bimbo') return ''
     const id = expense.id || crypto.randomUUID()
     const now = new Date().toISOString()
-    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     const clean: RecurringExpense = {
       id,
       merchant: String(expense.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',
       amount: Math.max(0, Number(expense.amount) || 0),
-      category: allowedCategories.includes(String(expense.category)) ? expense.category : 'other',
+      category: isExpenseCategory(expense.category) ? expense.category : 'other',
+      subcategory: isExpenseCategory(expense.category) && isExpenseSubcategory(expense.subcategory) && subcategoryBelongsToCategory(expense.subcategory, expense.category) ? expense.subcategory : undefined,
       frequency: ['weekly','monthly','yearly'].includes(String(expense.frequency)) ? expense.frequency : 'monthly',
       startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.startDate || '')) ? expense.startDate : localDateISO(),
       endDate: /^\d{4}-\d{2}-\d{2}$/.test(String(expense.endDate || '')) ? expense.endDate : undefined,
@@ -2767,6 +2781,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
           merchant: rule.merchant,
           total: rule.amount,
           category: rule.category,
+          subcategory: rule.subcategory,
           source: 'recurring',
           sourceRef,
           flow: 'expense',
