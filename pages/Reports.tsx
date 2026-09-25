@@ -731,12 +731,12 @@ export default function ReportsPage() {
 
     {section === 'bank' ? <div className="report-bank-layout">
       <Card>
-        <CardHeader title="Importa banca / PayPal" subtitle="Supporta il CSV PayPal, CSV/Excel bancari e il PDF “Movimenti Globali” di Banca Centro Toscana-Umbria." />
+        <CardHeader title="Importa banca / PayPal" subtitle="Supporta CSV PayPal, CSV/Excel bancari, PDF “Movimenti Globali” di Banca Centro Toscana-Umbria ed estratti conto CartaBCC / Numia." />
         <label className="bank-file-drop">
           <input type="file" accept=".csv,.txt,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={e => { const file = e.target.files?.[0]; if (file) void selectBankFile(file); e.currentTarget.value = '' }} />
           <FileSpreadsheet size={28} />
           <strong>{bankBusy ? 'Sto leggendo il file…' : 'Scegli CSV, Excel o PDF'}</strong>
-          <span>I formati PayPal e Banca Centro riconosciuti vengono interpretati automaticamente; gli altri file restano configurabili tramite colonne.</span>
+          <span>I formati PayPal, Banca Centro e CartaBCC riconosciuti vengono interpretati automaticamente; gli altri file restano configurabili tramite colonne.</span>
         </label>
         {bankMessage ? <div className="bank-import-message">{bankMessage}</div> : null}
 
