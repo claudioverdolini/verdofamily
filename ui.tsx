@@ -1,4 +1,5 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 export function Button({ children, variant = 'primary', size = 'md', icon, className = '', ...props }: any) {
@@ -77,8 +78,8 @@ export function Modal({ open, title, subtitle, children, onClose, footer, size =
     }
   }, [open])
 
-  if (!open) return null
-  return (
+  if (!open || typeof document === 'undefined') return null
+  return createPortal(
     <div className="modal-layer" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) onClose?.() }}>
       <div className={`modal modal--${size} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal__header">
@@ -91,7 +92,8 @@ export function Modal({ open, title, subtitle, children, onClose, footer, size =
         <div className="modal__body">{children}</div>
         {footer ? <div className="modal__footer">{footer}</div> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
