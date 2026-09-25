@@ -17,6 +17,7 @@ type ReportSchedule = {
   scope: 'personal' | 'family'
   sections: Record<SectionKey, boolean>
   include_health: boolean
+  expiry_alert_days: number
 }
 
 type TelegramStatus = {
@@ -68,7 +69,8 @@ function blankSchedule(): ReportSchedule {
       chores: false,
       school: true
     },
-    include_health: false
+    include_health: false,
+    expiry_alert_days: 7
   }
 }
 
@@ -82,7 +84,8 @@ function normalizeSchedule(value: any): ReportSchedule {
     target_day_offset: Number(value?.target_day_offset || 0) === 1 ? 1 : 0,
     scope: value?.scope === 'family' ? 'family' : 'personal',
     sections: { ...fallback.sections, ...(value?.sections || {}) },
-    include_health: value?.include_health === true
+    include_health: value?.include_health === true,
+    expiry_alert_days: Math.max(0, Math.min(365, Number(value?.expiry_alert_days ?? fallback.expiry_alert_days) || 0))
   }
 }
 
@@ -285,7 +288,7 @@ export default function TelegramReportsCard() {
       {(status.schedules || []).length ? <>
         <CardHeader title="Report attivi" subtitle="Puoi creare più invii nella stessa giornata." />
         <div className="sortable-list telegram-schedule-list">{(status.schedules || []).map(schedule => <div key={schedule.id}>
-          <span><strong>{schedule.name}</strong> · {schedule.time_local} · {schedule.target_day_offset === 1 ? 'giorno successivo' : 'giorno stesso'} · {schedule.scope === 'family' ? 'famiglia' : 'personale'}{schedule.enabled ? '' : ' · disattivato'}</span>
+          <span><strong>{schedule.name}</strong> · {schedule.time_local} · {schedule.target_day_offset === 1 ? 'giorno successivo' : 'giorno stesso'} · {schedule.scope === 'family' ? 'famiglia' : 'personale'}{schedule.sections.lowStock ? ` · scadenze ${schedule.expiry_alert_days}g` : ''}{schedule.enabled ? '' : ' · disattivato'}</span>
           <div>
             <button onClick={() => editSchedule(schedule)} disabled={busy}>Modifica</button>
             <button onClick={() => sendTest(schedule.id)} disabled={busy}>Prova</button>
@@ -312,6 +315,21 @@ export default function TelegramReportsCard() {
           <section className="telegram-report-panel telegram-report-panel--sections">
             <div className="telegram-report-panel__head"><div><strong>Sezioni del report</strong><span>Scegli cosa vuoi ricevere nel messaggio</span></div></div>
             <div className="telegram-section-grid">{SECTION_OPTIONS.map(section => <label key={section.key} className={`telegram-section-option ${draft.sections[section.key] ? 'is-selected' : ''}`}><div><strong>{section.label}</strong><span>{section.hint}</span></div><input type="checkbox" checked={draft.sections[section.key]} onChange={() => toggleSection(section.key)} /></label>)}</div>
+            {draft.sections.lowStock ? <div style={{ marginTop: 12 }}>
+              <Field
+                label="Preavviso scadenze prodotti"
+                hint="Scegli quanti giorni prima mostrare i prodotti in scadenza nel report. 0 = solo quelli che scadono oggi."
+              >
+                <input
+                  type="number"
+                  min="0"
+                  max="365"
+                  step="1"
+                  value={draft.expiry_alert_days}
+                  onChange={e => setDraft({ ...draft, expiry_alert_days: Math.max(0, Math.min(365, Number(e.target.value) || 0)) })}
+                />
+              </Field>
+            </div> : null}
           </section>
         </div>
 
