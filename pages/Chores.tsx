@@ -3,7 +3,7 @@ import { CheckCircle2, Clock3, Pencil, Plus, Repeat2, RotateCcw, Trash2, WalletC
 import { useFamily } from '../store'
 import MultiAssigneePicker from '../components/MultiAssigneePicker'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
-import { localDateISO, money } from '../utils'
+import { currencySymbol, formatDecimalInput, localDateISO, money, parseDecimalInput, sanitizeDecimalInput } from '../utils'
 
 const WEEKDAYS = [
   { id: 1, label: 'Lun' },
@@ -50,6 +50,8 @@ export default function ChoresPage() {
   const [recurringEditing, setRecurringEditing] = useState<any>(null)
   const [payment, setPayment] = useState<any>(null)
   const showBalances = authUser?.prefs?.showBalances !== false
+  const currency = data.currency || 'EUR'
+  const currencyUnit = currencySymbol(currency)
 
   const visibleUsers = isChild && authUser
     ? data.users.filter(user => user.id === authUser.id)
@@ -60,7 +62,7 @@ export default function ChoresPage() {
   function openNew() {
     if (isChild) return
     const defaultUserId = data.users.find(user => user.role === 'bimbo')?.id || data.users[0]?.id || 1
-    setEditing({ title: '', deadline: localDateISO(), userId: defaultUserId, userIds: [defaultUserId], amount: 1 })
+    setEditing({ title: '', deadline: localDateISO(), userId: defaultUserId, userIds: [defaultUserId], amount: formatDecimalInput(1) })
   }
 
   function openRecurring(item?: any) {
@@ -69,6 +71,7 @@ export default function ChoresPage() {
     setRecurringEditing(item
       ? {
           ...item,
+          amount: formatDecimalInput(item.amount),
           userIds: Array.from(new Set(
             (Array.isArray(item.userIds) && item.userIds.length ? item.userIds : [item.userId])
               .map(Number)
@@ -80,7 +83,7 @@ export default function ChoresPage() {
           title: '',
           userId: defaultUserId,
           userIds: [defaultUserId],
-          amount: 1,
+          amount: formatDecimalInput(1),
           weekdays: [1, 2, 3, 4, 5, 6, 7],
           active: true,
           startDate: localDateISO(),
@@ -101,7 +104,7 @@ export default function ChoresPage() {
         title: editing.title.trim(),
         deadline: editing.deadline,
         userId,
-        amount: Math.max(0, Number(editing.amount) || 0)
+        amount: Math.max(0, parseDecimalInput(editing.amount))
       })
     }
     setEditing(null)
@@ -119,7 +122,7 @@ export default function ChoresPage() {
       title: recurringEditing.title.trim(),
       userId: userIds[0],
       userIds,
-      amount: Math.max(0, Number(recurringEditing.amount) || 0),
+      amount: Math.max(0, parseDecimalInput(recurringEditing.amount)),
       weekdays: recurringEditing.weekdays.map(Number),
       active: recurringEditing.active !== false,
       startDate: recurringEditing.startDate || localDateISO(),
@@ -152,7 +155,7 @@ export default function ChoresPage() {
 
   function submitPayment() {
     if (isChild) return
-    const amount = Number(payment?.amount) || 0
+    const amount = parseDecimalInput(payment?.amount)
     if (!payment || amount <= 0) return
     if (payUser(payment.userId, amount, payment.note || 'Pagamento paghetta')) setPayment(null)
   }
@@ -255,7 +258,7 @@ export default function ChoresPage() {
                 >
                   <strong>{chore.title}</strong>
                   <span>
-                    {chore.deadline} · {money(chore.amount)}
+                    {chore.deadline} · {money(chore.amount, currency)}
                     {chore.recurringChoreId ? ' · Ricorrente' : ''}
                   </span>
                   <small className={`chore-status chore-status--${status}`}>
@@ -303,7 +306,7 @@ export default function ChoresPage() {
             </label>
             <button className="recurring-row__copy" onClick={() => openRecurring(item)}>
               <strong>{item.title}</strong>
-              <span>{recurringLabel(item.weekdays)} · {money(item.amount)} per persona</span>
+              <span>{recurringLabel(item.weekdays)} · {money(item.amount, currency)} per persona</span>
               <span className="recurring-row__people">
                 <span className="recurring-row__avatars">{assignees.slice(0, 4).map((user: any) => <Avatar key={user.id} user={user} size="xs" />)}</span>
                 <small>{assignees.map((user: any) => user.name).join(', ') || 'Nessun assegnatario'}</small>
@@ -331,13 +334,13 @@ export default function ChoresPage() {
           <Avatar user={user} size="lg" />
           <div>
             <span>{user.name}</span>
-            <strong>{showBalances ? money(user.balance) : '••••'}</strong>
+            <strong>{showBalances ? money(user.balance, currency) : '••••'}</strong>
             {isChild ? <small>Disponibile dopo l’approvazione dei compiti</small> : null}
           </div>
         </div>
         {!isChild ? <Button
           variant="soft"
-          onClick={() => setPayment({ userId: user.id, amount: user.balance, note: 'Pagamento paghetta' })}
+          onClick={() => setPayment({ userId: user.id, amount: formatDecimalInput(user.balance), note: 'Pagamento paghetta' })}
           disabled={user.balance <= 0}
         >
           Registra pagamento
@@ -360,7 +363,7 @@ export default function ChoresPage() {
                 <Avatar user={user} size="xs" />
                 <div><strong>{tx.note}</strong><span>{tx.date} · {user?.name}</span></div>
                 <Badge tone={tx.type === 'credit' ? 'success' : tx.type === 'payment' ? 'warning' : 'neutral'}>
-                  {tx.type === 'credit' ? '+' : '-'}{money(tx.amount)}
+                  {tx.type === 'credit' ? '+' : '-'}{money(tx.amount, currency)}
                 </Badge>
                 {!isChild && tx.type === 'payment' && !tx.reversed
                   ? <IconButton label="Annulla pagamento" onClick={() => undoTransaction(tx.id)}><RotateCcw size={17} /></IconButton>
@@ -394,8 +397,15 @@ export default function ChoresPage() {
             onChange={userIds => setEditing({ ...editing, userIds, userId: userIds[0] || 0 })}
           />
         </Field>
-        <Field label="Compenso">
-          <input type="number" min="0" step="0.1" value={editing.amount} onChange={e => setEditing({ ...editing, amount: Number(e.target.value) })} />
+        <Field label={`Compenso (${currencyUnit})`} hint="Puoi usare la virgola, ad esempio 1,50.">
+          <input
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            value={editing.amount}
+            onChange={e => setEditing({ ...editing, amount: sanitizeDecimalInput(e.target.value) })}
+            placeholder="0,00"
+          />
         </Field>
       </div> : null}
     </Modal> : null}
@@ -447,13 +457,14 @@ export default function ChoresPage() {
             }}>Tutta la famiglia</button>
           </div>
         </Field>
-        <Field label="Paghetta dopo approvazione">
+        <Field label={`Paghetta dopo approvazione (${currencyUnit})`} hint="Puoi usare la virgola, ad esempio 0,50.">
           <input
-            type="number"
-            min="0"
-            step="0.1"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
             value={recurringEditing.amount}
-            onChange={e => setRecurringEditing({ ...recurringEditing, amount: Number(e.target.value) })}
+            onChange={e => setRecurringEditing({ ...recurringEditing, amount: sanitizeDecimalInput(e.target.value) })}
+            placeholder="0,00"
           />
         </Field>
         <Field label="Dal">
@@ -501,7 +512,16 @@ export default function ChoresPage() {
       </div></div>}
     >
       {payment ? <div className="form-grid">
-        <Field label="Importo"><input type="number" min="0" step="0.1" value={payment.amount} onChange={e => setPayment({ ...payment, amount: Number(e.target.value) })} /></Field>
+        <Field label={`Importo (${currencyUnit})`} hint="Accetta sia la virgola sia il punto decimale.">
+          <input
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            value={payment.amount}
+            onChange={e => setPayment({ ...payment, amount: sanitizeDecimalInput(e.target.value) })}
+            placeholder="0,00"
+          />
+        </Field>
         <Field label="Nota"><input value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} /></Field>
       </div> : null}
     </Modal> : null}
