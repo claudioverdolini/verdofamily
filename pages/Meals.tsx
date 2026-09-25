@@ -193,7 +193,7 @@ export default function MealsPage() {
     setDishEditorKind('recipe')
     setEditingDish(dish
       ? { ...dish, ingredientsText: ingredientsToText(dish.ingredients), preferredByUserIds: [...(dish.preferredByUserIds || [])] }
-      : { id: undefined, name: '', type: 'Altro', variant: '', ingredientsText: '', prepMinutes: 30, preferredByUserIds: [], sourceUrl: '', sourceLabel: '', notes: '' })
+      : { id: undefined, name: '', type: '', variant: '', ingredientsText: '', prepMinutes: 30, preferredByUserIds: [], sourceUrl: '', sourceLabel: '', notes: '' })
   }
 
   function saveDish() {
@@ -201,6 +201,10 @@ export default function MealsPage() {
     const sourceUrl = normalizeRecipeUrl(editingDish.sourceUrl || '')
     if (dishEditorKind === 'recipe' && !sourceUrl) {
       alert('Inserisci un link valido che inizi con http:// o https://')
+      return
+    }
+    if (!MEAL_TYPES.includes(editingDish.type)) {
+      alert('Seleziona una tipologia di piatto.')
       return
     }
     upsertDish({
@@ -557,7 +561,15 @@ export default function MealsPage() {
             <Field label="Fonte"><input value={editingDish.sourceLabel || ''} onChange={e => setEditingDish({ ...editingDish, sourceLabel: e.target.value })} placeholder="Cookidoo" /></Field>
             <Field label="Note"><input value={editingDish.notes || ''} onChange={e => setEditingDish({ ...editingDish, notes: e.target.value })} placeholder="Es. Piace a tutti, raddoppiare le dosi…" /></Field>
           </> : null}
-          <Field label="Tipologia"><select value={editingDish.type} onChange={e => setEditingDish({ ...editingDish, type: e.target.value })}>{MEAL_TYPES.map(type => <option key={type}>{type}</option>)}</select></Field>
+          <Field
+            label="Tipologia piatto"
+            hint={dishEditorKind === 'recipe' ? 'Obbligatoria: serve anche per filtrare rapidamente le ricette quando pianifichi un pasto.' : undefined}
+          >
+            <select value={editingDish.type} onChange={e => setEditingDish({ ...editingDish, type: e.target.value })}>
+              {dishEditorKind === 'recipe' ? <option value="">Scegli tipologia…</option> : null}
+              {MEAL_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </Field>
           <Field label="Variante/i" hint="Se il piatto ha più varianti, separale con una virgola: es. Pomodoro, Carbonara, Pesto."><input value={editingDish.variant} onChange={e => setEditingDish({ ...editingDish, variant: e.target.value })} placeholder="Es. Pomodoro, Carbonara, Pesto" /></Field>
           <Field label="Tempo di preparazione"><input type="number" min="0" step="5" value={editingDish.prepMinutes || ''} onChange={e => setEditingDish({ ...editingDish, prepMinutes: Number(e.target.value) })} placeholder="30" /></Field>
           <Field label="Preferito da" className="field--wide" hint="Facoltativo: aiuta VerdoFamily a personalizzare i suggerimenti.">
