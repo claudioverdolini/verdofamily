@@ -5982,3 +5982,29 @@ html.has-modal-open .app-shell{
     grid-template-columns:minmax(0,1fr);
   }
 }
+
+
+/* Therapy medicine actions */
+.therapy-medicine-actions{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+}
+@media(max-width:560px){
+  .therapy-medicine-actions{
+    width:100%;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .therapy-medicine-actions .btn{
+    width:100%;
+    min-width:0;
+    white-space:nowrap;
+  }
+}
+@media(max-width:370px){
+  .therapy-medicine-actions{
+    grid-template-columns:minmax(0,1fr);
+  }
+}
