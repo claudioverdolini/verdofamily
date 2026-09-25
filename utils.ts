@@ -993,7 +993,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       date: /^\d{4}-\d{2}-\d{2}$/.test(String(item.date || '')) ? String(item.date) : localDateISO(),
       merchant: String(item.merchant || 'Spesa').trim().slice(0, 160) || 'Spesa',
       total: Math.max(0, Number(item.total) || 0),
-      category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
+      category: ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
       source: ['receipt','manual','voice','recurring','bank','paypal'].includes(String(item.source)) ? item.source : 'manual',
       sourceRef: item.sourceRef ? String(item.sourceRef).slice(0, 200) : undefined,
       flow: item.flow === 'refund' ? 'refund' : 'expense',
@@ -1020,7 +1020,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         qty: Math.max(0, Number(row?.qty) || 0),
         unitPrice: Number.isFinite(Number(row?.unitPrice)) ? Math.max(0, Number(row.unitPrice)) : undefined,
         totalPrice: Number.isFinite(Number(row?.totalPrice)) ? Math.max(0, Number(row.totalPrice)) : undefined,
-        category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(row?.category)) ? row.category : undefined
+        category: ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other'].includes(String(row?.category)) ? row.category : undefined
       })).filter((row: any) => row.qty > 0) : []
       const total = Math.max(0, Number(item?.total) || 0)
       const externalId = String(item?.externalId || '').trim().slice(0, 120)
@@ -1043,7 +1043,7 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       id: String(item.id || crypto.randomUUID()),
       merchant: String(item.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',
       amount: Math.max(0, Number(item.amount) || 0),
-      category: ['groceries','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
+      category: ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other'].includes(String(item.category)) ? item.category : 'other',
       frequency: ['weekly','monthly','yearly'].includes(String(item.frequency)) ? item.frequency : 'monthly',
       startDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.startDate || '')) ? String(item.startDate) : localDateISO(),
       endDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item.endDate || '')) ? String(item.endDate) : undefined,

@@ -377,7 +377,7 @@ export type BoardPost = {
   attachments: BoardAttachment[]
 }
 
-export type ExpenseCategory = 'groceries' | 'home' | 'transport' | 'health' | 'school' | 'bills' | 'leisure' | 'clothing' | 'other'
+export type ExpenseCategory = 'groceries' | 'dining' | 'home' | 'transport' | 'health' | 'school' | 'bills' | 'leisure' | 'clothing' | 'other'
 export type ExpenseSource = 'receipt' | 'manual' | 'voice' | 'recurring' | 'bank' | 'paypal'
 export type ExpenseFlow = 'expense' | 'refund'
 export type ExpenseMovementKind = 'purchase' | 'fee' | 'tax' | 'bill' | 'loan' | 'cash' | 'investment' | 'card_settlement' | 'transfer' | 'paypal_repayment' | 'refund' | 'other'

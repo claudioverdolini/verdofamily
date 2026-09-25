@@ -2434,7 +2434,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
 
     const id = expense.id || crypto.randomUUID()
     const now = new Date().toISOString()
-    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     setData(prev => {
       const existing = prev.expenses.find(item => item.id === id)
       const clean: ExpenseRecord = {
@@ -2486,7 +2486,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!authUser || authUser.role === 'bimbo') return { imported: 0, duplicates: expenses.length }
     const existingRefs = new Set(dataRef.current.expenses.map(item => item.sourceRef).filter(Boolean))
     const seenRefs = new Set(existingRefs)
-    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     const now = new Date().toISOString()
     let duplicates = 0
     const cleanRows: ExpenseRecord[] = []
@@ -2533,7 +2533,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
   }
 
   function cleanPurchaseEvidence(input: Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }, existing?: PurchaseEvidence): PurchaseEvidence | null {
-    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     const total = Math.max(0, Number(input.total) || 0)
     const externalId = String(input.externalId || '').trim().slice(0, 120)
     if (!externalId || total <= 0) return null
@@ -2690,7 +2690,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!authUser || authUser.role === 'bimbo') return ''
     const id = expense.id || crypto.randomUUID()
     const now = new Date().toISOString()
-    const allowedCategories = ['groceries','home','transport','health','school','bills','leisure','clothing','other']
+    const allowedCategories = ['groceries','dining','home','transport','health','school','bills','leisure','clothing','other']
     const clean: RecurringExpense = {
       id,
       merchant: String(expense.merchant || 'Spesa ricorrente').trim().slice(0, 160) || 'Spesa ricorrente',

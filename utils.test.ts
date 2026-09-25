@@ -87,6 +87,9 @@ describe('bank expense import helpers', () => {
     expect(inferExpenseCategory('CONAD SUPERMERCATO')).toBe('groceries')
     expect(inferExpenseCategory('ENEL ENERGIA')).toBe('bills')
     expect(inferExpenseCategory('Q8 CARBURANTE')).toBe('transport')
+    expect(inferExpenseCategory('SUSHI DEA ASSISI')).toBe('dining')
+    expect(inferExpenseCategory('MCDONALD\'S PERUGIA')).toBe('dining')
+    expect(inferExpenseCategory('CINEMA')).toBe('leisure')
   })
 
   it('creates stable duplicate keys for bank movements', () => {

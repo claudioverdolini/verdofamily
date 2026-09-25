@@ -723,7 +723,8 @@ export function inferExpenseCategory(value: string): ExpenseCategory {
   if (/enel|eni plenitude|hera|acea|a2a|gas|luce|energia|telefono|tim\b|telecom|vodafone|wind|iliad|spusu|fastweb|internet|fibra|acqua|tari|utenza|bollett|metlife|unipol|aruba|mooney|commissioni bancarie/.test(v)) return 'bills'
   if (/ikea|aosom|leroy|brico|casa|arredo|ferrament|casaling|rata mutuo/.test(v)) return 'home'
   if (/zara|h&m|ovs|decathlon|adidas|infinite styles|abbigli|scarpe|calzatur/.test(v)) return 'clothing'
-  if (/ristor|pizzeria|bella napoli|deliveroo|bar\b|cinema|teatro|netflix|spotify|booking|hotel|vacanz|camping|fantacalcio|sony interactive|apple services|google payment|microsoft payments|canva|trophy hunt|amazon prime/.test(v)) return 'leisure'
+  if (/ristor|pizzer|trattor|osteria|bistro|bistrot|pub\b|bar\b|caffe|gelater|pasticcer|sushi|mcdonald|burger king|kfc|deliveroo|just eat|glovo|chiosco|tavola calda/.test(v)) return 'dining'
+  if (/cinema|teatro|netflix|spotify|booking|hotel|vacanz|camping|fantacalcio|sony interactive|apple services|google payment|microsoft payments|canva|trophy hunt|amazon prime/.test(v)) return 'leisure'
   return 'other'
 }
 

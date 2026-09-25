@@ -35,6 +35,7 @@ import {
 
 const CATEGORIES: Array<{ value: ExpenseCategory; label: string }> = [
   { value: 'groceries', label: 'Spesa alimentare' },
+  { value: 'dining', label: 'Ristoranti / bar' },
   { value: 'home', label: 'Casa' },
   { value: 'transport', label: 'Auto e trasporti' },
   { value: 'health', label: 'Salute' },
