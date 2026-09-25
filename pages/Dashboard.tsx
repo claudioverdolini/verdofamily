@@ -270,7 +270,7 @@ export default function Dashboard() {
           </button>
           <button className="home-glance__item home-glance__item--chores" onClick={() => setActivePage('chores')}>
             <span className="home-glance__icon"><WalletCards size={19} /></span>
-            <span><small>Paghette</small><strong>{showBalances ? money(totalBalance) : '••••'}</strong></span>
+            <span><small>Paghette</small><strong>{showBalances ? money(totalBalance, data.currency || 'EUR') : '••••'}</strong></span>
           </button>
         </div>
 
