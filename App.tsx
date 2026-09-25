@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
   Bell,
@@ -712,6 +712,46 @@ function AppShell() {
   const contentRef = useRef<HTMLElement>(null)
 
   const prefs = authUser?.prefs
+  const menuOverlayOpen = drawerOpen || moreOpen
+
+  function setContentInteractionLocked(locked: boolean) {
+    const content = contentRef.current
+    if (!content) return
+    if (locked) {
+      content.style.setProperty('overflow', 'hidden', 'important')
+      content.style.setProperty('touch-action', 'none', 'important')
+      content.style.setProperty('overscroll-behavior', 'none', 'important')
+    } else {
+      content.style.removeProperty('overflow')
+      content.style.removeProperty('touch-action')
+      content.style.removeProperty('overscroll-behavior')
+    }
+  }
+
+  useLayoutEffect(() => {
+    setContentInteractionLocked(menuOverlayOpen)
+    return () => {
+      if (menuOverlayOpen) setContentInteractionLocked(false)
+    }
+  }, [menuOverlayOpen])
+
+  function openDrawerNow() {
+    setContentInteractionLocked(true)
+    setMoreOpen(false)
+    setDrawerOpen(true)
+  }
+
+  function openMoreNow() {
+    setContentInteractionLocked(true)
+    setDrawerOpen(false)
+    setMoreOpen(true)
+  }
+
+  function closeMenus() {
+    setContentInteractionLocked(false)
+    setDrawerOpen(false)
+    setMoreOpen(false)
+  }
 
   useEffect(() => {
     if (!prefs) return
@@ -767,34 +807,33 @@ function AppShell() {
 
   function navigate(page: PageKey) {
     setActivePage(page)
-    setDrawerOpen(false)
-    setMoreOpen(false)
+    closeMenus()
   }
 
   if (cloudLoading && cloudAuthenticated && !authUser && !needsFamilySetup) return <LoadingScreen />
   if (cloudAuthenticated && needsFamilySetup) return <FamilySetupScreen />
   if (!authUser) return <LoginScreen />
 
-  return <div className={`app-shell ${drawerOpen ? 'is-drawer-open' : ''}`}>
+  return <div className={`app-shell ${drawerOpen ? 'is-drawer-open' : ''} ${menuOverlayOpen ? 'is-menu-open' : ''}`}>
     <aside className={`sidebar ${drawerOpen ? 'is-open' : ''}`}>
-      <div className="sidebar__head"><div className="brand-mark"><span>V</span></div><div><strong>VerdoFamily</strong><span>{familyName || 'Family Hub'}</span></div><IconButton className="sidebar-close" label="Chiudi menu" onClick={() => setDrawerOpen(false)}><X size={20} /></IconButton></div>
+      <div className="sidebar__head"><div className="brand-mark"><span>V</span></div><div><strong>VerdoFamily</strong><span>{familyName || 'Family Hub'}</span></div><IconButton className="sidebar-close" label="Chiudi menu" onClick={closeMenus}><X size={20} /></IconButton></div>
       <nav className="sidebar__nav">{NAV.map((item, index) => <React.Fragment key={item.key}>{item.group && NAV[index - 1]?.group !== item.group ? <div className="nav-group-label">{item.group}</div> : null}<button className={activePage === item.key ? 'is-active' : ''} onClick={() => navigate(item.key)}><span data-page={item.key}>{item.icon}</span><strong>{item.label}</strong></button></React.Fragment>)}</nav>
       <div className="sidebar__footer"><SyncIndicator /><button className="sidebar-guide-btn" onClick={() => setGuideOpen(true)}><HelpCircle size={18} /><span><strong>Guida</strong><small>Scopri tutte le funzioni</small></span><ChevronRight size={17} /></button><button className="profile-chip" onClick={() => navigate('settings')}><Avatar user={authUser} size="sm" /><span><strong>{authUser.name}</strong><small>{authUser.role}</small></span><ChevronRight size={17} /></button><button className="logout-btn" onClick={() => logout()}><LogOut size={18} /> Esci</button></div>
     </aside>
 
-    {drawerOpen ? <button className="scrim" aria-label="Chiudi menu" onClick={() => setDrawerOpen(false)} /> : null}
+    {drawerOpen ? <button className="scrim" aria-label="Chiudi menu" onClick={closeMenus} /> : null}
 
     <div className="app-main">
-      <header className="topbar"><div className="topbar__left"><IconButton className="mobile-menu-btn" label="Menu" onClick={() => setDrawerOpen(true)}><Menu size={21} /></IconButton><div><span>{current?.label || 'VerdoFamily'}</span><small>{familyName || 'Family Hub'}</small></div></div><div className="topbar__right"><SyncIndicator /><IconButton className="topbar-help" label="Guida" onClick={() => setGuideOpen(true)}><HelpCircle size={20} /></IconButton><NotificationCenter /><button className="topbar-profile" onClick={() => navigate('settings')}><Avatar user={authUser} size="sm" /><span>{authUser.name}</span></button></div></header>
+      <header className="topbar"><div className="topbar__left"><IconButton className="mobile-menu-btn" label="Menu" onClick={openDrawerNow}><Menu size={21} /></IconButton><div><span>{current?.label || 'VerdoFamily'}</span><small>{familyName || 'Family Hub'}</small></div></div><div className="topbar__right"><SyncIndicator /><IconButton className="topbar-help" label="Guida" onClick={() => setGuideOpen(true)}><HelpCircle size={20} /></IconButton><NotificationCenter /><button className="topbar-profile" onClick={() => navigate('settings')}><Avatar user={authUser} size="sm" /><span>{authUser.name}</span></button></div></header>
       <main className="content" ref={contentRef}><PageRenderer /></main>
     </div>
 
-    <nav className="bottom-nav" aria-label="Navigazione mobile">{bottomTabs.map(key => { const item = NAV.find(n => n.key === key); if (!item) return null; return <button key={key} className={activePage === key ? 'is-active' : ''} onClick={() => navigate(key)}><span data-page={item.key}>{item.icon}</span><small>{item.label.replace(' & Dispensa','').replace('Compiti & Paghette','Paghette')}</small></button> })}<button className={bottomTabs.includes(activePage) ? '' : 'is-active'} onClick={() => setMoreOpen(true)}><span data-page="more"><MoreHorizontal size={20} /></span><small>Altro</small></button></nav>
+    <nav className="bottom-nav" aria-label="Navigazione mobile">{bottomTabs.map(key => { const item = NAV.find(n => n.key === key); if (!item) return null; return <button key={key} className={activePage === key ? 'is-active' : ''} onClick={() => navigate(key)}><span data-page={item.key}>{item.icon}</span><small>{item.label.replace(' & Dispensa','').replace('Compiti & Paghette','Paghette')}</small></button> })}<button className={bottomTabs.includes(activePage) ? '' : 'is-active'} onClick={openMoreNow}><span data-page="more"><MoreHorizontal size={20} /></span><small>Altro</small></button></nav>
 
     <VoiceAssistant />
     <UserGuide open={guideOpen} onClose={() => setGuideOpen(false)} currentPage={activePage} onNavigate={navigate} />
 
-    {moreOpen ? <div className="mobile-more-layer" onMouseDown={e => { if (e.target === e.currentTarget) setMoreOpen(false) }}><div className="mobile-more"><div className="mobile-more__handle" /><div className="mobile-more__head"><strong>Altre sezioni</strong><IconButton label="Chiudi" onClick={() => setMoreOpen(false)}><X size={20} /></IconButton></div><div className="mobile-more__status"><SyncIndicator /></div><div className="mobile-more__sections">{moreGroups.map(section => <section className="mobile-more__section" key={section.group}><div className="mobile-more__section-title">{section.group}</div><div className="mobile-more__grid">{section.items.map(item => <button key={item.key} onClick={() => navigate(item.key)} className={activePage === item.key ? 'is-active' : ''}><span data-page={item.key}>{item.icon}</span><strong>{item.label}</strong></button>)}</div></section>)}</div><button className="mobile-more__guide" onClick={() => { setMoreOpen(false); setGuideOpen(true) }}><HelpCircle size={18} /><span><strong>Guida VerdoFamily</strong><small>Scopri tutte le funzioni</small></span><ChevronRight size={17} /></button><button className="mobile-more__logout" onClick={() => logout()}><LogOut size={18} /> Esci</button></div></div> : null}
+    {moreOpen ? <div className="mobile-more-layer" onMouseDown={e => { if (e.target === e.currentTarget) closeMenus() }}><div className="mobile-more"><div className="mobile-more__handle" /><div className="mobile-more__head"><strong>Altre sezioni</strong><IconButton label="Chiudi" onClick={closeMenus}><X size={20} /></IconButton></div><div className="mobile-more__status"><SyncIndicator /></div><div className="mobile-more__sections">{moreGroups.map(section => <section className="mobile-more__section" key={section.group}><div className="mobile-more__section-title">{section.group}</div><div className="mobile-more__grid">{section.items.map(item => <button key={item.key} onClick={() => navigate(item.key)} className={activePage === item.key ? 'is-active' : ''}><span data-page={item.key}>{item.icon}</span><strong>{item.label}</strong></button>)}</div></section>)}</div><button className="mobile-more__guide" onClick={() => { closeMenus(); setGuideOpen(true) }}><HelpCircle size={18} /><span><strong>Guida VerdoFamily</strong><small>Scopri tutte le funzioni</small></span><ChevronRight size={17} /></button><button className="mobile-more__logout" onClick={() => logout()}><LogOut size={18} /> Esci</button></div></div> : null}
   </div>
 }
 
