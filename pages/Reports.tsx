@@ -696,10 +696,10 @@ export default function ReportsPage() {
       <Card className="amazon-evidence-hero">
         <CardHeader
           title="Amazon via Outlook"
-          subtitle="Controllo automatico della casella dedicata ogni notte e controllo manuale su richiesta degli adulti. Le email servono come prova d’acquisto e dettaglio articoli, senza creare una seconda spesa."
+          subtitle="Controllo automatico della casella dedicata ogni notte e controllo manuale su richiesta degli adulti. Le richieste manuali vengono prese in carico dal controllo di sicurezza entro un’ora."
           action={canEdit ? <div className="amazon-sync-actions">
             <Button size="sm" variant="soft" icon={<Upload size={16} />} disabled={amazonSync.status === 'pending' || amazonSync.status === 'running'} onClick={() => requestAmazonMailSync()}>
-              {amazonSync.status === 'pending' ? 'Richiesta inviata' : amazonSync.status === 'running' ? 'Controllo in corso' : 'Controlla adesso'}
+              {amazonSync.status === 'pending' ? 'Richiesta inviata' : amazonSync.status === 'running' ? 'Controllo in corso' : 'Richiedi controllo'}
             </Button>
             <Button size="sm" icon={<CheckCircle2 size={16} />} onClick={() => reconcilePurchaseEvidence()}>Riconcilia con banca</Button>
           </div> : null}
@@ -711,7 +711,7 @@ export default function ReportsPage() {
           <div><small>In attesa / verifica</small><strong>{amazonSummary.unmatched + amazonSummary.review}</strong></div>
         </div>
         <div className={`amazon-sync-status is-${amazonSync.status}`}>
-          {amazonSync.status === 'pending' ? <><Upload size={16} /><span><strong>Controllo richiesto{amazonRequestTime ? ` il ${amazonRequestTime}` : ''}.</strong> La richiesta è in coda e verrà presa in carico dal controllo automatico.</span></> :
+          {amazonSync.status === 'pending' ? <><Upload size={16} /><span><strong>Controllo richiesto{amazonRequestTime ? ` il ${amazonRequestTime}` : ''}.</strong> La richiesta è in coda e verrà presa in carico entro un’ora.</span></> :
            amazonSync.status === 'running' ? <><Upload size={16} /><span><strong>Controllo casella in corso.</strong> Sto verificando le nuove comunicazioni Amazon.</span></> :
            amazonSync.status === 'success' ? <><CheckCircle2 size={16} /><span><strong>Ultimo controllo completato{amazonSyncTime ? ` il ${amazonSyncTime}` : ''}.</strong>{amazonSync.lastImported !== undefined ? ` ${amazonSync.lastImported} nuovi ordini acquisiti` : ''}{amazonSync.lastScanned !== undefined ? ` su ${amazonSync.lastScanned} messaggi analizzati.` : '.'}</span></> :
            amazonSync.status === 'error' ? <><AlertTriangle size={16} /><span><strong>Ultimo controllo non completato.</strong> {amazonSync.lastError || 'Riproverò automaticamente al prossimo ciclo.'}</span></> :
