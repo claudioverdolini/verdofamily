@@ -193,6 +193,7 @@ export default function HealthPage() {
   const [personFilter, setPersonFilter] = useState<number | 'all'>('all')
   const [attachmentBusy, setAttachmentBusy] = useState(false)
   const [attachmentMessage, setAttachmentMessage] = useState('')
+  const [quickMedicine, setQuickMedicine] = useState<any>(null)
   const readOnlyHealth = authUser?.role === 'bimbo'
 
   const medicines = useMemo(
@@ -639,6 +640,60 @@ export default function HealthPage() {
     const current = editing?.therapyMedicines || []
     if (medicines.length) setEditing({ ...editing, therapyMedicines: [...current, blankTherapyMedicine(current)] })
   }
+
+  function openQuickMedicine() {
+    setQuickMedicine({
+      title: '',
+      activeIngredient: '',
+      defaultPackageSize: '',
+      quantity: '',
+      expiryDate: '',
+      purpose: '',
+      notes: ''
+    })
+  }
+
+  function saveQuickMedicine() {
+    if (!quickMedicine?.title?.trim()) return alert('Inserisci il nome del medicinale.')
+    const medicineId = nextId(data.deadlines)
+    const packageSize = positiveNumber(quickMedicine.defaultPackageSize)
+    const quantity = nonNegativeNumber(quickMedicine.quantity)
+    const packages = quickMedicine.expiryDate || quantity > 0 || packageSize
+      ? [{
+          id: 1,
+          expiryDate: quickMedicine.expiryDate || '',
+          quantity,
+          packageSize,
+          lot: '',
+          addedAt: localDateISO()
+        }]
+      : []
+    upsertDeadline({
+      id: medicineId,
+      title: quickMedicine.title.trim(),
+      date: quickMedicine.expiryDate || localDateISO(),
+      userId: 0,
+      done: false,
+      kind: 'medicine',
+      activeIngredient: quickMedicine.activeIngredient?.trim() || '',
+      purpose: quickMedicine.purpose?.trim() || '',
+      notes: quickMedicine.notes?.trim() || '',
+      defaultPackageSize: packageSize,
+      packages
+    })
+
+    const current = editing?.therapyMedicines || []
+    const line = {
+      id: nextNestedId(current),
+      medicineId,
+      tabletsPerDose: 1,
+      dosesPerDay: 1,
+      usage: ''
+    }
+    setEditing({ ...editing, therapyMedicines: [...current, line] })
+    setQuickMedicine(null)
+  }
+
   function updateTherapyMedicine(id: number, patch: any) { setEditing({ ...editing, therapyMedicines: (editing.therapyMedicines || []).map((line: any) => Number(line.id) === Number(id) ? { ...line, ...patch } : line) }) }
   function removeTherapyMedicine(id: number) { setEditing({ ...editing, therapyMedicines: (editing.therapyMedicines || []).filter((line: any) => Number(line.id) !== Number(id)) }) }
 
@@ -654,7 +709,7 @@ export default function HealthPage() {
       : section === 'inventory'
         ? <Button icon={<Package size={18} />} onClick={() => openNew('inventory')}>Aggiungi medicinale</Button>
         : section === 'therapy'
-          ? <Button icon={<Stethoscope size={18} />} onClick={() => openNew('therapy')} disabled={!medicines.length}>Nuova terapia</Button>
+          ? <Button icon={<Stethoscope size={18} />} onClick={() => openNew('therapy')}>Nuova terapia</Button>
           : section === 'records'
             ? <Button icon={<Plus size={18} />} onClick={() => openNew('record')}>Nuovo documento</Button>
             : <Button icon={<Plus size={18} />} onClick={() => openNew('visit')}>Aggiungi visita</Button>
@@ -816,7 +871,33 @@ export default function HealthPage() {
         <Field label="Inizio terapia"><input type="date" value={editing.therapyStartDate || ''} onChange={e => setEditing({ ...editing, therapyStartDate: e.target.value })} /></Field>
         <Field label="Fine terapia" hint="Lascia vuoto per una terapia continuativa."><input type="date" min={editing.therapyStartDate || undefined} value={editing.therapyEndDate || ''} onChange={e => setEditing({ ...editing, therapyEndDate: e.target.value })} /></Field>
         <Field label="Motivo / indicazione" className="field--wide"><input value={editing.purpose || ''} onChange={e => setEditing({ ...editing, purpose: e.target.value })} /></Field>
-        <Card className="field--wide"><CardHeader title="Medicinali della terapia" subtitle="Puoi aggiungerne più di uno. Il fabbisogno viene confrontato con il magazzino condiviso." action={<Button size="sm" variant="soft" icon={<Plus size={15} />} onClick={addTherapyMedicine} disabled={!medicines.length}>Farmaco</Button>} />
+        <Card className="field--wide"><CardHeader
+          title="Medicinali della terapia"
+          subtitle="Puoi collegare un farmaco già censito oppure crearne uno nuovo senza uscire dalla terapia."
+          action={<div className="therapy-medicine-actions">
+            <Button size="sm" variant="soft" icon={<Plus size={15} />} onClick={addTherapyMedicine} disabled={!medicines.length}>Esistente</Button>
+            <Button size="sm" variant="soft" icon={<Package size={15} />} onClick={openQuickMedicine}>Nuovo farmaco</Button>
+          </div>}
+        />
+          {quickMedicine ? <div className="callout" style={{ marginBottom: 12 }}>
+            <div className="receipt-match__head">
+              <strong>Censisci nuovo medicinale</strong>
+              <Button size="sm" variant="ghost" onClick={() => setQuickMedicine(null)}>Chiudi</Button>
+            </div>
+            <div className="form-grid form-grid--2" style={{ marginTop: 10 }}>
+              <Field label="Nome medicinale" className="field--wide"><input autoFocus value={quickMedicine.title || ''} onChange={e => setQuickMedicine({ ...quickMedicine, title: e.target.value })} placeholder="Es. Allopurinolo 300 mg" /></Field>
+              <Field label="Principio attivo"><input value={quickMedicine.activeIngredient || ''} onChange={e => setQuickMedicine({ ...quickMedicine, activeIngredient: e.target.value })} placeholder="Facoltativo" /></Field>
+              <Field label="Compresse per confezione"><input type="number" min="0" step="1" value={quickMedicine.defaultPackageSize ?? ''} onChange={e => setQuickMedicine({ ...quickMedicine, defaultPackageSize: e.target.value })} placeholder="Es. 30" /></Field>
+              <Field label="Compresse disponibili"><input type="number" min="0" step="0.25" value={quickMedicine.quantity ?? ''} onChange={e => setQuickMedicine({ ...quickMedicine, quantity: e.target.value })} placeholder="Facoltativo" /></Field>
+              <Field label="Scadenza confezione"><input type="date" value={quickMedicine.expiryDate || ''} onChange={e => setQuickMedicine({ ...quickMedicine, expiryDate: e.target.value })} /></Field>
+              <Field label="A cosa serve"><input value={quickMedicine.purpose || ''} onChange={e => setQuickMedicine({ ...quickMedicine, purpose: e.target.value })} /></Field>
+              <Field label="Note" className="field--wide"><textarea rows={2} value={quickMedicine.notes || ''} onChange={e => setQuickMedicine({ ...quickMedicine, notes: e.target.value })} /></Field>
+            </div>
+            <div className="modal-actions__right" style={{ marginTop: 10 }}>
+              <Button variant="ghost" onClick={() => setQuickMedicine(null)}>Annulla</Button>
+              <Button onClick={saveQuickMedicine}>Salva e collega</Button>
+            </div>
+          </div> : null}
           {(editing.therapyMedicines || []).length ? <div className="receipt-matches">{(editing.therapyMedicines || []).map((line: any, index: number) => {
             const medicine = medicines.find(product => product.id === Number(line.medicineId))
             const required = editing.therapyEndDate ? therapyLineRequiredTablets(editing.therapyStartDate || '', editing.therapyEndDate, line) : null
@@ -824,7 +905,7 @@ export default function HealthPage() {
             const boxes = required !== null && packageSize > 0 ? Math.ceil(Number(required || 0) / packageSize) : 0
             const summary = medicine ? medicineInventorySummary(medicine, planningTherapies as any) : null
             return <div className="receipt-match" key={line.id}><div className="receipt-match__head"><strong>Medicinale {index + 1}</strong><IconButton label="Rimuovi medicinale" onClick={() => removeTherapyMedicine(line.id)}><Trash2 size={16} /></IconButton></div><div className="form-grid form-grid--2" style={{ marginTop: 10 }}><Field label="Medicinale" className="field--wide"><select value={line.medicineId || 0} onChange={e => updateTherapyMedicine(line.id, { medicineId: Number(e.target.value) })}>{medicines.map(product => <option key={product.id} value={product.id}>{product.title}</option>)}</select></Field><Field label="Compresse per assunzione"><input type="number" min="0" step="0.25" value={line.tabletsPerDose ?? ''} onChange={e => updateTherapyMedicine(line.id, { tabletsPerDose: e.target.value })} /></Field><Field label="Assunzioni al giorno" hint="0,5 = una volta ogni due giorni."><input type="number" min="0" step="0.25" value={line.dosesPerDay ?? ''} onChange={e => updateTherapyMedicine(line.id, { dosesPerDay: e.target.value })} /></Field><Field label="Modalità d'uso" className="field--wide"><input value={line.usage || ''} onChange={e => updateTherapyMedicine(line.id, { usage: e.target.value })} /></Field></div>{medicine ? <div className={summary?.shortageDate ? 'callout callout--warning' : 'callout callout--success'} style={{ marginTop: 10 }}><strong>{medicine.title}</strong>: {therapyDailyUse(line)} compresse/giorno{required !== null ? ` · ${required} compresse${boxes ? ` (≈ ${boxes} confezioni)` : ''}` : ' · terapia continuativa'}.{summary?.shortageDate ? ` Scorta insufficiente dal ${formatDate(summary.shortageDate)}.` : ' Scorta compatibile con le terapie note.'}</div> : null}</div>
-          })}</div> : <EmptyState title="Nessun medicinale collegato" text="Aggiungi almeno un farmaco dal magazzino." action={<Button variant="soft" onClick={addTherapyMedicine} disabled={!medicines.length}>Aggiungi farmaco</Button>} />}
+          })}</div> : <EmptyState title="Nessun medicinale collegato" text="Puoi scegliere un farmaco già presente nel magazzino oppure censirne uno nuovo qui." action={<div className="therapy-medicine-actions"><Button variant="soft" onClick={addTherapyMedicine} disabled={!medicines.length}>Scegli esistente</Button><Button variant="soft" onClick={openQuickMedicine}>Censisci nuovo</Button></div>} />}
         </Card>
         <Field label="Note sulla terapia" className="field--wide"><textarea rows={3} value={editing.notes || ''} onChange={e => setEditing({ ...editing, notes: e.target.value })} /></Field>
         {renderAttachments()}
