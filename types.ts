@@ -378,6 +378,15 @@ export type BoardPost = {
 }
 
 export type ExpenseCategory = 'groceries' | 'dining' | 'home' | 'transport' | 'health' | 'school' | 'bills' | 'leisure' | 'clothing' | 'other'
+export type ExpenseSubcategory =
+  | 'dining_restaurant_bar' | 'dining_delivery'
+  | 'home_mortgage_rent' | 'home_furnishings' | 'home_maintenance'
+  | 'transport_fuel' | 'transport_installment' | 'transport_maintenance' | 'transport_tax_revision'
+  | 'transport_insurance' | 'transport_parking_tolls' | 'transport_public' | 'transport_charging'
+  | 'health_pharmacy' | 'health_visits'
+  | 'school_books_stationery' | 'school_fees_activities'
+  | 'bills_energy' | 'bills_phone_internet' | 'bills_banking' | 'bills_insurance'
+  | 'leisure_travel' | 'leisure_subscriptions' | 'leisure_sport_entertainment'
 export type ExpenseSource = 'receipt' | 'manual' | 'voice' | 'recurring' | 'bank' | 'paypal'
 export type ExpenseFlow = 'expense' | 'refund'
 export type ExpenseMovementKind = 'purchase' | 'fee' | 'tax' | 'bill' | 'loan' | 'cash' | 'investment' | 'card_settlement' | 'transfer' | 'paypal_repayment' | 'refund' | 'other'
@@ -413,6 +422,7 @@ export type ExpenseRecord = {
   merchant: string
   total: number
   category: ExpenseCategory
+  subcategory?: ExpenseSubcategory
   source: ExpenseSource
   sourceRef?: string
   flow?: ExpenseFlow
@@ -432,6 +442,7 @@ export type PurchaseEvidenceItem = {
   unitPrice?: number
   totalPrice?: number
   category?: ExpenseCategory
+  subcategory?: ExpenseSubcategory
 }
 
 export type PurchaseEvidence = {
@@ -454,6 +465,7 @@ export type RecurringExpense = {
   merchant: string
   amount: number
   category: ExpenseCategory
+  subcategory?: ExpenseSubcategory
   frequency: RecurringExpenseFrequency
   startDate: string
   endDate?: string
