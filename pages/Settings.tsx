@@ -709,7 +709,7 @@ export default function SettingsPage() {
     }
   }
 
-  return <div className="page">
+  return <div className="page page--settings">
     <PageIntro eyebrow="Centro di controllo" title="Impostazioni" description="Ogni scelta è separata per funzione: profilo, aspetto dell’app, uso quotidiano, connessioni e sicurezza dei dati." />
 
     <nav className="settings-jump-nav" aria-label="Vai alla sezione">
