@@ -176,7 +176,7 @@ export default function ChoresPage() {
         { value: 'wallets', label: 'Paghette' }
       ]
 
-  return <div className="page">
+  return <div className="page page--chores">
     <PageIntro
       eyebrow="Responsabilità"
       title="Compiti & paghette"
