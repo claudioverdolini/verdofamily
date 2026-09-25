@@ -247,6 +247,7 @@ export type MealPlan = {
   slot: string
   userId: number
   dishId: number
+  variant?: string
 }
 
 export type ChoreStatus = 'open' | 'pending' | 'approved'
