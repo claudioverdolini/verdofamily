@@ -390,7 +390,7 @@ export default function Dashboard() {
               <button aria-label="Apri paghette" onClick={() => setActivePage('chores')}><ChevronRight size={19} /></button>
             </div>
             <button className="home-wallet-summary" onClick={() => setActivePage('chores')}>
-              <span><small>Saldo famiglia</small><strong>{showBalances ? money(totalBalance) : '••••'}</strong></span>
+              <span><small>Saldo famiglia</small><strong>{showBalances ? money(totalBalance, data.currency || 'EUR') : '••••'}</strong></span>
               <span><small>Da fare</small><strong>{choresStillToDo.length}</strong></span>
               <span><small>Da confermare</small><strong>{choresAwaitingApproval.length}</strong></span>
             </button>
