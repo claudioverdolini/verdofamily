@@ -256,11 +256,20 @@ export default function MealsPage() {
     return variants.length === 1 ? variants[0] : ''
   }
 
+  function dishesForPlanFilter(typeFilter = 'Tutti') {
+    return data.dishes
+      .filter(dish => typeFilter === 'Tutti' || dish.type === typeFilter)
+      .sort((a, b) => `${a.type}${a.name}${a.variant}`.localeCompare(`${b.type}${b.name}${b.variant}`))
+  }
+
   function openPlan(date = today, slot = 'Pranzo', plan?: any, dishId?: number) {
     const defaultUserId = smartUserId || authUser?.id || data.users[0]?.id || 1
     const selectedDishId = plan?.dishId || dishId || data.dishes[0]?.id || ''
+    const selectedDish = data.dishes.find(item => item.id === Number(selectedDishId))
+    const dishTypeFilter = plan || dishId ? (selectedDish?.type || 'Tutti') : 'Tutti'
     setEditingPlan(plan ? {
       ...plan,
+      dishTypeFilter,
       variant: variantForDishSelection(selectedDishId, plan.variant),
       userIds: [Number(plan.userId)],
       addMissingToShopping: false
@@ -271,6 +280,7 @@ export default function MealsPage() {
       userId: defaultUserId,
       userIds: [defaultUserId],
       dishId: selectedDishId,
+      dishTypeFilter,
       variant: variantForDishSelection(selectedDishId),
       addMissingToShopping: true
     })
@@ -284,7 +294,7 @@ export default function MealsPage() {
       alert('Scegli quale variante vuoi pianificare.')
       return
     }
-    const { addMissingToShopping: shouldAddMissing, userIds: rawUserIds, ...plan } = editingPlan
+    const { addMissingToShopping: shouldAddMissing, userIds: rawUserIds, dishTypeFilter: _dishTypeFilter, ...plan } = editingPlan
     const userIds = editingPlan.id
       ? [Number(editingPlan.userId)]
       : Array.from(new Set(
@@ -561,12 +571,40 @@ export default function MealsPage() {
       </Modal>
 
       <Modal open={!!editingPlan} onClose={() => setEditingPlan(null)} title={editingPlan?.id ? 'Modifica pianificazione' : 'Pianifica pasto'} footer={<div className="modal-actions"><div>{editingPlan?.id ? <Button variant="danger" icon={<Trash2 size={17} />} onClick={() => { deleteMealPlan(editingPlan.id); setEditingPlan(null) }}>Elimina</Button> : null}</div><div className="modal-actions__right"><Button variant="ghost" onClick={() => setEditingPlan(null)}>Annulla</Button><Button onClick={savePlan}>Salva</Button></div></div>}>
-        {editingPlan ? <div className="form-grid form-grid--2"><Field label="Data"><input type="date" value={editingPlan.date} onChange={e => setEditingPlan({ ...editingPlan, date: e.target.value })} /></Field><Field label="Momento"><select value={editingPlan.slot} onChange={e => setEditingPlan({ ...editingPlan, slot: e.target.value })}>{MEAL_SLOTS.map(slot => <option key={slot}>{slot}</option>)}</select></Field>{editingPlan.id ? <Field label="Per chi"><select value={editingPlan.userId} onChange={e => setEditingPlan({ ...editingPlan, userId: Number(e.target.value), userIds: [Number(e.target.value)] })}>{data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field> : <Field label="Per chi" className="field--wide" hint="Puoi pianificare lo stesso pasto per più persone con un’unica operazione."><MultiAssigneePicker users={data.users} selectedIds={editingPlan.userIds || [editingPlan.userId].filter(Boolean)} onChange={userIds => setEditingPlan({ ...editingPlan, userIds, userId: userIds[0] || 0 })} /></Field>}<Field label="Piatto / ricetta"><select value={editingPlan.dishId} onChange={e => {
+        {editingPlan ? <div className="form-grid form-grid--2"><Field label="Data"><input type="date" value={editingPlan.date} onChange={e => setEditingPlan({ ...editingPlan, date: e.target.value })} /></Field><Field label="Momento"><select value={editingPlan.slot} onChange={e => setEditingPlan({ ...editingPlan, slot: e.target.value })}>{MEAL_SLOTS.map(slot => <option key={slot}>{slot}</option>)}</select></Field>{editingPlan.id ? <Field label="Per chi"><select value={editingPlan.userId} onChange={e => setEditingPlan({ ...editingPlan, userId: Number(e.target.value), userIds: [Number(e.target.value)] })}>{data.users.map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></Field> : <Field label="Per chi" className="field--wide" hint="Puoi pianificare lo stesso pasto per più persone con un’unica operazione."><MultiAssigneePicker users={data.users} selectedIds={editingPlan.userIds || [editingPlan.userId].filter(Boolean)} onChange={userIds => setEditingPlan({ ...editingPlan, userIds, userId: userIds[0] || 0 })} /></Field>}
+          <Field label="Tipologia piatto" hint="Filtra l’elenco per trovare più rapidamente il pasto.">
+            <select
+              value={editingPlan.dishTypeFilter || 'Tutti'}
+              onChange={e => {
+                const dishTypeFilter = e.target.value
+                const filtered = dishesForPlanFilter(dishTypeFilter)
+                const currentStillVisible = filtered.some(dish => dish.id === Number(editingPlan.dishId))
+                const dishId = currentStillVisible ? Number(editingPlan.dishId) : (filtered[0]?.id || '')
+                setEditingPlan({
+                  ...editingPlan,
+                  dishTypeFilter,
+                  dishId,
+                  variant: variantForDishSelection(dishId)
+                })
+              }}
+            >
+              <option value="Tutti">Tutte le tipologie</option>
+              {MEAL_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </Field>
+          <Field label="Piatto / ricetta"><select value={editingPlan.dishId} onChange={e => {
             const dishId = Number(e.target.value)
             setEditingPlan({ ...editingPlan, dishId, variant: variantForDishSelection(dishId) })
           }}>
-            {linkedRecipes.length ? <optgroup label="Ricette online">{linkedRecipes.map(d => <option key={d.id} value={d.id}>{d.sourceLabel || 'Online'} · {d.name}{d.variant ? ` (${d.variant})` : ''}</option>)}</optgroup> : null}
-            <optgroup label="Piatti">{data.dishes.filter(d => !d.sourceUrl).map(d => <option key={d.id} value={d.id}>{d.type} · {d.name}{d.variant ? ` (${d.variant})` : ''}</option>)}</optgroup>
+            {(() => {
+              const filtered = dishesForPlanFilter(editingPlan.dishTypeFilter || 'Tutti')
+              const recipes = filtered.filter(d => !!d.sourceUrl)
+              const dishes = filtered.filter(d => !d.sourceUrl)
+              return <>
+                {recipes.length ? <optgroup label="Ricette online">{recipes.map(d => <option key={d.id} value={d.id}>{d.sourceLabel || 'Online'} · {d.name}{d.variant ? ` (${d.variant})` : ''}</option>)}</optgroup> : null}
+                {dishes.length ? <optgroup label="Piatti">{dishes.map(d => <option key={d.id} value={d.id}>{d.name}{d.variant ? ` (${d.variant})` : ''}</option>)}</optgroup> : null}
+              </>
+            })()}
           </select></Field>
           {(() => {
             const variants = dishVariantOptions(data.dishes.find(d => d.id === Number(editingPlan.dishId))?.variant)
