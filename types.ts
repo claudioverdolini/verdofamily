@@ -1,5 +1,6 @@
 export type Role = 'admin' | 'adulto' | 'bimbo'
 export type ThemeMode = 'system' | 'light' | 'dark'
+export type CurrencyCode = 'EUR' | 'USD' | 'GBP' | 'CHF'
 export type VisualStyle = 'violet' | 'ocean' | 'emerald' | 'sunset' | 'berry' | 'coral' | 'midnight' | 'electric' | 'custom'
 export type BackgroundPreset = 'none' | 'color' | 'aurora' | 'sky' | 'sand' | 'forest' | 'sunset' | 'night' | 'lavender' | 'custom'
 
@@ -492,6 +493,7 @@ export type FamilyData = {
   version: number
   storageModel?: 'normalized-v1' | 'normalized-v2'
   assistantName: string
+  currency: CurrencyCode
   users: FamilyUser[]
   calendarEvents: CalendarEvent[]
   deadlines: Deadline[]
