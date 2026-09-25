@@ -1,4 +1,4 @@
-import type { ExpenseCategory } from './types'
+import type { ExpenseCategory, ExpenseSubcategory } from './types'
 
 export type BankTable = {
   fileName: string
@@ -726,6 +726,49 @@ export function inferExpenseCategory(value: string): ExpenseCategory {
   if (/ristor|pizzer|trattor|osteria|bistro|bistrot|pub\b|bar\b|caffe|gelater|pasticcer|sushi|mcdonald|burger king|kfc|deliveroo|just eat|glovo|chiosco|tavola calda/.test(v)) return 'dining'
   if (/cinema|teatro|netflix|spotify|booking|hotel|vacanz|camping|fantacalcio|sony interactive|apple services|google payment|microsoft payments|canva|trophy hunt|amazon prime/.test(v)) return 'leisure'
   return 'other'
+}
+
+export function inferExpenseSubcategory(value: string, category = inferExpenseCategory(value)): ExpenseSubcategory | undefined {
+  const v = normalized(value)
+  if (category === 'transport') {
+    if (/benz|carbur|gasolio|diesel|gpl\b|distributore|staz servizio|stazione servizio|nuova sidap|q8\b|tamoil|eni station|ip\b/.test(v)) return 'transport_fuel'
+    if (/mercedes benz financial|rata auto|finanziamento auto|leasing auto/.test(v)) return 'transport_installment'
+    if (/officina|meccanic|gommista|pneumatic|tagliando|ricambi auto|carrozzeria/.test(v)) return 'transport_maintenance'
+    if (/bollo auto|revisione auto|motorizzazione/.test(v)) return 'transport_tax_revision'
+    if (/assicurazione auto|rc auto|rca\b/.test(v)) return 'transport_insurance'
+    if (/autostr|telepass|pedaggio|parcheg|easypark/.test(v)) return 'transport_parking_tolls'
+    if (/enel x|be charge|tesla supercharger|ricarica elettrica|colonnina/.test(v)) return 'transport_charging'
+    if (/tren|bus|taxi|uber|balearia|traghetto|metro|aereo/.test(v)) return 'transport_public'
+  }
+  if (category === 'dining') {
+    if (/deliveroo|just eat|glovo|delivery|asporto/.test(v)) return 'dining_delivery'
+    return 'dining_restaurant_bar'
+  }
+  if (category === 'home') {
+    if (/rata mutuo|mutuo|affitto|canone locazione/.test(v)) return 'home_mortgage_rent'
+    if (/ikea|aosom|arredo|mobili|casaling/.test(v)) return 'home_furnishings'
+    if (/leroy|brico|ferrament|manutenz|idraul|elettric/.test(v)) return 'home_maintenance'
+  }
+  if (category === 'health') {
+    if (/farmac|parafarmac/.test(v)) return 'health_pharmacy'
+    if (/medic|dent|clinic|ospedal|sanit|ottic|visita/.test(v)) return 'health_visits'
+  }
+  if (category === 'school') {
+    if (/libri|cartoler|quadern|penne|matit|disegno|scuol/.test(v)) return 'school_books_stationery'
+    if (/mensa|retta|gita|corso|attivita/.test(v)) return 'school_fees_activities'
+  }
+  if (category === 'bills') {
+    if (/enel|eni plenitude|hera|acea|a2a|gas|luce|energia|acqua/.test(v)) return 'bills_energy'
+    if (/telefono|tim\b|telecom|vodafone|wind|iliad|spusu|fastweb|internet|fibra|aruba/.test(v)) return 'bills_phone_internet'
+    if (/metlife|unipol|assicur/.test(v)) return 'bills_insurance'
+    if (/commissioni bancarie|commissione banca|conto corrente/.test(v)) return 'bills_banking'
+  }
+  if (category === 'leisure') {
+    if (/booking|hotel|vacanz|camping|viaggio|resort/.test(v)) return 'leisure_travel'
+    if (/netflix|spotify|apple services|google payment|microsoft payments|canva|amazon prime|sony interactive/.test(v)) return 'leisure_subscriptions'
+    if (/cinema|teatro|fantacalcio|trophy hunt|sport|palestra|bowling/.test(v)) return 'leisure_sport_entertainment'
+  }
+  return undefined
 }
 
 export function bankSourceRef(date: string, description: string, amount: number, discriminator = '') {
