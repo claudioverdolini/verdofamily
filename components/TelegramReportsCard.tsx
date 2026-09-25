@@ -256,7 +256,7 @@ export default function TelegramReportsCard() {
     }
   }
 
-  return <Card className="settings-card--wide">
+  return <Card className="settings-card--wide telegram-reports-card">
     <CardHeader
       title="Telegram & report automatici"
       subtitle="Ricevi gratuitamente agenda, pasti, spesa e altri riepiloghi anche quando VerdoFamily è chiuso."
@@ -284,7 +284,7 @@ export default function TelegramReportsCard() {
 
       {(status.schedules || []).length ? <>
         <CardHeader title="Report attivi" subtitle="Puoi creare più invii nella stessa giornata." />
-        <div className="sortable-list">{(status.schedules || []).map(schedule => <div key={schedule.id}>
+        <div className="sortable-list telegram-schedule-list">{(status.schedules || []).map(schedule => <div key={schedule.id}>
           <span><strong>{schedule.name}</strong> · {schedule.time_local} · {schedule.target_day_offset === 1 ? 'giorno successivo' : 'giorno stesso'} · {schedule.scope === 'family' ? 'famiglia' : 'personale'}{schedule.enabled ? '' : ' · disattivato'}</span>
           <div>
             <button onClick={() => editSchedule(schedule)} disabled={busy}>Modifica</button>
