@@ -28,7 +28,7 @@ import { FamilyProvider, useFamily } from './store'
 import type { PageKey } from './types'
 import { Avatar, Button, IconButton } from './ui'
 import { supabase } from './supabaseClient'
-import { localDateISO, pantryExpiryDays, pantryNeedsRestock, routineCompletedOn, routineDueOn } from './utils'
+import { localDateISO, money, pantryExpiryDays, pantryNeedsRestock, routineCompletedOn, routineDueOn } from './utils'
 import Dashboard from './pages/Dashboard'
 import CalendarPage from './pages/Calendar'
 import ShoppingPantryPage from './pages/ShoppingPantry'
@@ -552,7 +552,7 @@ function NotificationCenter() {
         items.push({
           id: `chore-approval-${chore.id}-${chore.completedAt || today}`,
           title: `${child?.name || 'Un ragazzo'} ha completato: ${chore.title}`,
-          detail: `Verifica il compito e conferma per accreditare ${new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(Number(chore.amount || 0))}.`,
+          detail: `Verifica il compito e conferma per accreditare ${money(Number(chore.amount || 0), data.currency || 'EUR')}.`,
           page: 'chores',
           createdAt: chore.completedAt || new Date(nowTick).toISOString(),
           priority: 94,
