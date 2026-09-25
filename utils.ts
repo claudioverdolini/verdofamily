@@ -1,7 +1,7 @@
 import type { BoardPost, CalendarEvent, CurrencyCode, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 
-export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Dolce', 'Altro']
+export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Piatto veloce/unico', 'Dolce', 'Altro']
 export const MEAL_SLOTS = ['Colazione', 'II Colazione', 'Pranzo', 'Merenda', 'Cena']
 
 export async function imageFileToAvatarDataUrl(file: File, size = 320) {
