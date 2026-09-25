@@ -129,6 +129,7 @@ export default function ReportsPage() {
     importExpenses,
     deleteExpense,
     reconcilePurchaseEvidence,
+    requestAmazonMailSync,
     upsertRecurringExpense,
     deleteRecurringExpense,
     materializeRecurringExpenses,
@@ -540,6 +541,13 @@ export default function ReportsPage() {
     review: amazonEvidence.filter(item => item.status === 'review').length,
     unmatched: amazonEvidence.filter(item => item.status === 'unmatched').length
   }), [amazonEvidence])
+  const amazonSync = data.amazonMailSync || { enabled: true, status: 'idle' as const }
+  const amazonSyncTime = amazonSync.lastRunAt
+    ? new Date(amazonSync.lastRunAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+    : ''
+  const amazonRequestTime = amazonSync.lastRequestedAt
+    ? new Date(amazonSync.lastRequestedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+    : ''
 
   const periodTitle = period === 'month' ? monthLabel(cursor) : String(selectedYear)
 
@@ -688,14 +696,26 @@ export default function ReportsPage() {
       <Card className="amazon-evidence-hero">
         <CardHeader
           title="Amazon via Outlook"
-          subtitle="Le email servono come prova d’acquisto e dettaglio articoli. Non vengono conteggiate come una seconda spesa: il totale entra nei Report solo quando viene riconciliato con un movimento di pagamento."
-          action={canEdit ? <Button size="sm" icon={<CheckCircle2 size={16} />} onClick={() => reconcilePurchaseEvidence()}>Riconcilia con banca</Button> : null}
+          subtitle="Controllo automatico della casella dedicata ogni notte e controllo manuale su richiesta degli adulti. Le email servono come prova d’acquisto e dettaglio articoli, senza creare una seconda spesa."
+          action={canEdit ? <div className="amazon-sync-actions">
+            <Button size="sm" variant="soft" icon={<Upload size={16} />} disabled={amazonSync.status === 'pending' || amazonSync.status === 'running'} onClick={() => requestAmazonMailSync()}>
+              {amazonSync.status === 'pending' ? 'Richiesta inviata' : amazonSync.status === 'running' ? 'Controllo in corso' : 'Controlla adesso'}
+            </Button>
+            <Button size="sm" icon={<CheckCircle2 size={16} />} onClick={() => reconcilePurchaseEvidence()}>Riconcilia con banca</Button>
+          </div> : null}
         />
         <div className="amazon-evidence-stats">
           <div><small>Ordini acquisiti</small><strong>{amazonEvidence.length}</strong></div>
           <div><small>Valore documentato</small><strong>{money(amazonSummary.total)}</strong></div>
           <div><small>Riconciliati</small><strong>{amazonSummary.matched}</strong></div>
           <div><small>In attesa / verifica</small><strong>{amazonSummary.unmatched + amazonSummary.review}</strong></div>
+        </div>
+        <div className={`amazon-sync-status is-${amazonSync.status}`}>
+          {amazonSync.status === 'pending' ? <><Upload size={16} /><span><strong>Controllo richiesto{amazonRequestTime ? ` il ${amazonRequestTime}` : ''}.</strong> La richiesta è in coda e verrà presa in carico dal controllo automatico.</span></> :
+           amazonSync.status === 'running' ? <><Upload size={16} /><span><strong>Controllo casella in corso.</strong> Sto verificando le nuove comunicazioni Amazon.</span></> :
+           amazonSync.status === 'success' ? <><CheckCircle2 size={16} /><span><strong>Ultimo controllo completato{amazonSyncTime ? ` il ${amazonSyncTime}` : ''}.</strong>{amazonSync.lastImported !== undefined ? ` ${amazonSync.lastImported} nuovi ordini acquisiti` : ''}{amazonSync.lastScanned !== undefined ? ` su ${amazonSync.lastScanned} messaggi analizzati.` : '.'}</span></> :
+           amazonSync.status === 'error' ? <><AlertTriangle size={16} /><span><strong>Ultimo controllo non completato.</strong> {amazonSync.lastError || 'Riproverò automaticamente al prossimo ciclo.'}</span></> :
+           <><CheckCircle2 size={16} /><span><strong>Controllo automatico attivo.</strong> La casella dedicata viene verificata almeno una volta al giorno, durante la notte.</span></>}
         </div>
         <div className="amazon-security-note">
           <CheckCircle2 size={16} />
