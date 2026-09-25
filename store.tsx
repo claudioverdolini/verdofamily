@@ -1373,7 +1373,23 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       childApprovalRequest('deadline', deadline.id ? 'update' : 'create', { ...deadline, userId: authUser.id }, `${deadline.id ? 'Modifica' : 'Nuova scadenza'}: ${deadline.title || 'Scadenza'} · ${deadline.date || ''}`)
       return
     }
-    setData(prev => ({ ...prev, deadlines: deadline.id ? prev.deadlines.map(d => d.id === deadline.id ? { ...d, ...deadline, id: d.id, done: !!deadline.done } : d) : [...prev.deadlines, { ...deadline, id: nextId(prev.deadlines), done: !!deadline.done }] }))
+    setData(prev => {
+      const requestedId = Number(deadline.id || 0)
+      const existing = requestedId > 0 ? prev.deadlines.find(item => item.id === requestedId) : undefined
+      if (existing) {
+        return {
+          ...prev,
+          deadlines: prev.deadlines.map(item => item.id === requestedId
+            ? { ...item, ...deadline, id: item.id, done: !!deadline.done }
+            : item)
+        }
+      }
+      const id = requestedId > 0 ? requestedId : nextId(prev.deadlines)
+      return {
+        ...prev,
+        deadlines: [...prev.deadlines, { ...deadline, id, done: !!deadline.done }]
+      }
+    })
   }
   function toggleDeadline(id: number) {
     if (authUser?.role === 'bimbo') return
