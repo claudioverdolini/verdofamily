@@ -204,6 +204,7 @@ type StoreValue = {
   upsertPurchaseEvidence: (evidence: Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }) => string
   importPurchaseEvidence: (evidence: Array<Omit<PurchaseEvidence, 'id' | 'importedAt'> & { id?: string; importedAt?: string }>) => { imported: number; duplicates: number }
   reconcilePurchaseEvidence: () => { matched: number; review: number }
+  requestAmazonMailSync: () => { ok: boolean; error?: string }
   upsertRecurringExpense: (expense: Omit<RecurringExpense, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) => string
   deleteRecurringExpense: (id: string) => Promise<void>
   materializeRecurringExpenses: (referenceDate?: string) => number
@@ -2686,6 +2687,30 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return { matched, review }
   }
 
+  function requestAmazonMailSync() {
+    if (!authUser || authUser.role === 'bimbo') return { ok: false, error: 'Solo un adulto può richiedere il controllo della casella Amazon.' }
+    const now = new Date().toISOString()
+    const current = dataRef.current.amazonMailSync
+    if (current?.status === 'pending' && current.lastRequestedAt) {
+      const age = Date.now() - new Date(current.lastRequestedAt).getTime()
+      if (Number.isFinite(age) && age >= 0 && age < 5 * 60 * 1000) {
+        return { ok: true }
+      }
+    }
+    setData(prev => ({
+      ...prev,
+      amazonMailSync: {
+        ...(prev.amazonMailSync || { enabled: true, status: 'idle' }),
+        enabled: true,
+        status: 'pending',
+        lastRequestedAt: now,
+        requestedByUserId: authUser.id,
+        lastError: undefined
+      }
+    }))
+    return { ok: true }
+  }
+
   function upsertRecurringExpense(expense: Omit<RecurringExpense, 'id' | 'createdAt' | 'createdByUserId'> & { id?: string; createdAt?: string; createdByUserId?: number }) {
     if (!authUser || authUser.role === 'bimbo') return ''
     const id = expense.id || crypto.randomUUID()
@@ -3022,7 +3047,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
     upsertBoardPost, toggleBoardPin, deleteBoardPost, addBoardAttachment, removeBoardAttachment,
     upsertExpense, importExpenses, deleteExpense,
-    upsertPurchaseEvidence, importPurchaseEvidence, reconcilePurchaseEvidence,
+    upsertPurchaseEvidence, importPurchaseEvidence, reconcilePurchaseEvidence, requestAmazonMailSync,
     upsertRecurringExpense, deleteRecurringExpense, materializeRecurringExpenses,
     restoreRecycleItem, recoverConflictDraft,
     exportData, importData, resetData
