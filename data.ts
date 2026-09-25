@@ -2,9 +2,10 @@ import type { FamilyData } from './types'
 import { DEFAULT_PREFS } from './utils'
 
 export const initialData: FamilyData = {
-  version: 26,
+  version: 27,
   storageModel: 'normalized-v2',
   assistantName: 'Verdo',
+  currency: 'EUR',
   users: [
     {
       id: 1,
