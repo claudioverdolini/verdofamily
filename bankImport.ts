@@ -4,7 +4,7 @@ export type BankTable = {
   fileName: string
   headers: string[]
   rows: string[][]
-  kind?: 'generic' | 'paypal' | 'banca-centro-pdf'
+  kind?: 'generic' | 'paypal' | 'banca-centro-pdf' | 'carta-bcc-pdf'
   detectedLabel?: string
 }
 
@@ -395,6 +395,107 @@ async function parseBancaCentroPdf(file: File): Promise<BankTable> {
   }
 }
 
+
+function cartaBccMerchant(description: string) {
+  const d = text(description).replace(/\s+/g, ' ').trim()
+  if (/\b(?:amazon|amzn)\b/i.test(d)) return 'Amazon.it'
+  if (/^IMPOSTA DI BOLLO$/i.test(d)) return 'Imposta di bollo'
+  if (/^SPESE TRANSAZIONI BENZINA$/i.test(d)) return 'Commissione transazione carburante'
+  return d.replace(/\s+(?:ITA|IRL|LUX|FRA|DEU|ESP|NLD|GBR)$/i, '').trim() || 'Movimento CartaBCC'
+}
+
+function cartaBccMeta(description: string) {
+  const d = normalized(description)
+  if (/addebito in c c|saldo carta|saldo precedente/.test(d)) return { count: false, movementKind: 'card_settlement' }
+  if (/imposta di bollo|imposte e tasse/.test(d)) return { count: true, movementKind: 'tax' }
+  if (/spese transazioni benzina|commission/.test(d)) return { count: true, movementKind: 'fee' }
+  return { count: true, movementKind: 'purchase' }
+}
+
+async function parseCartaBccPdf(file: File): Promise<BankTable> {
+  let pdfjs: any
+  try {
+    const url = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs'
+    pdfjs = await import(/* @vite-ignore */ url)
+    if (pdfjs?.GlobalWorkerOptions) {
+      pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs'
+    }
+  } catch {
+    throw new Error('Non riesco a caricare il lettore PDF. Verifica la connessione e riprova.')
+  }
+
+  const document = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
+  const rows: string[][] = []
+  let fingerprint = ''
+
+  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+    const page = await document.getPage(pageNumber)
+    const content = await page.getTextContent()
+    const items = (content.items || [])
+      .filter((item: any) => item?.str && item?.transform)
+      .map((item: any) => ({ text: String(item.str).trim(), x: Number(item.transform[4] || 0), y: Number(item.transform[5] || 0) }))
+      .filter((item: any) => item.text)
+
+    if (pageNumber <= 2) fingerprint += ' ' + items.map((item: any) => item.text).join(' ')
+
+    const lines: Array<{ y: number; items: Array<{ text: string; x: number; y: number }> }> = []
+    for (const item of items) {
+      let line = lines.find(entry => Math.abs(entry.y - item.y) <= 1.6)
+      if (!line) {
+        line = { y: item.y, items: [] }
+        lines.push(line)
+      }
+      line.items.push(item)
+    }
+    lines.sort((a, b) => b.y - a.y)
+    lines.forEach(line => line.items.sort((a, b) => a.x - b.x))
+
+    const col = (line: { items: Array<{ text: string; x: number }> }, min: number, max = Number.POSITIVE_INFINITY) =>
+      line.items.filter(item => item.x >= min && item.x < max).map(item => item.text).join(' ').replace(/\s+/g, ' ').trim()
+
+    for (const line of lines) {
+      const purchaseDate = col(line, 40, 110)
+      const registrationDate = col(line, 110, 165)
+      const description = col(line, 165, 500)
+      const amount = parseBankAmount(col(line, 500))
+
+      if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(purchaseDate) || !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(registrationDate) || amount === undefined || !description) continue
+
+      const meta = cartaBccMeta(description)
+      if (!meta.count && meta.movementKind === 'card_settlement') continue
+
+      const flow = amount < 0 ? 'refund' : 'expense'
+      const movementKind = flow === 'refund' ? 'refund' : meta.movementKind
+      const merchant = cartaBccMerchant(description)
+      const reference = [purchaseDate, registrationDate, description, amount.toFixed(2)].join('|')
+
+      rows.push([
+        purchaseDate,
+        merchant,
+        Math.abs(amount).toFixed(2),
+        reference,
+        'bank',
+        flow,
+        meta.count ? 'si' : 'no',
+        movementKind,
+        [description, `registrata il ${registrationDate}`].join(' · ')
+      ])
+    }
+  }
+
+  if (!/CartaBCC|Numia|Riepilogo movimenti mensili/i.test(fingerprint) || !rows.length) {
+    throw new Error('Non riconosco movimenti nel PDF CartaBCC.')
+  }
+
+  return {
+    fileName: file.name,
+    headers: NORMALIZED_HEADERS,
+    rows,
+    kind: 'carta-bcc-pdf',
+    detectedLabel: 'CartaBCC / Numia · Estratto conto carta PDF'
+  }
+}
+
 async function unzipXlsx(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer)
   const view = new DataView(buffer)
@@ -507,7 +608,17 @@ async function parseXlsx(file: File) {
 
 export async function readBankFile(file: File): Promise<BankTable> {
   const lower = file.name.toLowerCase()
-  if (lower.endsWith('.pdf')) return parseBancaCentroPdf(file)
+  if (lower.endsWith('.pdf')) {
+    try {
+      return await parseBancaCentroPdf(file)
+    } catch {
+      try {
+        return await parseCartaBccPdf(file)
+      } catch {
+        throw new Error('PDF non riconosciuto. Sono supportati i movimenti Banca Centro Toscana-Umbria e gli estratti conto CartaBCC / Numia.')
+      }
+    }
+  }
   if (lower.endsWith('.xlsx')) return parseXlsx(file)
   if (lower.endsWith('.xls')) throw new Error('Il vecchio formato .xls non è supportato. Salvalo come .xlsx oppure CSV.')
   const value = await file.text()
