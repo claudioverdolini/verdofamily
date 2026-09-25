@@ -20,11 +20,13 @@ import {
 import { useFamily } from '../store'
 import { Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
 import { localDateISO, money } from '../utils'
-import type { ExpenseCategory, ExpenseRecord, RecurringExpenseFrequency } from '../types'
+import type { ExpenseCategory, ExpenseRecord, ExpenseSubcategory, RecurringExpenseFrequency } from '../types'
+import { EXPENSE_CATEGORIES, expenseCategoryLabel, expenseSubcategoryLabel, expenseSubcategoryOptions } from '../expenseCategories'
 import {
   bankSourceRef,
   bankMerchantSimilarity,
   inferExpenseCategory,
+  inferExpenseSubcategory,
   parseBankAmount,
   parseBankDate,
   readBankFile,
@@ -33,18 +35,7 @@ import {
   type BankTable
 } from '../bankImport'
 
-const CATEGORIES: Array<{ value: ExpenseCategory; label: string }> = [
-  { value: 'groceries', label: 'Spesa alimentare' },
-  { value: 'dining', label: 'Ristoranti / bar' },
-  { value: 'home', label: 'Casa' },
-  { value: 'transport', label: 'Auto e trasporti' },
-  { value: 'health', label: 'Salute' },
-  { value: 'school', label: 'Scuola' },
-  { value: 'bills', label: 'Bollette e utenze' },
-  { value: 'leisure', label: 'Tempo libero' },
-  { value: 'clothing', label: 'Abbigliamento' },
-  { value: 'other', label: 'Altro' }
-]
+const CATEGORIES = EXPENSE_CATEGORIES
 
 const FREQUENCIES: Array<{ value: RecurringExpenseFrequency; label: string }> = [
   { value: 'weekly', label: 'Ogni settimana' },
@@ -53,7 +44,11 @@ const FREQUENCIES: Array<{ value: RecurringExpenseFrequency; label: string }> = 
 ]
 
 function categoryLabel(value: ExpenseCategory) {
-  return CATEGORIES.find(item => item.value === value)?.label || 'Altro'
+  return expenseCategoryLabel(value)
+}
+
+function subcategoryLabel(value?: ExpenseSubcategory) {
+  return expenseSubcategoryLabel(value)
 }
 
 function frequencyLabel(value: RecurringExpenseFrequency) {
@@ -105,6 +100,7 @@ type BankPreviewRow = {
   merchant: string
   total: number
   category: ExpenseCategory
+  subcategory?: ExpenseSubcategory
   sourceRef: string
   legacySourceRef: string
   sourceKey: string
@@ -140,7 +136,7 @@ export default function ReportsPage() {
   const [cursor, setCursor] = useState(monthKey())
   const [editing, setEditing] = useState<any>(null)
   const [recurringEditing, setRecurringEditing] = useState<any>(null)
-  const [quick, setQuick] = useState({ merchant: '', total: '', category: 'other' as ExpenseCategory })
+  const [quick, setQuick] = useState({ merchant: '', total: '', category: 'other' as ExpenseCategory, subcategory: undefined as ExpenseSubcategory | undefined })
   const [quickMessage, setQuickMessage] = useState('')
   const [bankTable, setBankTable] = useState<BankTable | null>(null)
   const [bankMapping, setBankMapping] = useState<BankColumnMapping>({ date: '', description: '', amount: '', debit: '', credit: '', reference: '' })
@@ -224,7 +220,18 @@ export default function ReportsPage() {
     countedFiltered.forEach(item => totals.set(item.category, (totals.get(item.category) || 0) + signedExpense(item)))
     return [...totals.entries()]
       .filter(([, total]) => Math.abs(total) >= .005)
-      .map(([category, total]) => ({ category, total, pct: stats.total > 0 ? Math.max(0, total) / stats.total * 100 : 0 }))
+      .map(([category, total]) => {
+        const subTotals = new Map<ExpenseSubcategory, number>()
+        countedFiltered.filter(item => item.category === category && item.subcategory).forEach(item => {
+          const key = item.subcategory as ExpenseSubcategory
+          subTotals.set(key, (subTotals.get(key) || 0) + signedExpense(item))
+        })
+        const subcategories = [...subTotals.entries()]
+          .filter(([, subTotal]) => Math.abs(subTotal) >= .005)
+          .map(([subcategory, subTotal]) => ({ subcategory, total: subTotal }))
+          .sort((a, b) => b.total - a.total)
+        return { category, total, pct: stats.total > 0 ? Math.max(0, total) / stats.total * 100 : 0, subcategories }
+      })
       .sort((a, b) => b.total - a.total)
   }, [countedFiltered, stats.total])
 
@@ -258,6 +265,7 @@ export default function ReportsPage() {
       merchant: '',
       total: '',
       category: 'other' as ExpenseCategory,
+      subcategory: undefined,
       notes: '',
       source: 'manual',
       flow: 'expense',
@@ -280,6 +288,7 @@ export default function ReportsPage() {
       merchant: editing.merchant.trim(),
       total: Number(editing.total),
       category: editing.category || 'other',
+      subcategory: editing.subcategory,
       source: editing.source || 'manual',
       sourceRef: editing.sourceRef,
       flow: editing.flow === 'refund' ? 'refund' : 'expense',
@@ -302,6 +311,7 @@ export default function ReportsPage() {
       merchant,
       total,
       category: quick.category,
+      subcategory: quick.subcategory,
       source: 'manual',
       flow: 'expense',
       movementKind: 'purchase',
@@ -309,7 +319,7 @@ export default function ReportsPage() {
       notes: 'Inserimento rapido',
       items: []
     })
-    setQuick({ merchant: '', total: '', category: 'other' })
+    setQuick({ merchant: '', total: '', category: 'other', subcategory: undefined })
     setQuickMessage(`Registrati ${money(total)} per ${merchant}.`)
     window.setTimeout(() => setQuickMessage(''), 3500)
   }
@@ -320,6 +330,7 @@ export default function ReportsPage() {
       merchant: '',
       amount: '',
       category: 'bills',
+      subcategory: undefined,
       frequency: 'monthly',
       startDate: localDateISO(),
       endDate: '',
@@ -335,6 +346,7 @@ export default function ReportsPage() {
       merchant: recurringEditing.merchant.trim(),
       amount: Number(recurringEditing.amount),
       category: recurringEditing.category || 'other',
+      subcategory: recurringEditing.subcategory,
       frequency: recurringEditing.frequency || 'monthly',
       startDate: recurringEditing.startDate,
       endDate: recurringEditing.endDate || undefined,
@@ -415,6 +427,7 @@ export default function ReportsPage() {
         : `invalid-${index}`
       const legacySourceRef = valid ? bankSourceRef(date, merchant, total) : `invalid-legacy-${index}`
       const assessment = valid ? duplicateAssessment(date, merchant, total, sourceRef, legacySourceRef, flow) : { status: 'none' as BankDuplicateStatus, reason: '', match: undefined }
+      const category = inferExpenseCategory(merchant)
 
       return {
         id: `bank-${index}`,
@@ -422,7 +435,8 @@ export default function ReportsPage() {
         date,
         merchant,
         total,
-        category: inferExpenseCategory(merchant),
+        category,
+        subcategory: inferExpenseSubcategory(merchant, category),
         sourceRef,
         legacySourceRef,
         sourceKey,
@@ -503,6 +517,7 @@ export default function ReportsPage() {
       merchant: row.merchant,
       total: row.total,
       category: row.category,
+      subcategory: row.subcategory,
       source: row.source,
       sourceRef: row.sourceRef,
       flow: row.flow,
@@ -573,8 +588,16 @@ export default function ReportsPage() {
         <div className="report-quick-card__head"><Zap size={19} /><div><strong>Spesa rapida</strong><span>Per le piccole spese senza scontrino. Puoi anche dirlo a Verdo con la voce.</span></div></div>
         <div className="report-quick-form">
           <Field label="Importo €"><input inputMode="decimal" value={quick.total} onChange={e => setQuick({ ...quick, total: e.target.value })} placeholder="0,00" /></Field>
-          <Field label="Dove / causale"><input value={quick.merchant} onChange={e => setQuick({ ...quick, merchant: e.target.value, category: quick.category === 'other' ? inferExpenseCategory(e.target.value) : quick.category })} onKeyDown={e => { if (e.key === 'Enter') saveQuickExpense() }} placeholder="Es. benzina Q8" /></Field>
-          <Field label="Categoria"><select value={quick.category} onChange={e => setQuick({ ...quick, category: e.target.value as ExpenseCategory })}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+          <Field label="Dove / causale"><input value={quick.merchant} onChange={e => {
+            const merchant = e.target.value
+            const category = quick.category === 'other' ? inferExpenseCategory(merchant) : quick.category
+            setQuick({ ...quick, merchant, category, subcategory: inferExpenseSubcategory(merchant, category) })
+          }} onKeyDown={e => { if (e.key === 'Enter') saveQuickExpense() }} placeholder="Es. benzina Q8" /></Field>
+          <Field label="Macro categoria"><select value={quick.category} onChange={e => {
+            const category = e.target.value as ExpenseCategory
+            setQuick({ ...quick, category, subcategory: inferExpenseSubcategory(quick.merchant, category) })
+          }}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+          {expenseSubcategoryOptions(quick.category).length ? <Field label="Sottocategoria"><select value={quick.subcategory || ''} onChange={e => setQuick({ ...quick, subcategory: (e.target.value || undefined) as ExpenseSubcategory | undefined })}><option value="">Generica</option>{expenseSubcategoryOptions(quick.category).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field> : null}
           <Button icon={<Plus size={17} />} onClick={saveQuickExpense} disabled={!quick.merchant.trim() || Number(String(quick.total).replace(',', '.')) <= 0}>Registra</Button>
         </div>
         {quickMessage ? <div className="report-quick-success"><CheckCircle2 size={15} />{quickMessage}</div> : null}
@@ -611,7 +634,11 @@ export default function ReportsPage() {
           <CardHeader title="Per categoria" subtitle="Dove si concentra la spesa nel periodo selezionato" />
           {categoryRows.length ? <div className="report-breakdown">
             {categoryRows.map(row => <div key={row.category} className="report-breakdown__row">
-              <div><strong>{categoryLabel(row.category)}</strong><span>{money(row.total)} · {Math.round(row.pct)}%</span></div>
+              <div>
+                <strong>{categoryLabel(row.category)}</strong>
+                <span>{money(row.total)} · {Math.round(row.pct)}%</span>
+                {row.subcategories.length ? <small className="report-subcategory-summary">{row.subcategories.map(sub => `${subcategoryLabel(sub.subcategory)} ${money(sub.total)}`).join(' · ')}</small> : null}
+              </div>
               <div className="report-bar"><span style={{ width: `${Math.max(3, row.pct)}%` }} /></div>
             </div>)}
           </div> : <EmptyState title="Nessuna spesa nel periodo" text="Scontrini, banca e spese manuali compariranno qui." />}
@@ -651,7 +678,7 @@ export default function ReportsPage() {
             <div className="expense-row__date"><strong>{item.date.slice(8, 10)}</strong><span>{item.date.slice(5, 7)}</span></div>
             <div className="expense-row__copy">
               <strong>{item.merchant}</strong>
-              <span>{categoryLabel(item.category)} · {sourceLabel(item.source)}{item.flow === 'refund' ? ' · Rimborso' : ''}{!countsInStats(item) ? ' · Non conteggiato' : ''}{item.items.length ? ` · ${item.items.length} articoli` : ''}</span>
+              <span>{categoryLabel(item.category)}{item.subcategory ? ` · ${subcategoryLabel(item.subcategory)}` : ''} · {sourceLabel(item.source)}{item.flow === 'refund' ? ' · Rimborso' : ''}{!countsInStats(item) ? ' · Non conteggiato' : ''}{item.items.length ? ` · ${item.items.length} articoli` : ''}</span>
               {item.notes ? <small>{item.notes}</small> : null}
             </div>
             <div className={`expense-row__amount ${item.flow === 'refund' ? 'is-refund' : ''} ${!countsInStats(item) ? 'is-excluded' : ''}`}>
@@ -681,7 +708,7 @@ export default function ReportsPage() {
           <div>
             <strong>{item.merchant}</strong>
             <span>{frequencyLabel(item.frequency)} · dal {item.startDate.split('-').reverse().join('/')}{item.endDate ? ` al ${item.endDate.split('-').reverse().join('/')}` : ''}</span>
-            <small>{categoryLabel(item.category)}{item.notes ? ` · ${item.notes}` : ''}</small>
+            <small>{categoryLabel(item.category)}{item.subcategory ? ` · ${subcategoryLabel(item.subcategory)}` : ''}{item.notes ? ` · ${item.notes}` : ''}</small>
           </div>
           <div className="recurring-expense-row__amount"><strong>{money(item.amount)}</strong><Badge tone={item.active ? 'success' : 'warning'}>{item.active ? 'Attiva' : 'Pausa'}</Badge></div>
           {canEdit ? <div className="expense-row__actions">
@@ -741,7 +768,7 @@ export default function ReportsPage() {
             {matched ? <div className="amazon-match-line"><CheckCircle2 size={14} /><span>Collegato a {matched.merchant} del {matched.date.split('-').reverse().join('/')} · {money(matched.total)}</span></div> : order.status === 'review' ? <div className="amazon-match-line is-review"><AlertTriangle size={14} /><span>Possibile movimento trovato: verifica prima di considerarlo collegato.</span></div> : null}
             <div className="amazon-item-list">
               {order.items.map(item => <div key={item.id}>
-                <div><strong>{item.name}</strong><span>{item.category ? categoryLabel(item.category) : 'Categoria da definire'} · q.tà {item.qty}</span></div>
+                <div><strong>{item.name}</strong><span>{item.category ? categoryLabel(item.category) : 'Categoria da definire'}{item.subcategory ? ` · ${subcategoryLabel(item.subcategory)}` : ''} · q.tà {item.qty}</span></div>
                 <b>{item.totalPrice !== undefined ? money(item.totalPrice) : item.unitPrice !== undefined ? money(item.unitPrice * Math.max(1, item.qty)) : '—'}</b>
               </div>)}
             </div>
@@ -818,7 +845,13 @@ export default function ReportsPage() {
                 {row.duplicateReason ? <small>{row.duplicateReason}</small> : row.bankDoubleReason ? <small>{row.bankDoubleReason}</small> : null}
               </div>
               <strong className={`bank-preview-row__amount ${row.flow === 'refund' ? 'is-refund' : ''}`}>{row.flow === 'refund' ? '− ' : ''}{money(row.total)}</strong>
-              <select value={row.category} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, category: e.target.value as ExpenseCategory } : item))}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+              <div className="bank-category-selects">
+                <select value={row.category} onChange={e => {
+                  const category = e.target.value as ExpenseCategory
+                  setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, category, subcategory: inferExpenseSubcategory(item.merchant, category) } : item))
+                }}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+                {expenseSubcategoryOptions(row.category).length ? <select value={row.subcategory || ''} onChange={e => setBankRows(prev => prev.map(item => item.id === row.id ? { ...item, subcategory: (e.target.value || undefined) as ExpenseSubcategory | undefined } : item))}><option value="">Sottocategoria…</option>{expenseSubcategoryOptions(row.category).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select> : null}
+              </div>
             </div>)}
             {visibleBankRows.length > 500 ? <div className="bank-preview-more">Mostro le prime 500 righe del filtro corrente. Le altre verranno comunque considerate dall’importazione.</div> : null}
           </div>
@@ -837,7 +870,11 @@ export default function ReportsPage() {
         <Field label="Data"><input type="date" value={editing.date || ''} onChange={e => setEditing({ ...editing, date: e.target.value })} /></Field>
         <Field label="Importo"><input type="number" min="0" step="0.01" value={editing.total} onChange={e => setEditing({ ...editing, total: e.target.value })} /></Field>
         <Field label="Negozio / fornitore" className="field--wide"><input autoFocus value={editing.merchant || ''} onChange={e => setEditing({ ...editing, merchant: e.target.value })} placeholder="Es. Conad, farmacia, Enel…" /></Field>
-        <Field label="Categoria"><select value={editing.category || 'other'} onChange={e => setEditing({ ...editing, category: e.target.value as ExpenseCategory })}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+        <Field label="Macro categoria"><select value={editing.category || 'other'} onChange={e => {
+          const category = e.target.value as ExpenseCategory
+          setEditing({ ...editing, category, subcategory: inferExpenseSubcategory(editing.merchant || '', category) })
+        }}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+        {expenseSubcategoryOptions(editing.category || 'other').length ? <Field label="Sottocategoria"><select value={editing.subcategory || ''} onChange={e => setEditing({ ...editing, subcategory: (e.target.value || undefined) as ExpenseSubcategory | undefined })}><option value="">Generica</option>{expenseSubcategoryOptions(editing.category || 'other').map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field> : null}
         <Field label="Origine"><input value={sourceLabel(editing.source || 'manual')} disabled /></Field>
         <Field label="Note" className="field--wide"><textarea rows={3} value={editing.notes || ''} onChange={e => setEditing({ ...editing, notes: e.target.value })} placeholder="Facoltative" /></Field>
         {editing.items?.length ? <div className="expense-item-preview field--wide">
@@ -856,12 +893,20 @@ export default function ReportsPage() {
       footer={<div className="modal-actions"><span /><div className="modal-actions__right"><Button variant="ghost" onClick={() => setRecurringEditing(null)}>Annulla</Button><Button onClick={saveRecurring} disabled={!recurringEditing?.merchant?.trim() || Number(recurringEditing?.amount) <= 0}>Salva</Button></div></div>}
     >
       {recurringEditing ? <div className="form-grid form-grid--2">
-        <Field label="Voce / fornitore" className="field--wide"><input autoFocus value={recurringEditing.merchant || ''} onChange={e => setRecurringEditing({ ...recurringEditing, merchant: e.target.value, category: recurringEditing.category === 'other' ? inferExpenseCategory(e.target.value) : recurringEditing.category })} placeholder="Es. Netflix, affitto, assicurazione…" /></Field>
+        <Field label="Voce / fornitore" className="field--wide"><input autoFocus value={recurringEditing.merchant || ''} onChange={e => {
+          const merchant = e.target.value
+          const category = recurringEditing.category === 'other' ? inferExpenseCategory(merchant) : recurringEditing.category
+          setRecurringEditing({ ...recurringEditing, merchant, category, subcategory: inferExpenseSubcategory(merchant, category) })
+        }} placeholder="Es. Netflix, rata auto, assicurazione…" /></Field>
         <Field label="Importo €"><input type="number" min="0" step="0.01" value={recurringEditing.amount} onChange={e => setRecurringEditing({ ...recurringEditing, amount: e.target.value })} /></Field>
         <Field label="Frequenza"><select value={recurringEditing.frequency} onChange={e => setRecurringEditing({ ...recurringEditing, frequency: e.target.value })}>{FREQUENCIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
         <Field label="Dal"><input type="date" value={recurringEditing.startDate} onChange={e => setRecurringEditing({ ...recurringEditing, startDate: e.target.value })} /></Field>
         <Field label="Fino al" hint="Facoltativo"><input type="date" min={recurringEditing.startDate} value={recurringEditing.endDate || ''} onChange={e => setRecurringEditing({ ...recurringEditing, endDate: e.target.value })} /></Field>
-        <Field label="Categoria"><select value={recurringEditing.category} onChange={e => setRecurringEditing({ ...recurringEditing, category: e.target.value })}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+        <Field label="Macro categoria"><select value={recurringEditing.category} onChange={e => {
+          const category = e.target.value as ExpenseCategory
+          setRecurringEditing({ ...recurringEditing, category, subcategory: inferExpenseSubcategory(recurringEditing.merchant || '', category) })
+        }}>{CATEGORIES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field>
+        {expenseSubcategoryOptions(recurringEditing.category).length ? <Field label="Sottocategoria"><select value={recurringEditing.subcategory || ''} onChange={e => setRecurringEditing({ ...recurringEditing, subcategory: (e.target.value || undefined) as ExpenseSubcategory | undefined })}><option value="">Generica</option>{expenseSubcategoryOptions(recurringEditing.category).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></Field> : null}
         <Field label="Stato"><select value={recurringEditing.active === false ? 'paused' : 'active'} onChange={e => setRecurringEditing({ ...recurringEditing, active: e.target.value === 'active' })}><option value="active">Attiva</option><option value="paused">In pausa</option></select></Field>
         <Field label="Note" className="field--wide"><textarea rows={3} value={recurringEditing.notes || ''} onChange={e => setRecurringEditing({ ...recurringEditing, notes: e.target.value })} /></Field>
       </div> : null}
