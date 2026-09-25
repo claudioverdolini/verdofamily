@@ -384,6 +384,18 @@ export type ExpenseMovementKind = 'purchase' | 'fee' | 'tax' | 'bill' | 'loan' |
 export type RecurringExpenseFrequency = 'weekly' | 'monthly' | 'yearly'
 export type PurchaseEvidenceSource = 'amazon_email'
 export type PurchaseEvidenceStatus = 'unmatched' | 'matched' | 'review'
+export type AmazonMailSyncStatus = 'idle' | 'pending' | 'running' | 'success' | 'error'
+
+export type AmazonMailSyncState = {
+  enabled: boolean
+  status: AmazonMailSyncStatus
+  lastRunAt?: string
+  lastRequestedAt?: string
+  requestedByUserId?: number
+  lastImported?: number
+  lastScanned?: number
+  lastError?: string
+}
 
 export type ExpenseItem = {
   id: string
@@ -490,5 +502,6 @@ export type FamilyData = {
   approvalRequests: ApprovalRequest[]
   expenses: ExpenseRecord[]
   purchaseEvidence: PurchaseEvidence[]
+  amazonMailSync: AmazonMailSyncState
   recurringExpenses: RecurringExpense[]
 }
