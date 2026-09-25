@@ -6,6 +6,7 @@ import type {
   BoardPost,
   CalendarEvent,
   Chore,
+  CurrencyCode,
   Deadline,
   Dish,
   ExpenseRecord,
@@ -143,6 +144,7 @@ type StoreValue = {
   updateCurrentPrefs: (patch: Partial<UserPrefs> | ((current: UserPrefs) => Partial<UserPrefs>)) => void
   updateCurrentProfile: (patch: Partial<FamilyUser>) => void
   setAssistantName: (name: string) => void
+  setCurrency: (currency: CurrencyCode) => void
   addUser: (user: Omit<FamilyUser, 'id' | 'balance' | 'prefs'> & { prefs?: Partial<UserPrefs> }) => void
   updateUser: (id: number, patch: Partial<FamilyUser>) => void
   deleteUser: (id: number) => void
@@ -485,6 +487,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     const merged = deepClone(remote)
     const keys: Array<keyof FamilyData> = [
       'assistantName',
+      'currency',
       'users',
       'calendarEvents',
       'deadlines',
@@ -1174,6 +1177,13 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!authUser || authUser.role === 'bimbo') return
     const clean = name.trim().replace(/\s+/g, ' ').slice(0, 24) || 'Verdo'
     setData(prev => ({ ...prev, assistantName: clean }))
+  }
+
+  function setCurrency(currency: CurrencyCode) {
+    if (!authUser || authUser.role === 'bimbo') return
+    const allowed: CurrencyCode[] = ['EUR', 'USD', 'GBP', 'CHF']
+    const next = allowed.includes(currency) ? currency : 'EUR'
+    setData(prev => ({ ...prev, currency: next }))
   }
 
   function addUser(input: Omit<FamilyUser, 'id' | 'balance' | 'prefs'> & { prefs?: Partial<UserPrefs> }) {
@@ -3047,7 +3057,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     cloudAuthenticated: Boolean(cloudUserId),
     cloudLoading, cloudStatus, cloudEmail, familyId, familyName, needsFamilySetup,
     createCloudFamily, joinCloudFamily, createFamilyInvite, syncNow,
-    updateCurrentPrefs, updateCurrentProfile, setAssistantName,
+    updateCurrentPrefs, updateCurrentProfile, setAssistantName, setCurrency,
     addUser, updateUser, deleteUser,
     approveApprovalRequest, rejectApprovalRequest,
     upsertCalendarEvent, deleteCalendarEvent,
