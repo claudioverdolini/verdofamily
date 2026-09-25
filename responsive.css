@@ -5383,3 +5383,28 @@ html{
     flex:1 1 150px;
   }
 }
+
+
+/* Expense macro categories and subcategories */
+.report-subcategory-summary{
+  display:block;
+  margin-top:3px;
+  color:var(--muted);
+  font-size:8.5px;
+  line-height:1.35;
+  font-weight:650;
+}
+.bank-category-selects{
+  display:grid;
+  gap:4px;
+  min-width:0;
+}
+.bank-category-selects select{
+  width:100%;
+  min-width:0;
+}
+@media(max-width:620px){
+  .report-subcategory-summary{
+    font-size:9px;
+  }
+}
