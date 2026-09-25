@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { BellRing, CalendarDays, Camera, Check, ClipboardCopy, Cloud, Download, Flame, Heart, Image as ImageIcon, ImagePlus, Leaf, Link2, Moon, RefreshCw, RotateCcw, Sparkles, Unlink, Upload, Waves, Zap } from 'lucide-react'
 import { useFamily } from '../store'
 import { supabase } from '../supabaseClient'
-import type { PageKey, ThemeMode } from '../types'
+import type { CurrencyCode, PageKey, ThemeMode } from '../types'
 import { Avatar, Button, Card, CardHeader, Field, PageIntro, Segmented } from '../ui'
 import TelegramReportsCard from '../components/TelegramReportsCard'
 import { imageFileToAvatarDataUrl, imageFileToBackgroundDataUrl } from '../utils'
@@ -188,6 +188,7 @@ export default function SettingsPage() {
     updateCurrentPrefs,
     updateCurrentProfile,
     setAssistantName,
+    setCurrency,
     exportData,
     importData,
     resetData,
@@ -935,6 +936,22 @@ export default function SettingsPage() {
             <section className="settings-subsection">
               <div className="settings-subsection__head"><div><strong>Home</strong><span>Riepiloghi visibili a colpo d’occhio</span></div></div>
               <div className="settings-check-grid settings-check-grid--compact">{HOME_CARDS.map(item => <label key={item.key} className={prefs.homeCards.includes(item.key) ? 'is-selected' : ''}><input type="checkbox" checked={prefs.homeCards.includes(item.key)} onChange={() => toggleHomeCard(item.key)} /><span>{item.label}</span></label>)}</div>
+            </section>
+
+            <section className="settings-subsection">
+              <div className="settings-subsection__head"><div><strong>Paghette</strong><span>Importi, saldi e unità monetaria</span></div></div>
+              <Field label="Valuta paghette" hint="Condivisa con tutta la famiglia. L’Euro (€) è l’impostazione predefinita.">
+                <select
+                  value={data.currency || 'EUR'}
+                  disabled={authUser.role === 'bimbo'}
+                  onChange={e => setCurrency(e.target.value as CurrencyCode)}
+                >
+                  <option value="EUR">Euro (€)</option>
+                  <option value="USD">Dollaro USA ($)</option>
+                  <option value="GBP">Sterlina britannica (£)</option>
+                  <option value="CHF">Franco svizzero (CHF)</option>
+                </select>
+              </Field>
               <label className="toggle-row settings-toggle-standalone"><input type="checkbox" checked={prefs.showBalances} onChange={e => updateCurrentPrefs({ showBalances: e.target.checked })} /><span>Mostra i saldi delle paghette</span></label>
             </section>
 
