@@ -801,7 +801,7 @@ export default function HealthPage() {
 
     <Modal
       open={!!editing}
-      onClose={() => setEditing(null)}
+      onClose={() => { setEditing(null); setQuickMedicine(null) }}
       title={editing?.kind === 'visit' ? (editing?.id ? 'Modifica visita' : 'Nuova visita') : editing?.kind === 'health-record' ? (editing?.id ? 'Modifica documento sanitario' : 'Nuovo documento sanitario') : editing?.kind === 'medicine' ? (editing?.id ? 'Modifica medicinale' : 'Nuovo medicinale') : (editing?.id ? 'Modifica terapia' : 'Nuova terapia')}
       size={editing?.kind === 'visit' || editing?.kind === 'health-record' ? 'md' : 'lg'}
       footer={readOnlyHealth
