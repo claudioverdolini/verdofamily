@@ -39,6 +39,7 @@ export default function ChoresPage() {
     deleteChore,
     upsertRecurringChore,
     completeRecurringChore,
+    completeRecurringChoreAsAdult,
     toggleRecurringChore,
     deleteRecurringChore,
     payUser,
@@ -49,6 +50,7 @@ export default function ChoresPage() {
   const [tab, setTab] = useState<'chores' | 'recurring' | 'wallets'>('chores')
   const [editing, setEditing] = useState<any>(null)
   const [recurringEditing, setRecurringEditing] = useState<any>(null)
+  const [recurringCompletion, setRecurringCompletion] = useState<any>(null)
   const [payment, setPayment] = useState<any>(null)
   const showBalances = authUser?.prefs?.showBalances !== false
   const currency = data.currency || 'EUR'
@@ -176,6 +178,30 @@ export default function ChoresPage() {
       ...recurringEditing,
       weekdays: days.includes(day) ? days.filter((item: number) => item !== day) : [...days, day].sort()
     })
+  }
+
+  function openRecurringCompletion(item: any, userId?: number) {
+    if (isChild) return
+    const userIds = Array.from(new Set(
+      (Array.isArray(item?.userIds) && item.userIds.length ? item.userIds : [item?.userId])
+        .map(Number)
+        .filter((id: number) => id > 0)
+    ))
+    const selectedUserId = userId && userIds.includes(userId) ? userId : (userIds[0] || 0)
+    if (!selectedUserId) return
+    setRecurringCompletion({
+      recurringChoreId: item.id,
+      title: item.title,
+      amount: item.amount,
+      userIds,
+      userId: selectedUserId
+    })
+  }
+
+  function confirmRecurringCompletion() {
+    if (!recurringCompletion?.recurringChoreId || !recurringCompletion?.userId || isChild) return
+    completeRecurringChoreAsAdult(recurringCompletion.recurringChoreId, recurringCompletion.userId)
+    setRecurringCompletion(null)
   }
 
   function submitPayment() {
@@ -366,6 +392,7 @@ export default function ChoresPage() {
               </small> : null}
             </button>
             <Badge tone={item.active ? 'success' : 'neutral'}>{item.active ? 'Attivo' : 'Pausa'}</Badge>
+            {item.active ? <Button size="sm" variant="soft" onClick={() => openRecurringCompletion(item)}>Segna svolto</Button> : null}
             <IconButton label="Modifica" onClick={() => openRecurring(item)}><Pencil size={16} /></IconButton>
             <IconButton label="Elimina ricorrenza" onClick={() => deleteRecurringChore(item.id)}><Trash2 size={16} /></IconButton>
           </div>
@@ -548,6 +575,44 @@ export default function ChoresPage() {
           />
           Attivo: rende l’attività disponibile nei giorni selezionati, senza creare record automatici
         </label>
+      </div> : null}
+    </Modal> : null}
+
+    {!isChild ? <Modal
+      open={!!recurringCompletion}
+      onClose={() => setRecurringCompletion(null)}
+      title="Registra attività svolta"
+      subtitle={recurringCompletion ? `${recurringCompletion.title} · accredito immediato dopo la conferma` : ''}
+      footer={<div className="modal-actions"><span /><div className="modal-actions__right">
+        <Button variant="ghost" onClick={() => setRecurringCompletion(null)}>Annulla</Button>
+        <Button onClick={confirmRecurringCompletion}>Conferma svolgimento</Button>
+      </div></div>}
+    >
+      {recurringCompletion ? <div className="form-grid">
+        <Field label="Chi l’ha svolto?" hint="L’adulto sta certificando direttamente il completamento: non serve una seconda approvazione.">
+          <div className="recurring-assignee-picker">
+            {recurringCompletion.userIds.map((userId: number) => {
+              const user = data.users.find(entry => entry.id === userId)
+              if (!user) return null
+              const selected = recurringCompletion.userId === userId
+              return <button
+                type="button"
+                key={user.id}
+                className={selected ? 'is-selected' : ''}
+                onClick={() => setRecurringCompletion({ ...recurringCompletion, userId })}
+              >
+                <Avatar user={user} size="sm" />
+                <span><strong>{user.name}</strong><small>{money(recurringCompletion.amount, currency)} per completamento</small></span>
+                <span className="recurring-assignee-picker__check">{selected ? <CheckCircle2 size={18} /> : null}</span>
+              </button>
+            })}
+          </div>
+        </Field>
+        <div className="field--wide">
+          <small>
+            Puoi registrare la stessa attività più volte nello stesso giorno: ogni conferma crea un completamento reale separato.
+          </small>
+        </div>
       </div> : null}
     </Modal> : null}
 
