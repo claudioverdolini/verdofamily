@@ -52,6 +52,74 @@ function textPart(result: any) {
   return parts.map((part: any) => part?.text || "").join("").trim();
 }
 
+async function callGeminiWithTimeout(
+  apiKey: string,
+  models: string[],
+  body: string,
+  label: string
+) {
+  let result: any = null;
+  let usedModel = "";
+  let lastStatus = 0;
+  let lastMessage = "";
+  const attemptTimeouts = [14000, 9000, 7000];
+  const candidates = models.slice(0, attemptTimeouts.length);
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const model = candidates[index];
+    const timeoutMs = attemptTimeouts[index];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+          },
+          body,
+          signal: controller.signal
+        }
+      );
+
+      const candidate = await response.json().catch(() => ({}));
+      if (response.ok) {
+        result = candidate;
+        usedModel = model;
+        return { result, usedModel, lastStatus: response.status, lastMessage: "" };
+      }
+
+      lastStatus = response.status;
+      lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
+      console.warn("gemini_attempt_failed", {
+        label,
+        model,
+        status: response.status,
+        message: lastMessage.slice(0, 240)
+      });
+    } catch (error) {
+      const timedOut = controller.signal.aborted;
+      lastStatus = 0;
+      lastMessage = timedOut
+        ? `gemini_timeout_${timeoutMs}ms`
+        : String(error instanceof Error ? error.message : error);
+      console.warn("gemini_attempt_failed", {
+        label,
+        model,
+        status: timedOut ? "timeout" : "network_error",
+        message: lastMessage.slice(0, 240)
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  return { result, usedModel, lastStatus, lastMessage };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
@@ -62,11 +130,12 @@ Deno.serve(async (req) => {
     const geminiKey = Deno.env.get("GEMINI_API_KEY") || "";
     const configuredModel = Deno.env.get("GEMINI_MODEL") || "";
     const geminiModels = [...new Set([
-      configuredModel,
-      "gemini-3.8-flash",
-      "gemini-3.7-flash",
       "gemini-3.6-flash",
-      "gemini-3.5-flash"
+      configuredModel,
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.8-flash",
+      "gemini-3.7-flash"
     ].filter(Boolean))];
     const geminiModel = geminiModels[0];
     const client = createClient(supabaseUrl, serviceRole, { auth: { persistSession: false } });
@@ -208,28 +277,11 @@ Restituisci esclusivamente JSON conforme allo schema.`;
         contents: [{ role: "user", parts: [{ text: receiptPrompt }] }],
         generationConfig: { responseMimeType: "application/json" }
       });
-
-      let result: any = null;
-      let usedModel = "";
-      let lastStatus = 0;
-      let lastMessage = "";
-
-      for (const model of geminiModels) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-          body: requestBody
-        });
-        const candidate = await response.json().catch(() => ({}));
-        if (response.ok) { result = candidate; usedModel = model; break; }
-        lastStatus = response.status;
-        lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
-        const lower = lastMessage.toLowerCase();
-        const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
-          || lower.includes("high demand") || lower.includes("overloaded")
-          || lower.includes("temporarily") || lower.includes("unavailable");
-        if (!retryable) return json({ ok: false, error: lastMessage }, response.status >= 500 ? 502 : 400);
-      }
+      const geminiCall = await callGeminiWithTimeout(geminiKey, geminiModels, requestBody, "receipt_text");
+      const result = geminiCall.result;
+      const usedModel = geminiCall.usedModel;
+      const lastStatus = geminiCall.lastStatus;
+      const lastMessage = geminiCall.lastMessage;
 
       if (!result || !usedModel) {
         return json({ ok: false, error: "Correzione OCR intelligente non disponibile.", code: "ai_temporarily_unavailable", lastStatus, lastMessage }, 503);
@@ -323,37 +375,11 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
           responseSchema: residualSchema
         }
       });
-
-      let residualResult: any = null;
-      let residualModel = "";
-      let residualLastStatus = 0;
-      let residualLastMessage = "";
-
-      for (const model of geminiModels) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": geminiKey
-          },
-          body: residualRequest
-        });
-        const candidate = await response.json().catch(() => ({}));
-        if (response.ok) {
-          residualResult = candidate;
-          residualModel = model;
-          break;
-        }
-        residualLastStatus = response.status;
-        residualLastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
-        const lower = residualLastMessage.toLowerCase();
-        const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
-          || lower.includes("high demand")
-          || lower.includes("overloaded")
-          || lower.includes("temporarily")
-          || lower.includes("unavailable");
-        if (!retryable) return json({ ok: false, error: residualLastMessage }, response.status >= 500 ? 502 : 400);
-      }
+      const residualCall = await callGeminiWithTimeout(geminiKey, geminiModels, residualRequest, "residual");
+      const residualResult = residualCall.result;
+      const residualModel = residualCall.usedModel;
+      const residualLastStatus = residualCall.lastStatus;
+      const residualLastMessage = residualCall.lastMessage;
 
       if (!residualResult || !residualModel) {
         return json({
@@ -496,37 +522,11 @@ Restituisci esclusivamente JSON conforme allo schema.`;
           responseMimeType: "application/json"
         }
       });
-
-      let receiptResult: any = null;
-      let receiptModel = "";
-      let receiptLastStatus = 0;
-      let receiptLastMessage = "";
-
-      for (const model of geminiModels) {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": geminiKey
-          },
-          body: receiptRequest
-        });
-        const candidate = await response.json().catch(() => ({}));
-        if (response.ok) {
-          receiptResult = candidate;
-          receiptModel = model;
-          break;
-        }
-        receiptLastStatus = response.status;
-        receiptLastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
-        const lower = receiptLastMessage.toLowerCase();
-        const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
-          || lower.includes("high demand")
-          || lower.includes("overloaded")
-          || lower.includes("temporarily")
-          || lower.includes("unavailable");
-        if (!retryable) return json({ ok: false, error: receiptLastMessage }, response.status >= 500 ? 502 : 400);
-      }
+      const receiptCall = await callGeminiWithTimeout(geminiKey, geminiModels, receiptRequest, "receipt_image");
+      const receiptResult = receiptCall.result;
+      const receiptModel = receiptCall.usedModel;
+      const receiptLastStatus = receiptCall.lastStatus;
+      const receiptLastMessage = receiptCall.lastMessage;
 
       if (!receiptResult || !receiptModel) {
         return json({
@@ -649,42 +649,11 @@ Restituisci esclusivamente JSON conforme allo schema.`;
         responseSchema: schema
       }
     });
-
-    let result: any = null;
-    let usedModel = "";
-    let lastStatus = 0;
-    let lastMessage = "";
-
-    for (const model of geminiModels) {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": geminiKey
-        },
-        body: requestBody
-      });
-
-      const candidate = await response.json().catch(() => ({}));
-      if (response.ok) {
-        result = candidate;
-        usedModel = model;
-        break;
-      }
-
-      lastStatus = response.status;
-      lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
-      const lower = lastMessage.toLowerCase();
-      const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
-        || lower.includes("high demand")
-        || lower.includes("overloaded")
-        || lower.includes("temporarily")
-        || lower.includes("unavailable");
-
-      if (!retryable) {
-        return json({ ok: false, error: lastMessage }, response.status >= 500 ? 502 : 400);
-      }
-    }
+      const geminiCall = await callGeminiWithTimeout(geminiKey, geminiModels, requestBody, "pantry_photo");
+      const result = geminiCall.result;
+      const usedModel = geminiCall.usedModel;
+      const lastStatus = geminiCall.lastStatus;
+      const lastMessage = geminiCall.lastMessage;
 
     if (!result || !usedModel) {
       return json({
