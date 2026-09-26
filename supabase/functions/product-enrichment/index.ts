@@ -239,7 +239,7 @@ Deno.serve(async (req) => {
     if (memberError || !membership) return json({ ok: false, error: "forbidden" }, 403);
 
     if (body?.action === "status") {
-      return json({ ok: true, provider: "openfoodfacts", automaticLimit: 6 });
+      return json({ ok: true, provider: "openfoodfacts", automaticLimit: 20 });
     }
 
     const allowed = await rateLimit(client, "product_enrichment_lookup", `${user.id}:${familyId}`, 60, 3600);
@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
     }
 
     if (body?.action === "batch") {
-      const items = arr(body?.items).slice(0, 6);
+      const items = arr(body?.items).slice(0, 20);
       if (!items.length) return json({ ok: true, provider: "openfoodfacts", results: [] });
 
       const settled = await Promise.allSettled(items.map(lookupOne));
