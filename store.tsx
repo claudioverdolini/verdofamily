@@ -1524,11 +1524,19 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       }
       const incomingBarcode = String(clean.barcode || clean.productInfo?.barcode || '').replace(/\D/g, '')
       const incomingBrand = normalize(clean.brand || clean.productInfo?.brand || '')
+      const incomingVariant = normalize(clean.variant || '')
+      const incomingPackageSize = normalize(clean.packageSize || clean.productInfo?.packageQuantity || '')
+      const compatibleIdentity = (incoming: string, current: string) => !incoming || !current || incoming === current
       const existing = prev.pantry.find(current => {
         const currentBarcode = String(current.barcode || current.productInfo?.barcode || '').replace(/\D/g, '')
+        const currentBrand = normalize(current.brand || current.productInfo?.brand || '')
+        const currentVariant = normalize(current.variant || '')
+        const currentPackageSize = normalize(current.packageSize || current.productInfo?.packageQuantity || '')
         const sameSku = !!incomingBarcode && !!currentBarcode && incomingBarcode === currentBarcode
         const sameNamedProduct = normalize(current.name) === normalize(clean.name)
-          && (!incomingBrand || !normalize(current.brand || current.productInfo?.brand || '') || incomingBrand === normalize(current.brand || current.productInfo?.brand || ''))
+          && compatibleIdentity(incomingBrand, currentBrand)
+          && compatibleIdentity(incomingVariant, currentVariant)
+          && compatibleIdentity(incomingPackageSize, currentPackageSize)
         return (sameSku || sameNamedProduct)
           && normalize(current.unit) === normalize(clean.unit)
           && (current.location || 'pantry') === (clean.location || 'pantry')
@@ -1629,14 +1637,24 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
         const observedQty = Math.max(0, Number(raw.qty || 0))
         const incomingBarcode = String(raw.barcode || raw.productInfo?.barcode || '').replace(/\D/g, '')
         const incomingName = normalize(name)
+        const incomingBrand = normalize(raw.brand || raw.productInfo?.brand || '')
+        const incomingVariant = normalize(raw.variant || '')
+        const incomingPackageSize = normalize(raw.packageSize || raw.productInfo?.packageQuantity || '')
+        const compatibleIdentity = (incoming: string, current: string) => !incoming || !current || incoming === current
 
         const matches = pantry
           .map((item, index) => ({ item, index }))
           .filter(({ item }) => {
             const currentBarcode = String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+            const currentBrand = normalize(item.brand || item.productInfo?.brand || '')
+            const currentVariant = normalize(item.variant || '')
+            const currentPackageSize = normalize(item.packageSize || item.productInfo?.packageQuantity || '')
             const sameSku = !!incomingBarcode && !!currentBarcode && incomingBarcode === currentBarcode
-            const sameName = normalize(item.name) === incomingName
-            return (sameSku || sameName)
+            const sameProduct = normalize(item.name) === incomingName
+              && compatibleIdentity(incomingBrand, currentBrand)
+              && compatibleIdentity(incomingVariant, currentVariant)
+              && compatibleIdentity(incomingPackageSize, currentPackageSize)
+            return (sameSku || sameProduct)
               && normalize(item.unit) === normalize(unit)
               && (item.location || 'pantry') === location
           })
@@ -1760,13 +1778,20 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       const location = item.location || defaultLocation
       const expiryDate = item.expiryDate || undefined
       const incomingBrand = normalize(item.brand || item.productInfo?.brand || '')
+      const incomingVariant = normalize(item.variant || '')
+      const incomingPackageSize = normalize(item.packageSize || item.productInfo?.packageQuantity || '')
       const incomingBarcode = String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '')
+      const compatibleIdentity = (incoming: string, current: string) => !incoming || !current || incoming === current
       const idx = next.findIndex(p => {
         const currentBrand = normalize(p.brand || p.productInfo?.brand || '')
+        const currentVariant = normalize(p.variant || '')
+        const currentPackageSize = normalize(p.packageSize || p.productInfo?.packageQuantity || '')
         const currentBarcode = String(p.barcode || p.productInfo?.barcode || '').replace(/\D/g, '')
         const sameSku = !!incomingBarcode && !!currentBarcode && incomingBarcode === currentBarcode
         const sameNamedProduct = normalize(p.name) === normalize(item.name)
-          && (!incomingBrand || !currentBrand || incomingBrand === currentBrand)
+          && compatibleIdentity(incomingBrand, currentBrand)
+          && compatibleIdentity(incomingVariant, currentVariant)
+          && compatibleIdentity(incomingPackageSize, currentPackageSize)
         return (sameSku || sameNamedProduct)
           && normalize(p.unit) === normalize(item.unit)
           && (p.location || 'pantry') === location
