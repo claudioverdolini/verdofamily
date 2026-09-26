@@ -1305,6 +1305,39 @@ export default function ShoppingPantryPage() {
     return existing ? rowWithExistingPantry(row, existing) : { ...row, mode: 'existing', existingPantryId: undefined }
   }
 
+  function productIdentityEditor(row: any, onPatch: (patch: Record<string, any>) => void) {
+    const existing = row.existingPantryId
+      ? data.pantry.find(item => item.id === Number(row.existingPantryId))
+      : undefined
+
+    if (row.mode === 'existing' && existing) {
+      return <div className="receipt-product-identity receipt-product-identity--linked field--wide">
+        <div className="receipt-product-identity__head">
+          <div><strong>Scheda prodotto associata</strong><span>Questa identità viene usata per non confondere prodotti con lo stesso nome.</span></div>
+          {existing.productInfo ? <Badge tone="success">Scheda tecnica</Badge> : null}
+        </div>
+        <div className="receipt-product-identity__summary">
+          {existing.brand || existing.productInfo?.brand ? <span><small>Marca</small><b>{existing.brand || existing.productInfo?.brand}</b></span> : null}
+          {existing.variant ? <span><small>Variante</small><b>{existing.variant}</b></span> : null}
+          {existing.packageSize || existing.productInfo?.packageQuantity ? <span><small>Formato</small><b>{existing.packageSize || existing.productInfo?.packageQuantity}</b></span> : null}
+          {existing.barcode || existing.productInfo?.barcode ? <span><small>EAN</small><b>{existing.barcode || existing.productInfo?.barcode}</b></span> : null}
+        </div>
+      </div>
+    }
+
+    return <div className="receipt-product-identity field--wide">
+      <div className="receipt-product-identity__head">
+        <div><strong>Scheda prodotto</strong><span>Marca, variante e formato distinguono articoli omonimi. Se disponibile, cercherò anche la scheda tecnica online.</span></div>
+      </div>
+      <div className="receipt-product-identity__grid">
+        <Field label="Marca"><input value={row.brand || ''} onChange={e => onPatch({ brand: e.target.value })} placeholder="Es. Divella" /></Field>
+        <Field label="Variante / linea"><input value={row.variant || ''} onChange={e => onPatch({ variant: e.target.value })} placeholder="Es. Ziti n. 27" /></Field>
+        <Field label="Formato confezione"><input value={row.packageSize || ''} onChange={e => onPatch({ packageSize: e.target.value })} placeholder="Es. 500 g" /></Field>
+        <Field label="Barcode / EAN"><input inputMode="numeric" value={row.barcode || ''} onChange={e => onPatch({ barcode: e.target.value.replace(/\D/g, '').slice(0, 14) })} placeholder="8–14 cifre" /></Field>
+      </div>
+    </div>
+  }
+
   function analyzeReceipt(text = receiptText) {
     const inspection = inspectReceiptText(text)
     const lines = parseReceiptLines(text)
@@ -1662,7 +1695,7 @@ export default function ShoppingPantryPage() {
           </Card>
 
           <Card>
-            <CardHeader title="2. Verifica associazioni" subtitle="Quando il match non è sicuro, scegli un prodotto esistente oppure creane uno nuovo." />
+            <CardHeader title="2. Verifica prodotti" subtitle="Controlla associazione, marca, variante, formato ed EAN. I prodotti omonimi restano distinti." />
             {receiptRows.length ? (
               <div className="receipt-matches">
                 {receiptRows.map(row => (
