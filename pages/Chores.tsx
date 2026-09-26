@@ -3,7 +3,7 @@ import { CheckCircle2, Clock3, Pencil, Plus, Repeat2, RotateCcw, Trash2, WalletC
 import { useFamily } from '../store'
 import MultiAssigneePicker from '../components/MultiAssigneePicker'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
-import { currencySymbol, formatDecimalInput, localDateISO, money, parseDecimalInput, sanitizeDecimalInput } from '../utils'
+import { currencySymbol, formatDecimalInput, localDateISO, money, parseDecimalInput, recurringChoreDueOn, sanitizeDecimalInput } from '../utils'
 
 const WEEKDAYS = [
   { id: 1, label: 'Lun' },
@@ -38,6 +38,7 @@ export default function ChoresPage() {
     rejectChore,
     deleteChore,
     upsertRecurringChore,
+    completeRecurringChore,
     toggleRecurringChore,
     deleteRecurringChore,
     payUser,
@@ -58,6 +59,30 @@ export default function ChoresPage() {
     : data.users
   const walletUsers = visibleUsers
   const pendingApprovalCount = data.chores.filter(chore => !chore.done && chore.completionStatus === 'pending').length
+  const today = localDateISO()
+  const availableRecurring = isChild && authUser
+    ? data.recurringChores.filter(item => {
+        const userIds = Array.from(new Set(
+          (Array.isArray(item.userIds) && item.userIds.length ? item.userIds : [item.userId])
+            .map(Number)
+            .filter((id: number) => id > 0)
+        ))
+        return item.active && userIds.includes(authUser.id) && recurringChoreDueOn(item, today)
+      })
+    : []
+
+  function recurringTodayStats(recurringChoreId: number) {
+    const rows = data.chores.filter(chore =>
+      chore.recurringChoreId === recurringChoreId
+      && chore.userId === authUser?.id
+      && chore.deadline === today
+    )
+    return {
+      total: rows.length,
+      pending: rows.filter(chore => !chore.done && chore.completionStatus === 'pending').length,
+      approved: rows.filter(chore => chore.done).length
+    }
+  }
 
   function openNew() {
     if (isChild) return
@@ -205,6 +230,31 @@ export default function ChoresPage() {
       />
     </div>
 
+    {isChild && tab === 'chores' && availableRecurring.length ? <Card>
+      <CardHeader
+        title="Attività disponibili oggi"
+        subtitle="Queste attività non creano righe in automatico. Tocca “Ho fatto” ogni volta che le completi, anche più volte nello stesso giorno."
+      />
+      <div className="check-list">
+        {availableRecurring.map(item => {
+          const stats = recurringTodayStats(item.id)
+          return <div key={item.id} className="check-item chore-item chore-item--open">
+            <span className="check-item__check"><Repeat2 size={16} /></span>
+            <div className="check-item__copy">
+              <strong>{item.title}</strong>
+              <span>{money(item.amount, currency)} per completamento</span>
+              <small className="chore-status chore-status--open">
+                {stats.total
+                  ? `Oggi: ${stats.total} ${stats.total === 1 ? 'volta' : 'volte'} · ${stats.pending} in attesa · ${stats.approved} approvate`
+                  : 'Nessuna esecuzione registrata oggi'}
+              </small>
+            </div>
+            <Button size="sm" onClick={() => completeRecurringChore(item.id)}>Ho fatto</Button>
+          </div>
+        })}
+      </div>
+    </Card> : null}
+
     {(tab === 'chores' || (isChild && tab === 'recurring')) ? <div className="chores-grid">{visibleUsers.map(user => {
       const chores = data.chores.filter(c => c.userId === user.id)
       const openCount = chores.filter(c => !c.done && c.completionStatus !== 'pending').length
@@ -289,7 +339,7 @@ export default function ChoresPage() {
     {!isChild && tab === 'recurring' ? <Card className="recurring-master-card">
       <CardHeader
         title="Compiti ricorrenti"
-        subtitle={`${data.recurringChores.filter(item => item.active).length} attivi · ogni attività può essere assegnata a più persone`}
+        subtitle={`${data.recurringChores.filter(item => item.active).length} attivi · sono attività disponibili, non righe create in anticipo`}
         action={<Button variant="soft" icon={<Repeat2 size={17} />} onClick={() => openRecurring()}>Nuovo</Button>}
       />
       {data.recurringChores.length ? <div className="recurring-list">
@@ -306,7 +356,7 @@ export default function ChoresPage() {
             </label>
             <button className="recurring-row__copy" onClick={() => openRecurring(item)}>
               <strong>{item.title}</strong>
-              <span>{recurringLabel(item.weekdays)} · {money(item.amount, currency)} per persona</span>
+              <span>{recurringLabel(item.weekdays)} · {money(item.amount, currency)} per completamento</span>
               <span className="recurring-row__people">
                 <span className="recurring-row__avatars">{assignees.slice(0, 4).map((user: any) => <Avatar key={user.id} user={user} size="xs" />)}</span>
                 <small>{assignees.map((user: any) => user.name).join(', ') || 'Nessun assegnatario'}</small>
@@ -323,7 +373,7 @@ export default function ChoresPage() {
       </div> : <EmptyState
         icon={<Repeat2 size={28} />}
         title="Nessun compito ricorrente"
-        text="Crea attività abituali come apparecchiare, rifare il letto o sistemare la camera e assegnale a una o più persone."
+        text="Crea attività abituali come apparecchiare, rifare il letto o sistemare la camera. Verrà registrata una riga solo quando qualcuno segnala di averle completate."
         action={<Button variant="soft" onClick={() => openRecurring()}>Crea il primo</Button>}
       />}
     </Card> : null}
@@ -496,7 +546,7 @@ export default function ChoresPage() {
             checked={recurringEditing.active !== false}
             onChange={e => setRecurringEditing({ ...recurringEditing, active: e.target.checked })}
           />
-          Attivo: genera automaticamente il compito nei giorni selezionati
+          Attivo: rende l’attività disponibile nei giorni selezionati, senza creare record automatici
         </label>
       </div> : null}
     </Modal> : null}
