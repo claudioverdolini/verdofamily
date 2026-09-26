@@ -243,7 +243,11 @@ async function readFinance(client: any, familyId: string) {
     approvedByUserId: row.approved_by_person_id ? personLegacy.get(String(row.approved_by_person_id)) || undefined : undefined,
     creditedTransactionId: row.credited_transaction_id ? txLegacy.get(String(row.credited_transaction_id)) || undefined : undefined,
     recurringChoreId: row.recurring_chore_id ? recurringLegacy.get(String(row.recurring_chore_id)) || undefined : undefined
-  })).filter((row: any) => row.userId > 0);
+  })).filter((row: any) => row.userId > 0 && !(
+    row.recurringChoreId
+    && row.completionStatus === "open"
+    && !row.completedAt
+  ));
 
   return { wallets, recurringChores, transactions, chores };
 }
@@ -409,7 +413,11 @@ async function syncAdultFinance(admin: any, familyId: string, snapshot: any) {
     credited_transaction_id: txByLegacy.get(n(item.creditedTransactionId)) || null,
     recurring_chore_id: recurringByLegacy.get(n(item.recurringChoreId)) || null,
     updated_at: now
-  })).filter((row: any) => row.legacy_id > 0 && row.person_id);
+  })).filter((row: any) => row.legacy_id > 0 && row.person_id && !(
+    row.recurring_chore_id
+    && row.status === "open"
+    && !row.completed_at
+  ));
 
   if (choreRows.length) {
     const { error } = await admin.from("finance_chores").upsert(choreRows, { onConflict: "family_id,legacy_id" });
@@ -421,13 +429,16 @@ async function syncAdultFinance(admin: any, familyId: string, snapshot: any) {
   const keepTransactions = new Set(transactionRows.map((row: any) => row.legacy_id));
 
   const [{ data: choresDb }, { data: recurringAll }, { data: txAll }] = await Promise.all([
-    admin.from("finance_chores").select("id,legacy_id").eq("family_id", familyId),
+    admin.from("finance_chores").select("id,legacy_id,status,completed_at,approved_at").eq("family_id", familyId),
     admin.from("finance_recurring_chores").select("id,legacy_id").eq("family_id", familyId),
     admin.from("finance_transactions").select("id,legacy_id").eq("family_id", familyId)
   ]);
 
   for (const row of choresDb || []) {
     if (!keepChores.has(Number(row.legacy_id))) {
+      // Pending and approved rows are completion history. A stale device must
+      // never erase them merely because its local snapshot does not contain them.
+      if (row.status === "pending" || row.status === "approved") continue;
       const { error } = await admin.from("finance_chores").delete().eq("id", row.id);
       dbError(error, "delete chore");
     }
