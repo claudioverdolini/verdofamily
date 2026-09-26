@@ -108,10 +108,10 @@ function financePushDetails(previous: any, next: any) {
     const before = choreChange.before;
     const status = item?.completionStatus === "pending" && before?.completionStatus !== "pending"
       ? "pending"
-      : !before
-        ? "new"
-        : item?.done === true && before?.done !== true
-          ? "approved"
+      : item?.done === true && before?.done !== true
+        ? "approved"
+        : !before
+          ? "new"
           : "updated";
     return [{
       category: "chores",
