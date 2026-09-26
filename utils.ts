@@ -1,4 +1,4 @@
-import type { BoardPost, CalendarEvent, CurrencyCode, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
+import type { BoardPost, CalendarEvent, Chore, CurrencyCode, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Piatto veloce/unico', 'Dolce', 'Altro']
