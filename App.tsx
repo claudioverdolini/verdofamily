@@ -277,6 +277,7 @@ function NotificationCenter() {
   const [onlyUnread, setOnlyUnread] = useState(false)
   const [nowTick, setNowTick] = useState(() => Date.now())
   const [liveUpdates, setLiveUpdates] = useState<AppNotification[]>([])
+  const [openSnapshot, setOpenSnapshot] = useState<AppNotification[] | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const previousHashes = useRef<Record<string, string> | null>(null)
 
@@ -308,10 +309,16 @@ function NotificationCenter() {
   useEffect(() => {
     if (!open) return
     const onPointer = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false)
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false)
+        setOpenSnapshot(null)
+      }
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key === 'Escape') {
+        setOpen(false)
+        setOpenSnapshot(null)
+      }
     }
     document.addEventListener('mousedown', onPointer)
     document.addEventListener('keydown', onKey)
@@ -645,7 +652,9 @@ function NotificationCenter() {
   }, [authUser, data, liveUpdates, cloudStatus, nowTick])
 
   const unread = notifications.filter(item => !readIds.includes(item.id))
-  const visible = onlyUnread ? unread : notifications
+  const panelNotifications = openSnapshot || notifications
+  const panelUnread = panelNotifications.filter(item => !readIds.includes(item.id))
+  const visible = onlyUnread ? panelUnread : panelNotifications
 
   function saveReadIds(ids: string[]) {
     const merged = Array.from(new Set([...readIds, ...ids])).slice(-300)
@@ -656,15 +665,21 @@ function NotificationCenter() {
     if (!readIds.includes(id)) saveReadIds([id])
   }
 
-  useEffect(() => {
-    if (!open || !unread.length) return
-    const ids = unread.map(item => item.id)
-    const timer = window.setTimeout(() => {
-      saveReadIds(ids)
-      setOnlyUnread(false)
-    }, 500)
-    return () => window.clearTimeout(timer)
-  }, [open, unread.map(item => item.id).join('|')])
+  function toggleNotificationCenter() {
+    if (open) {
+      setOpen(false)
+      setOpenSnapshot(null)
+      return
+    }
+
+    // Freeze the exact list that produced the badge before marking anything
+    // as read. This prevents a "2" badge from opening into an empty panel if
+    // read state or cloud data refreshes during the same interaction.
+    setOpenSnapshot(notifications)
+    setOnlyUnread(false)
+    setOpen(true)
+    if (unread.length) saveReadIds(unread.map(item => item.id))
+  }
 
   function openNotification(item: AppNotification) {
     markRead(item.id)
@@ -694,14 +709,14 @@ function NotificationCenter() {
 
   return <div className="notification-center" ref={rootRef}>
     <div className="notification-bell-wrap">
-      <IconButton label="Notifiche" onClick={() => setOpen(value => !value)}><Bell size={19} /></IconButton>
+      <IconButton label="Notifiche" onClick={toggleNotificationCenter}><Bell size={19} /></IconButton>
       {unread.length ? <span className="notification-badge">{unread.length > 99 ? '99+' : unread.length}</span> : null}
     </div>
 
     {open ? <div className="notification-panel">
       <div className="notification-panel__head">
-        <div><strong>Notifiche</strong><span>{unread.length ? `${unread.length} non ${unread.length === 1 ? 'letta' : 'lette'}` : 'Tutto sotto controllo'}</span></div>
-        <IconButton label="Chiudi notifiche" onClick={() => setOpen(false)}><X size={18} /></IconButton>
+        <div><strong>Notifiche</strong><span>{panelUnread.length ? `${panelUnread.length} non ${panelUnread.length === 1 ? 'letta' : 'lette'}` : 'Tutto sotto controllo'}</span></div>
+        <IconButton label="Chiudi notifiche" onClick={() => { setOpen(false); setOpenSnapshot(null) }}><X size={18} /></IconButton>
       </div>
 
       <div className="notification-panel__toolbar">
@@ -709,7 +724,7 @@ function NotificationCenter() {
           <button className={!onlyUnread ? 'is-active' : ''} onClick={() => setOnlyUnread(false)}>Tutte</button>
           <button className={onlyUnread ? 'is-active' : ''} onClick={() => setOnlyUnread(true)}>Non lette</button>
         </div>
-        {unread.length ? <button className="notification-mark-all" onClick={() => saveReadIds(unread.map(item => item.id))}>Segna tutte lette</button> : null}
+        {panelUnread.length ? <button className="notification-mark-all" onClick={() => saveReadIds(panelUnread.map(item => item.id))}>Segna tutte lette</button> : null}
       </div>
 
       <div className="notification-list">
