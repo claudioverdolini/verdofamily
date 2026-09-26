@@ -182,8 +182,12 @@ export default function ShoppingPantryPage() {
     if (!cloudAuthenticated || !familyId || !supabase || !items.length) return items
 
     const withExisting = items.map(item => {
-      const existing = data.pantry.find(pantryItem =>
-        normalize(pantryItem.name) === normalize(item.name) && !!pantryItem.productInfo
+      const existing = findExistingPantryProduct(
+        item.name,
+        item.brand || '',
+        item.barcode || '',
+        item.variant || '',
+        item.packageSize || ''
       )
       return existing?.productInfo ? {
         ...item,
@@ -1211,6 +1215,75 @@ export default function ShoppingPantryPage() {
     data.shopping.forEach(x => names.set(normalize(x.name), x.name))
     data.dishes.forEach(d => d.ingredients.forEach(x => names.set(normalize(x.name), x.name)))
     return [...names.values()]
+  }
+
+  function pantryIdentityLabel(item: any) {
+    return [
+      item?.name,
+      item?.brand || item?.productInfo?.brand,
+      item?.variant,
+      item?.packageSize || item?.productInfo?.packageQuantity
+    ].map(value => String(value || '').trim()).filter(Boolean).join(' · ')
+  }
+
+  function findExistingPantryProduct(name: string, brand = '', barcode = '', variant = '', packageSize = '') {
+    const incomingBarcode = String(barcode || '').replace(/\D/g, '')
+    if (incomingBarcode) {
+      const byBarcode = data.pantry.find(item =>
+        String(item.barcode || item.productInfo?.barcode || '').replace(/\D/g, '') === incomingBarcode
+      )
+      if (byBarcode) return byBarcode
+    }
+
+    let candidates = data.pantry.filter(item => normalize(item.name) === normalize(name))
+    if (!candidates.length) return undefined
+
+    const incomingBrand = normalize(brand)
+    if (incomingBrand) {
+      candidates = candidates.filter(item =>
+        normalize(item.brand || item.productInfo?.brand || '') === incomingBrand
+      )
+      if (!candidates.length) return undefined
+    }
+
+    const incomingVariant = normalize(variant)
+    if (incomingVariant) {
+      const exactVariant = candidates.filter(item => normalize(item.variant || '') === incomingVariant)
+      if (exactVariant.length) candidates = exactVariant
+    }
+
+    const incomingPackage = normalize(packageSize)
+    if (incomingPackage) {
+      const exactPackage = candidates.filter(item =>
+        normalize(item.packageSize || item.productInfo?.packageQuantity || '') === incomingPackage
+      )
+      if (exactPackage.length) candidates = exactPackage
+    }
+
+    return candidates.length === 1 ? candidates[0] : undefined
+  }
+
+  function rowWithExistingPantry(row: any, existing: any) {
+    return {
+      ...row,
+      mode: 'existing',
+      existingPantryId: existing.id,
+      name: existing.name,
+      brand: existing.brand || existing.productInfo?.brand || row.brand || '',
+      variant: existing.variant || row.variant || '',
+      packageSize: existing.packageSize || existing.productInfo?.packageQuantity || row.packageSize || '',
+      barcode: existing.barcode || existing.productInfo?.barcode || row.barcode || '',
+      category: existing.category || row.category,
+      unit: existing.unit || row.unit,
+      location: existing.location || row.location || inferredStorageLocation(existing.name),
+      productInfo: existing.productInfo || row.productInfo
+    }
+  }
+
+  function updateRowAssociation(row: any, mode: string) {
+    if (mode === 'new') return { ...row, mode: 'new', existingPantryId: undefined, productInfo: undefined }
+    const existing = findExistingPantryProduct(row.name, row.brand, row.barcode, row.variant, row.packageSize)
+    return existing ? rowWithExistingPantry(row, existing) : { ...row, mode: 'existing', existingPantryId: undefined }
   }
 
   function analyzeReceipt(text = receiptText) {
