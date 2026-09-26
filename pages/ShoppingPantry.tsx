@@ -822,32 +822,34 @@ export default function ShoppingPantryPage() {
   }
 
   function aggregateReceiptRows(input: any[]) {
-    const groups = new Map<string, any>()
+    const groups: any[] = []
+    const compatible = (left: any, right: any) => {
+      const a = normalize(left || '')
+      const b = normalize(right || '')
+      return !a || !b || a === b
+    }
 
     for (const row of input) {
       if (!row?.name?.trim()) continue
-      const isExisting = row.mode === 'existing'
-      const identityParts = isExisting
-        ? [normalize(row.name), row.unit || 'pz', row.location || 'pantry']
-        : [
-            normalize(row.name),
-            normalize(row.brand || ''),
-            normalize(row.variant || ''),
-            normalize(row.packageSize || ''),
-            row.unit || 'pz',
-            row.location || 'pantry'
-          ]
-      const key = identityParts.join('|')
-      const current = groups.get(key)
+      const currentIndex = groups.findIndex(current => {
+        if (normalize(current.name) !== normalize(row.name)) return false
+        if ((current.unit || 'pz') !== (row.unit || 'pz')) return false
+        if ((current.location || 'pantry') !== (row.location || 'pantry')) return false
+        if (current.mode === 'existing' || row.mode === 'existing') return true
+        return compatible(current.brand, row.brand)
+          && compatible(current.variant, row.variant)
+          && compatible(current.packageSize, row.packageSize)
+      })
 
-      if (!current) {
-        groups.set(key, { ...row })
+      if (currentIndex < 0) {
+        groups.push({ ...row })
         continue
       }
 
+      const current = groups[currentIndex]
       const qty = Math.max(0, Number(current.qty) || 0) + Math.max(0, Number(row.qty) || 0)
-      const hasCurrentTotal = Number.isFinite(Number(current.totalPrice))
-      const hasRowTotal = Number.isFinite(Number(row.totalPrice))
+      const hasCurrentTotal = current.totalPrice !== undefined && current.totalPrice !== null && Number.isFinite(Number(current.totalPrice))
+      const hasRowTotal = row.totalPrice !== undefined && row.totalPrice !== null && Number.isFinite(Number(row.totalPrice))
       const totalPrice = hasCurrentTotal || hasRowTotal
         ? Math.round(((hasCurrentTotal ? Number(current.totalPrice) : 0) + (hasRowTotal ? Number(row.totalPrice) : 0)) * 100) / 100
         : undefined
@@ -855,7 +857,7 @@ export default function ShoppingPantryPage() {
       const rawParts = [current.raw, row.raw].map(value => String(value || '').trim()).filter(Boolean)
       const observedParts = [current.observedText, row.observedText].map(value => String(value || '').trim()).filter(Boolean)
 
-      groups.set(key, {
+      groups[currentIndex] = {
         ...current,
         qty,
         totalPrice,
@@ -868,10 +870,10 @@ export default function ShoppingPantryPage() {
         raw: [...new Set(rawParts)].join(' + '),
         observedText: [...new Set(observedParts)].join(' + '),
         suggestions: current.suggestions?.length ? current.suggestions : row.suggestions
-      })
+      }
     }
 
-    return [...groups.values()]
+    return groups
   }
 
   function applyReceiptVision(result: any) {
