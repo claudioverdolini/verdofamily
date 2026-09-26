@@ -364,46 +364,11 @@ export function recurringChoreDueOn(chore: RecurringChore, dateStr: string) {
   return weekdays.includes(isoWeekday(dateStr))
 }
 
-export function materializeRecurringChores(data: FamilyData, dateStr = localDateISO()): FamilyData {
-  const templates = Array.isArray(data.recurringChores) ? data.recurringChores : []
-  if (!templates.length) return data
-
-  let chores = data.chores
-  let changed = false
-
-  for (const template of templates) {
-    if (!recurringChoreDueOn(template, dateStr)) continue
-    const assigneeIds = Array.from(new Set(
-      (Array.isArray(template.userIds) && template.userIds.length ? template.userIds : [template.userId])
-        .map(Number)
-        .filter(id => id > 0)
-    ))
-
-    for (const userId of assigneeIds) {
-      const alreadyExists = chores.some(chore =>
-        Number(chore.recurringChoreId || 0) === Number(template.id)
-        && chore.deadline === dateStr
-        && Number(chore.userId) === userId
-      )
-      if (alreadyExists) continue
-
-      chores = [...chores, {
-        id: nextId(chores),
-        title: template.title,
-        deadline: dateStr,
-        userId,
-        amount: Math.max(0, Number(template.amount) || 0),
-        done: false,
-        completionStatus: 'open',
-        recurringChoreId: Number(template.id)
-      }]
-      changed = true
-    }
-  }
-
-  return changed ? { ...data, chores } : data
+export function materializeRecurringChores(data: FamilyData, _dateStr = localDateISO()): FamilyData {
+  // Compatibility no-op. Recurring chores are now templates that create a
+  // Chore record only when an assignee actually reports a completion.
+  return data
 }
-
 
 function daysBetween(startDate: string, endDate: string) {
   return Math.round((parseISODate(endDate).getTime() - parseISODate(startDate).getTime()) / 86400000)
