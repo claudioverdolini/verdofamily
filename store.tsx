@@ -178,6 +178,7 @@ type StoreValue = {
   deleteChore: (id: number) => void
   upsertRecurringChore: (chore: Omit<RecurringChore, 'id'> & { id?: number }) => void
   completeRecurringChore: (id: number) => void
+  completeRecurringChoreAsAdult: (id: number, userId: number) => void
   toggleRecurringChore: (id: number) => void
   deleteRecurringChore: (id: number) => void
   payUser: (userId: number, amount: number, note?: string) => boolean
@@ -2074,6 +2075,46 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  function completeRecurringChoreAsAdult(id: number, userId: number) {
+    if (!authUser || authUser.role === 'bimbo') return
+    setData(prev => {
+      const template = prev.recurringChores.find(item => item.id === id)
+      if (!template) return prev
+
+      const today = localDateISO()
+      const assigneeIds = Array.from(new Set(
+        (Array.isArray(template.userIds) && template.userIds.length ? template.userIds : [template.userId])
+          .map(Number)
+          .filter(candidateId => candidateId > 0)
+      ))
+
+      if (!template.active || !recurringChoreDueOn(template, today) || !assigneeIds.includes(userId)) return prev
+      if (!prev.users.some(user => user.id === userId)) return prev
+
+      const now = new Date().toISOString()
+      const completion: Chore = {
+        id: nextId(prev.chores),
+        title: template.title,
+        deadline: today,
+        userId,
+        amount: Math.max(0, Number(template.amount) || 0),
+        done: false,
+        completionStatus: 'pending',
+        completedAt: now,
+        completedByUserId: authUser.id,
+        recurringChoreId: template.id
+      }
+
+      const withCompletion = {
+        ...prev,
+        chores: [...prev.chores, completion]
+      }
+      // Since an adult is directly certifying that the activity was completed,
+      // approval and wallet credit happen immediately in the same operation.
+      return approveChoreState(withCompletion, completion, authUser.id)
+    })
+  }
+
   function toggleChore(id: number) {
     if (!authUser) return
     setData(prev => {
@@ -3093,7 +3134,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertPantryItem, deletePantryItem, changePantryQty, reconcilePantryItems,
     addShoppingItem, toggleShoppingItem, deleteShoppingItem, moveTakenShoppingToPantry, importReceiptItems,
     upsertDish, deleteDish, upsertMealPlan, deleteMealPlan,
-    addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, completeRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
+    addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, completeRecurringChore, completeRecurringChoreAsAdult, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
     addTodo, toggleTodo, deleteTodo,
     upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
