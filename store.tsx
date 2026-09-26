@@ -29,7 +29,7 @@ import type {
   UserPrefs
 } from './types'
 import { initialData } from './data'
-import { localDateISO, materializeRecurringChores, mergePrefs, migrateData, nextId, normalize } from './utils'
+import { localDateISO, mergePrefs, migrateData, nextId, normalize, recurringChoreDueOn } from './utils'
 import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
 import type { PushTopics } from './pushNotifications'
@@ -177,6 +177,7 @@ type StoreValue = {
   rejectChore: (id: number) => void
   deleteChore: (id: number) => void
   upsertRecurringChore: (chore: Omit<RecurringChore, 'id'> & { id?: number }) => void
+  completeRecurringChore: (id: number) => void
   toggleRecurringChore: (id: number) => void
   deleteRecurringChore: (id: number) => void
   payUser: (userId: number, amount: number, note?: string) => boolean
@@ -370,19 +371,6 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   }, [data])
-
-  useEffect(() => {
-    const ensureToday = () => setData(prev => {
-      const current = cloudUserId
-        ? prev.users.find(user => user.cloudUserId === cloudUserId)
-        : prev.users.find(user => user.id === sessionUserId)
-      if (isSupabaseConfigured && current?.role === 'bimbo') return prev
-      return materializeRecurringChores(prev, localDateISO())
-    })
-    ensureToday()
-    const timer = window.setInterval(ensureToday, 60_000)
-    return () => window.clearInterval(timer)
-  }, [data.recurringChores, cloudUserId, sessionUserId])
 
   useEffect(() => {
     if (sessionUserId) sessionStorage.setItem(SESSION_KEY, String(sessionUserId))
@@ -1984,35 +1972,58 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       }
       if (!clean.title || !clean.weekdays.length || !clean.userIds?.length) return prev
 
-      let next: FamilyData = {
+      return {
         ...prev,
         recurringChores: chore.id
           ? prev.recurringChores.map(item => item.id === chore.id ? clean : item)
-          : [...prev.recurringChores, clean]
+          : [...prev.recurringChores, clean],
+        // Legacy versions created an "open" row every day for a recurring
+        // template. Under the completion-driven model those rows are not real
+        // events, so discard only untouched synthetic rows and preserve every
+        // pending/approved completion.
+        chores: prev.chores.filter(item => !(
+          item.recurringChoreId === clean.id
+          && !item.done
+          && (item.completionStatus || 'open') === 'open'
+          && !item.completedAt
+        ))
       }
+    })
+  }
+
+  function completeRecurringChore(id: number) {
+    if (!authUser) return
+    setData(prev => {
+      const template = prev.recurringChores.find(item => item.id === id)
+      if (!template) return prev
 
       const today = localDateISO()
-      const selected = new Set(clean.userIds)
-      next = {
-        ...next,
-        chores: next.chores
-          .filter(item => !(
-            item.recurringChoreId === clean.id
-            && item.deadline === today
-            && !item.done
-            && (item.completionStatus || 'open') === 'open'
-            && !selected.has(Number(item.userId))
-          ))
-          .map(item =>
-            item.recurringChoreId === clean.id
-            && item.deadline === today
-            && !item.done
-            && selected.has(Number(item.userId))
-              ? { ...item, title: clean.title, amount: clean.amount }
-              : item
-          )
+      const assigneeIds = Array.from(new Set(
+        (Array.isArray(template.userIds) && template.userIds.length ? template.userIds : [template.userId])
+          .map(Number)
+          .filter(userId => userId > 0)
+      ))
+
+      // A recurring template is an available action, not a pre-created task.
+      // Every tap records one actual completion, so the same activity can be
+      // completed zero, one, or several times on the same day.
+      if (!template.active || !recurringChoreDueOn(template, today) || !assigneeIds.includes(authUser.id)) return prev
+
+      const now = new Date().toISOString()
+      const completion: Chore = {
+        id: nextId(prev.chores),
+        title: template.title,
+        deadline: today,
+        userId: authUser.id,
+        amount: Math.max(0, Number(template.amount) || 0),
+        done: false,
+        completionStatus: 'pending',
+        completedAt: now,
+        completedByUserId: authUser.id,
+        recurringChoreId: template.id
       }
-      return materializeRecurringChores(next, today)
+
+      return { ...prev, chores: [...prev.chores, completion] }
     })
   }
 
@@ -3082,7 +3093,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     upsertPantryItem, deletePantryItem, changePantryQty, reconcilePantryItems,
     addShoppingItem, toggleShoppingItem, deleteShoppingItem, moveTakenShoppingToPantry, importReceiptItems,
     upsertDish, deleteDish, upsertMealPlan, deleteMealPlan,
-    addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
+    addChore, toggleChore, approveChore, rejectChore, deleteChore, upsertRecurringChore, completeRecurringChore, toggleRecurringChore, deleteRecurringChore, payUser, undoTransaction,
     addTodo, toggleTodo, deleteTodo,
     upsertRoutine, toggleRoutineActive, deleteRoutine, completeRoutine, undoRoutineCompletion,
     upsertSchoolSubject, deleteSchoolSubject, upsertSchoolTimetableEntry, deleteSchoolTimetableEntry, upsertSchoolItem, toggleSchoolItem, deleteSchoolItem,
