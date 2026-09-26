@@ -106,10 +106,10 @@ function financePushDetails(previous: any, next: any) {
   if (choreChange?.after) {
     const item = choreChange.after;
     const before = choreChange.before;
-    const status = !before
-      ? "new"
-      : item?.completionStatus === "pending" && before?.completionStatus !== "pending"
-        ? "pending"
+    const status = item?.completionStatus === "pending" && before?.completionStatus !== "pending"
+      ? "pending"
+      : !before
+        ? "new"
         : item?.done === true && before?.done !== true
           ? "approved"
           : "updated";
@@ -462,7 +462,8 @@ async function syncChildFinance(admin: any, familyId: string, userId: string, sn
   const [
     { data: currentRows, error: currentError },
     { data: txRows, error: txError },
-    { data: recurringRows, error: recurringError }
+    { data: recurringRows, error: recurringError },
+    { data: recurringAssignees, error: recurringAssigneesError }
   ] = await Promise.all([
     admin
       .from("finance_chores")
@@ -475,21 +476,92 @@ async function syncChildFinance(admin: any, familyId: string, userId: string, sn
       .eq("family_id", familyId),
     admin
       .from("finance_recurring_chores")
-      .select("id,legacy_id")
+      .select("id,legacy_id,person_id,title,amount,weekdays,active,start_date,end_date")
+      .eq("family_id", familyId),
+    admin
+      .from("finance_recurring_chore_assignees")
+      .select("recurring_chore_id")
       .eq("family_id", familyId)
+      .eq("person_id", person.id)
   ]);
   dbError(currentError, "read child chores");
   dbError(txError, "read child transactions");
   dbError(recurringError, "read child recurring chores");
+  dbError(recurringAssigneesError, "read child recurring chore assignees");
 
   const currentByLegacy = new Map((currentRows || []).map((row: any) => [Number(row.legacy_id), row]));
   const txLegacyById = new Map((txRows || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
   const recurringLegacyById = new Map((recurringRows || []).map((row: any) => [String(row.id), Number(row.legacy_id)]));
+  const recurringByLegacy = new Map((recurringRows || []).map((row: any) => [Number(row.legacy_id), row]));
+  const assignedRecurringIds = new Set((recurringAssignees || []).map((row: any) => String(row.recurring_chore_id)));
+
+  const romeDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Rome",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+  const romeNoon = new Date(`${romeDate}T12:00:00Z`);
+  const romeWeekday = romeNoon.getUTCDay() === 0 ? 7 : romeNoon.getUTCDay();
 
   for (const proposed of incomingChores) {
     if (n(proposed?.userId) !== childId) throw new Error("forbidden_chore_change");
     const current = currentByLegacy.get(n(proposed?.id));
-    if (!current) throw new Error("forbidden_chore_create");
+    if (!current) {
+      const recurringLegacyId = n(proposed?.recurringChoreId);
+      const recurring = recurringByLegacy.get(recurringLegacyId);
+      const proposedStatus = proposed?.done === true
+        ? "approved"
+        : proposed?.completionStatus === "pending"
+          ? "pending"
+          : "open";
+      const weekdays = cleanWeekdays(recurring?.weekdays);
+      const assigned = !!recurring && (
+        String(recurring.person_id || "") === String(person.id)
+        || assignedRecurringIds.has(String(recurring.id))
+      );
+      const dateAllowed = !!recurring
+        && String(recurring.start_date || "") <= romeDate
+        && (!recurring.end_date || String(recurring.end_date) >= romeDate)
+        && weekdays.includes(romeWeekday);
+
+      if (
+        !recurring
+        || !assigned
+        || recurring.active === false
+        || !dateAllowed
+        || s(proposed?.deadline) !== romeDate
+        || proposedStatus !== "pending"
+        || proposed?.done === true
+        || n(proposed?.completedByUserId) !== childId
+        || s(proposed?.title) !== s(recurring.title)
+        || Math.abs(Number(proposed?.amount || 0) - Number(recurring.amount || 0)) > 0.0001
+        || proposed?.approvedAt
+        || proposed?.approvedByUserId
+        || proposed?.creditedTransactionId
+      ) {
+        throw new Error("forbidden_recurring_chore_completion");
+      }
+
+      const { error: insertError } = await admin.from("finance_chores").insert({
+        family_id: familyId,
+        legacy_id: n(proposed?.id),
+        person_id: person.id,
+        title: s(recurring.title) || "Compito ricorrente",
+        deadline: romeDate,
+        amount: Math.max(0, Number(recurring.amount || 0)),
+        status: "pending",
+        completed_at: s(proposed?.completedAt) || new Date().toISOString(),
+        completed_by_person_id: person.id,
+        approved_at: null,
+        approved_by_person_id: null,
+        credited_transaction_id: null,
+        recurring_chore_id: recurring.id,
+        updated_at: new Date().toISOString()
+      });
+      dbError(insertError, "create recurring chore completion");
+      continue;
+    }
 
     const currentRecurring = current.recurring_chore_id ? recurringLegacyById.get(String(current.recurring_chore_id)) : undefined;
     const currentTx = current.credited_transaction_id ? txLegacyById.get(String(current.credited_transaction_id)) : undefined;
