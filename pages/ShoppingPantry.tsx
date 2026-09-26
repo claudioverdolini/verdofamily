@@ -407,7 +407,7 @@ export default function ShoppingPantryPage() {
       const compressed = canvas.toDataURL('image/jpeg', .82)
       return { preview: compressed, imageData: compressed.split(',')[1] || '', mimeType: 'image/jpeg' }
     } catch {
-      if (!supportedRaw || file.size > 8_500_000) throw new Error('La foto è troppo grande o in un formato non supportato. Prova con JPG/PNG oppure riduci la dimensione.')
+      if (!supportedRaw || file.size > 18_000_000) throw new Error('La foto è troppo grande o in un formato non supportato. Prova con JPG/PNG oppure riduci la dimensione.')
       return { preview: original, imageData: original.split(',')[1] || '', mimeType: file.type.toLowerCase() }
     }
   }
@@ -1008,6 +1008,22 @@ export default function ShoppingPantryPage() {
       }
 
       setReceiptText(text)
+
+      // If direct image understanding failed, try a second intelligent pass on
+      // the OCR text before exposing noisy lines to the user.
+      if (cloudAuthenticated && familyId && supabase) {
+        try {
+          const cleaned = await callPantryVision('analyze-receipt-text', { receiptText: text })
+          const count = applyReceiptVision(cleaned)
+          if (count) {
+            setOcrProgress(1)
+            setEnrichmentMessage(`Ho ripulito l’OCR automaticamente: ${count} ${count === 1 ? 'prodotto identificato' : 'prodotti identificati'}.`)
+            setOcrError(aiError ? 'La lettura diretta della foto non era disponibile, ma ho corretto automaticamente il testo OCR.' : '')
+            return
+          }
+        } catch {}
+      }
+
       analyzeReceipt(text)
       if (aiError) setOcrError('Il riconoscimento intelligente non era disponibile: ho usato la lettura OCR locale. Controlla le righe prima di importare.')
     } catch {
