@@ -965,6 +965,7 @@ export default function ShoppingPantryPage() {
     setOcrError('')
     setEnrichmentMessage('')
     let aiError = ''
+    let textAiError = ''
 
     try {
       // First choice: multimodal receipt understanding. It reads the image as a
@@ -1015,10 +1016,8 @@ export default function ShoppingPantryPage() {
         return
       }
 
-      setReceiptText(text)
-
       // If direct image understanding failed, try a second intelligent pass on
-      // the OCR text before exposing noisy lines to the user.
+      // the OCR text before exposing anything noisy to the user.
       if (cloudAuthenticated && familyId && supabase) {
         try {
           const cleaned = await callPantryVision('analyze-receipt-text', { receiptText: text })
@@ -1029,13 +1028,25 @@ export default function ShoppingPantryPage() {
             setOcrError(aiError ? 'La lettura diretta della foto non era disponibile, ma ho corretto automaticamente il testo OCR.' : '')
             return
           }
-        } catch {}
+        } catch (error: any) {
+          textAiError = String(error?.message || '')
+        }
       }
 
+      // Last-resort local OCR: never dump the whole noisy OCR transcript in the
+      // main UI. Show only lines that our receipt parser considers product-like.
+      const fallbackLines = parseReceiptLines(text)
+      setReceiptText(fallbackLines.join('\n'))
       analyzeReceipt(text)
-      if (aiError) setOcrError(aiError.includes('conversione_iphone_non_disponibile')
-        ? 'La foto iPhone non è stata convertita correttamente per il riconoscimento intelligente: ho usato l’OCR locale. Prova a scattare una nuova foto direttamente dall’app.'
-        : 'Il riconoscimento intelligente non era disponibile: ho usato la lettura OCR locale. Controlla le righe prima di importare.')
+
+      if (aiError) {
+        const timedOut = /timeout|timed out|tempo/i.test(`${aiError} ${textAiError}`)
+        setOcrError(aiError.includes('conversione_iphone_non_disponibile')
+          ? 'La foto iPhone non è stata convertita correttamente per il riconoscimento intelligente: ho usato l’OCR locale. Prova a scattare una nuova foto direttamente dall’app.'
+          : timedOut
+            ? 'Il riconoscimento intelligente non ha risposto nei tempi previsti. Ho mostrato solo le righe dello scontrino che sembrano prodotti.'
+            : 'Il riconoscimento intelligente non era disponibile. Ho mostrato solo le righe dello scontrino che sembrano prodotti.')
+      }
     } catch {
       setOcrError(aiError || 'Non sono riuscito a leggere bene lo scontrino. Prova una foto più nitida oppure usa “Foto dispensa” per riconoscere direttamente i prodotti.')
     } finally {
