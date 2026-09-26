@@ -941,7 +941,12 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
       approvedAt: chore.approvedAt || undefined,
       approvedByUserId: chore.approvedByUserId ? Number(chore.approvedByUserId) : undefined,
       recurringChoreId: chore.recurringChoreId ? Number(chore.recurringChoreId) : undefined
-    })) : [],
+    })).filter((chore: Chore) => !(
+      chore.recurringChoreId
+      && !chore.done
+      && (chore.completionStatus || 'open') === 'open'
+      && !chore.completedAt
+    )) : [],
     recurringChores: Array.isArray(source.recurringChores) ? source.recurringChores.map((chore: any): RecurringChore => {
       const legacyUserId = Number(chore.userId || 0)
       const userIds = Array.from(new Set(
