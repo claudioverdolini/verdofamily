@@ -821,9 +821,62 @@ export default function ShoppingPantryPage() {
     return 'pantry'
   }
 
+  function aggregateReceiptRows(input: any[]) {
+    const groups = new Map<string, any>()
+
+    for (const row of input) {
+      if (!row?.name?.trim()) continue
+      const isExisting = row.mode === 'existing'
+      const identityParts = isExisting
+        ? [normalize(row.name), row.unit || 'pz', row.location || 'pantry']
+        : [
+            normalize(row.name),
+            normalize(row.brand || ''),
+            normalize(row.variant || ''),
+            normalize(row.packageSize || ''),
+            row.unit || 'pz',
+            row.location || 'pantry'
+          ]
+      const key = identityParts.join('|')
+      const current = groups.get(key)
+
+      if (!current) {
+        groups.set(key, { ...row })
+        continue
+      }
+
+      const qty = Math.max(0, Number(current.qty) || 0) + Math.max(0, Number(row.qty) || 0)
+      const hasCurrentTotal = Number.isFinite(Number(current.totalPrice))
+      const hasRowTotal = Number.isFinite(Number(row.totalPrice))
+      const totalPrice = hasCurrentTotal || hasRowTotal
+        ? Math.round(((hasCurrentTotal ? Number(current.totalPrice) : 0) + (hasRowTotal ? Number(row.totalPrice) : 0)) * 100) / 100
+        : undefined
+
+      const rawParts = [current.raw, row.raw].map(value => String(value || '').trim()).filter(Boolean)
+      const observedParts = [current.observedText, row.observedText].map(value => String(value || '').trim()).filter(Boolean)
+
+      groups.set(key, {
+        ...current,
+        qty,
+        totalPrice,
+        unitPrice: totalPrice !== undefined && qty > 0 ? Math.round(totalPrice / qty * 100) / 100 : current.unitPrice,
+        category: current.category === 'Generico' && row.category && row.category !== 'Generico' ? row.category : current.category,
+        brand: current.brand || row.brand || '',
+        variant: current.variant || row.variant || '',
+        packageSize: current.packageSize || row.packageSize || '',
+        confidence: Math.max(Number(current.confidence) || 0, Number(row.confidence) || 0),
+        raw: [...new Set(rawParts)].join(' + '),
+        observedText: [...new Set(observedParts)].join(' + '),
+        suggestions: current.suggestions?.length ? current.suggestions : row.suggestions
+      })
+    }
+
+    return [...groups.values()]
+  }
+
   function applyReceiptVision(result: any) {
     const catalog = catalogNames()
-    const rows = (Array.isArray(result?.items) ? result.items : []).map((item: any, index: number) => {
+    const rows = aggregateReceiptRows((Array.isArray(result?.items) ? result.items : []).map((item: any, index: number) => {
       const exact = item.matchName && catalog.some(name => normalize(name) === normalize(item.matchName))
         ? catalog.find(name => normalize(name) === normalize(item.matchName))
         : ''
@@ -866,7 +919,7 @@ export default function ShoppingPantryPage() {
         unitPrice,
         suggestions
       }
-    }).filter((row: any) => row.name)
+    }).filter((row: any) => row.name))
 
     const rawText = String(result?.rawText || '').trim() || [
       result?.merchant || '',
@@ -974,7 +1027,7 @@ export default function ShoppingPantryPage() {
     const inspection = inspectReceiptText(text)
     const lines = parseReceiptLines(text)
     const catalog = catalogNames()
-    const rows = lines.map((raw, index) => {
+    const rows = aggregateReceiptRows(lines.map((raw, index) => {
       const suggestions = catalog
         .map(name => ({ name, score: similarity(raw, name) }))
         .filter(x => x.score >= 0.18)
@@ -1001,7 +1054,7 @@ export default function ShoppingPantryPage() {
         unitPrice: totalPrice !== undefined && qty > 0 ? Math.round(totalPrice / qty * 100) / 100 : undefined,
         suggestions
       }
-    })
+    }))
     setReceiptMeta({
       merchant: inspection.merchant,
       date: inspection.date,
@@ -1017,7 +1070,7 @@ export default function ShoppingPantryPage() {
     const duplicateExpense = !!sourceRef && (data.expenses || []).some(item => item.source === 'receipt' && item.sourceRef === sourceRef)
     if (duplicateExpense && !window.confirm('Questo scontrino risulta già importato. Continuando potresti aumentare di nuovo le quantità in dispensa. Vuoi continuare comunque? La spesa non verrà duplicata nel Report.')) return
 
-    const selectedRows = receiptRows.filter(x => x.include && x.name.trim())
+    const selectedRows = aggregateReceiptRows(receiptRows.filter(x => x.include && x.name.trim()))
     const selected = selectedRows.map(x => ({
       name: x.name.trim(),
       qty: Math.max(0, Number(x.qty) || 1),
