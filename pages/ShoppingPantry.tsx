@@ -615,6 +615,7 @@ export default function ShoppingPantryPage() {
             qty: Math.max(1, Number(item.qty) || 1),
             unit: item.unit || 'pz',
             category,
+            location: ['pantry','fridge','freezer'].includes(String(item.location || '')) ? item.location : inventoryDestination,
             expiryDate: String(item.expiryDate || ''),
             suggestions
           }
@@ -658,7 +659,7 @@ export default function ShoppingPantryPage() {
       qty: Math.max(1, Number(x.qty) || 1),
       unit: x.unit || 'pz',
       category: x.category || 'Generico',
-      location: inventoryDestination,
+      location: x.location || inventoryDestination,
       expiryDate: x.expiryDate || undefined,
       brand: x.brand || '',
       variant: x.variant || '',
@@ -679,7 +680,7 @@ export default function ShoppingPantryPage() {
       if (!ok) return
       reconcilePantryItems(enriched, inventoryDestination)
     } else {
-      importReceiptItems(enriched, removeFromShopping, inventoryDestination)
+      importReceiptItems(enriched, removeFromShopping, 'pantry')
     }
     setPhotoRows([])
     setPhotoBatch([])
@@ -801,6 +802,91 @@ export default function ShoppingPantryPage() {
     })
   }
 
+  function inferredStorageLocation(name: string, existingName?: string): PantryLocation {
+    const exactName = existingName || name
+    const existing = data.pantry.find(item => normalize(item.name) === normalize(exactName))
+    if (existing?.location && ['pantry','fridge','freezer'].includes(existing.location)) return existing.location
+
+    const value = normalize(name)
+    const freezerWords = ['surgelat', 'congelat', 'gelato', 'ghiacciolo', 'frozen', 'pizza surgelata', 'patatine surgelate']
+    if (freezerWords.some(word => value.includes(normalize(word)))) return 'freezer'
+
+    const fridgeWords = [
+      'yogurt','latte fresco','mozzarella','burrata','ricotta','stracchino','mascarpone','formaggio',
+      'burro','panna fresca','prosciutto','salame','mortadella','affettato','wurstel','carne','pollo',
+      'tacchino','hamburger','pesce','salmone','tonno fresco','uova','pasta fresca','ravioli','tortellini',
+      'gnocchi freschi','tofu fresco'
+    ]
+    if (fridgeWords.some(word => value.includes(normalize(word)))) return 'fridge'
+    return 'pantry'
+  }
+
+  function applyReceiptVision(result: any) {
+    const catalog = catalogNames()
+    const rows = (Array.isArray(result?.items) ? result.items : []).map((item: any, index: number) => {
+      const exact = item.matchName && catalog.some(name => normalize(name) === normalize(item.matchName))
+        ? catalog.find(name => normalize(name) === normalize(item.matchName))
+        : ''
+      const searchText = `${item.detectedName || ''} ${item.observedText || ''}`.trim()
+      const suggestions = catalog
+        .map(name => ({ name, score: similarity(searchText, name) }))
+        .filter(x => x.score >= 0.16)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5)
+      const top = suggestions[0]
+      const confidentExisting = !!exact || (!!top && top.score >= 0.8)
+      const chosenName = exact || (confidentExisting ? top.name : String(item.detectedName || '').trim())
+      const matchedPantry = data.pantry.find(entry => normalize(entry.name) === normalize(chosenName))
+      const category = matchedPantry?.category || (data.categories.includes(item.category) ? item.category : 'Generico')
+      const requestedLocation = ['pantry','fridge','freezer'].includes(String(item.location || ''))
+        ? item.location as PantryLocation
+        : inferredStorageLocation(chosenName, exact || undefined)
+      const location = matchedPantry?.location || requestedLocation
+      const qty = Math.max(0.01, Number(item.qty) || 1)
+      const totalPrice = Number(item.totalPrice) > 0 ? Number(item.totalPrice) : undefined
+      const unitPrice = Number(item.unitPrice) > 0
+        ? Number(item.unitPrice)
+        : totalPrice !== undefined && qty > 0 ? Math.round(totalPrice / qty * 100) / 100 : undefined
+      return {
+        id: `vision-receipt-${Date.now()}-${index}`,
+        raw: String(item.detectedName || '').trim(),
+        observedText: String(item.observedText || '').trim(),
+        brand: String(item.brand || '').trim(),
+        variant: String(item.variant || '').trim(),
+        packageSize: String(item.packageSize || '').trim(),
+        confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
+        include: true,
+        mode: confidentExisting ? 'existing' : 'new',
+        name: chosenName,
+        qty,
+        unit: ['pz','g','kg','ml','l'].includes(item.unit) ? item.unit : 'pz',
+        category,
+        location,
+        totalPrice,
+        unitPrice,
+        suggestions
+      }
+    }).filter((row: any) => row.name)
+
+    const rawText = String(result?.rawText || '').trim() || [
+      result?.merchant || '',
+      result?.date || '',
+      ...rows.map((row: any) => `${row.observedText || row.raw}${row.totalPrice ? ` ${row.totalPrice.toFixed(2)}` : ''}`),
+      result?.total ? `TOTALE ${Number(result.total).toFixed(2)}` : ''
+    ].filter(Boolean).join('\n')
+
+    setReceiptText(rawText)
+    setReceiptMeta({
+      merchant: String(result?.merchant || '').trim(),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(String(result?.date || '')) ? result.date : localDateISO(),
+      total: Math.max(0, Number(result?.total) || 0),
+      category: 'groceries',
+      sourceRef: receiptFingerprint(rawText || JSON.stringify(result?.items || []))
+    })
+    setReceiptRows(rows)
+    return rows.length
+  }
+
   function looksLikeReceiptText(text: string) {
     const clean = text.replace(/\s+/g, ' ').toUpperCase()
     const priceHits = (clean.match(/\b\d{1,4}[,.]\d{2}\b/g) || []).length
@@ -814,19 +900,49 @@ export default function ShoppingPantryPage() {
     setOcrBusy(true)
     setOcrProgress(0)
     setOcrError('')
+    setEnrichmentMessage('')
+    let aiError = ''
+
     try {
+      // First choice: multimodal receipt understanding. It reads the image as a
+      // receipt and reconstructs real product names instead of exposing noisy OCR.
+      if (cloudAuthenticated && familyId && supabase) {
+        try {
+          setOcrProgress(0.12)
+          const prepared = await preparePantryPhoto(file)
+          setOcrProgress(0.28)
+          const result = await callPantryVision('analyze-receipt', {
+            imageData: prepared.imageData,
+            mimeType: prepared.mimeType
+          })
+          setOcrProgress(0.92)
+          const count = applyReceiptVision(result)
+          if (count) {
+            setOcrProgress(1)
+            setEnrichmentMessage(`Riconoscimento intelligente completato: ${count} ${count === 1 ? 'prodotto identificato' : 'prodotti identificati'} e destinazione proposta automaticamente.`)
+            return
+          }
+          aiError = 'Nessun prodotto identificato con sufficiente affidabilità.'
+        } catch (error: any) {
+          aiError = String(error?.message || '')
+        }
+      }
+
+      // Offline / backend fallback: keep local OCR available, but apply semantic
+      // storage heuristics so imported items are not all forced into Dispensa.
       const mod: any = await import('tesseract.js')
       const T = mod.default || mod
       const res = await T.recognize(file, 'ita', {
         logger: (msg: any) => {
-          if (msg?.status === 'recognizing text' && typeof msg.progress === 'number') setOcrProgress(msg.progress)
+          if (msg?.status === 'recognizing text' && typeof msg.progress === 'number') {
+            const localProgress = Math.max(0, Math.min(1, msg.progress))
+            setOcrProgress(0.3 + localProgress * 0.7)
+          }
         }
       })
       const text = res?.data?.text || ''
       if (!text.trim()) throw new Error('empty')
 
-      // Product/scenery photos can produce pages of meaningless OCR. Never expose
-      // that dump to the user: move the same photo to visual product recognition.
       if (!looksLikeReceiptText(text)) {
         setReceiptText('')
         setReceiptRows([])
@@ -838,8 +954,9 @@ export default function ShoppingPantryPage() {
 
       setReceiptText(text)
       analyzeReceipt(text)
+      if (aiError) setOcrError('Il riconoscimento intelligente non era disponibile: ho usato la lettura OCR locale. Controlla le righe prima di importare.')
     } catch {
-      setOcrError('Non sono riuscito a leggere bene lo scontrino. Prova una foto più nitida oppure usa “Foto dispensa” per riconoscere direttamente i prodotti.')
+      setOcrError(aiError || 'Non sono riuscito a leggere bene lo scontrino. Prova una foto più nitida oppure usa “Foto dispensa” per riconoscere direttamente i prodotti.')
     } finally {
       setOcrBusy(false)
     }
@@ -865,18 +982,21 @@ export default function ShoppingPantryPage() {
         .slice(0, 5)
       const top = suggestions[0]
       const confident = !!top && top.score >= 0.72
+      const matchedPantry = confident ? data.pantry.find(item => normalize(item.name) === normalize(top.name)) : undefined
       const detail = inspection.details.get(normalize(raw))
       const qty = Math.max(0, Number(detail?.qty || 1))
       const totalPrice = detail?.price
+      const chosenName = confident ? top.name : raw
       return {
         id: `${Date.now()}-${index}`,
         raw,
         include: true,
         mode: confident ? 'existing' : 'new',
-        name: confident ? top.name : raw,
+        name: chosenName,
         qty,
-        unit: 'pz',
-        category: 'Generico',
+        unit: matchedPantry?.unit || 'pz',
+        category: matchedPantry?.category || 'Generico',
+        location: matchedPantry?.location || inferredStorageLocation(chosenName),
         totalPrice,
         unitPrice: totalPrice !== undefined && qty > 0 ? Math.round(totalPrice / qty * 100) / 100 : undefined,
         suggestions
@@ -903,8 +1023,11 @@ export default function ShoppingPantryPage() {
       qty: Math.max(0, Number(x.qty) || 1),
       unit: x.unit || 'pz',
       category: x.category || 'Generico',
-      location: inventoryDestination,
-      observedText: x.raw || x.name
+      location: x.location || inferredStorageLocation(x.name),
+      brand: x.brand || '',
+      variant: x.variant || '',
+      packageSize: x.packageSize || '',
+      observedText: x.observedText || x.raw || x.name
     }))
     if (!selected.length) return
     const enriched = await enrichImportedItems(selected)
@@ -919,7 +1042,7 @@ export default function ShoppingPantryPage() {
         category: receiptMeta.category || 'groceries',
         source: 'receipt',
         sourceRef,
-        notes: 'Importato automaticamente da OCR scontrino',
+        notes: 'Importato automaticamente da riconoscimento scontrino',
         items: selectedRows.map(row => ({
           id: crypto.randomUUID(),
           name: row.name.trim(),
@@ -1203,7 +1326,10 @@ export default function ShoppingPantryPage() {
                   <div key={row.id} className="receipt-match">
                     <div className="receipt-match__head">
                       <label><input type="checkbox" checked={row.include} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}</span></label>
-                      {row.mode === 'existing' ? <Badge tone="success">Associato</Badge> : <Badge tone="warning">Da verificare</Badge>}
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {Number.isFinite(Number(row.confidence)) ? <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge> : null}
+                        {row.mode === 'existing' ? <Badge tone="success">Associato</Badge> : <Badge tone="warning">Da verificare</Badge>}
+                      </div>
                     </div>
                     {row.include ? (
                       <div className="receipt-match__grid">
@@ -1215,7 +1341,17 @@ export default function ShoppingPantryPage() {
                         </Field>
                         {row.mode === 'existing' ? (
                           <Field label="Prodotto">
-                            <select value={row.name} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))}>
+                            <select value={row.name} onChange={e => {
+                              const name = e.target.value
+                              const existing = data.pantry.find(item => normalize(item.name) === normalize(name))
+                              setReceiptRows(prev => prev.map(x => x.id === row.id ? {
+                                ...x,
+                                name,
+                                category: existing?.category || x.category,
+                                unit: existing?.unit || x.unit,
+                                location: existing?.location || inferredStorageLocation(name)
+                              } : x))
+                            }}>
                               {row.suggestions.length ? row.suggestions.map((s: any) => <option key={s.name} value={s.name}>{s.name} · {Math.round(s.score * 100)}%</option>) : <option value={row.name}>{row.name}</option>}
                               {catalogNames().filter(n => !row.suggestions.some((s: any) => s.name === n)).map(name => <option key={name} value={name}>{name}</option>)}
                             </select>
@@ -1226,6 +1362,7 @@ export default function ShoppingPantryPage() {
                         <Field label="Quantità"><input type="number" min="0" value={row.qty} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value), unitPrice: x.totalPrice !== undefined && Number(e.target.value) > 0 ? Math.round(x.totalPrice / Number(e.target.value) * 100) / 100 : x.unitPrice } : x))} /></Field>
                         <Field label="Prezzo riga €" hint="Facoltativo"><input type="number" min="0" step="0.01" value={row.totalPrice ?? ''} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, totalPrice: e.target.value === '' ? undefined : Number(e.target.value), unitPrice: e.target.value !== '' && Number(x.qty) > 0 ? Math.round(Number(e.target.value) / Number(x.qty) * 100) / 100 : undefined } : x))} /></Field>
                         <Field label="Unità"><select value={row.unit} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
+                        <Field label="Destinazione" hint="Scelta automaticamente in base al prodotto."><select value={row.location || 'pantry'} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, location: e.target.value as PantryLocation } : x))}><option value="pantry">Dispensa</option><option value="fridge">Frigo</option><option value="freezer">Freezer</option></select></Field>
                         {row.mode === 'new' ? <Field label="Categoria"><select value={row.category} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, category: e.target.value } : x))}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field> : null}
                       </div>
                     ) : null}
@@ -1299,10 +1436,21 @@ export default function ShoppingPantryPage() {
                   </div> : null}
                   {row.include ? <div className="receipt-match__grid">
                     <Field label="Associazione"><select value={row.mode} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, mode: e.target.value } : x))}><option value="existing">Prodotto esistente</option><option value="new">Crea nuovo prodotto</option></select></Field>
-                    {row.mode === 'existing' ? <Field label="Prodotto"><select value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))}>{row.suggestions.length ? row.suggestions.map((suggestion: any) => <option key={suggestion.name} value={suggestion.name}>{suggestion.name} · {Math.round(suggestion.score * 100)}%</option>) : <option value={row.name}>{row.name}</option>}{catalogNames().filter(name => !row.suggestions.some((suggestion: any) => suggestion.name === name)).map(name => <option key={name} value={name}>{name}</option>)}</select></Field> : <Field label="Nome prodotto"><input value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>}
+                    {row.mode === 'existing' ? <Field label="Prodotto"><select value={row.name} onChange={e => {
+                      const name = e.target.value
+                      const existing = data.pantry.find(item => normalize(item.name) === normalize(name))
+                      setPhotoRows(prev => prev.map(x => x.id === row.id ? {
+                        ...x,
+                        name,
+                        category: existing?.category || x.category,
+                        unit: existing?.unit || x.unit,
+                        location: existing?.location || x.location || inferredStorageLocation(name)
+                      } : x))
+                    }}>{row.suggestions.length ? row.suggestions.map((suggestion: any) => <option key={suggestion.name} value={suggestion.name}>{suggestion.name} · {Math.round(suggestion.score * 100)}%</option>) : <option value={row.name}>{row.name}</option>}{catalogNames().filter(name => !row.suggestions.some((suggestion: any) => suggestion.name === name)).map(name => <option key={name} value={name}>{name}</option>)}</select></Field> : <Field label="Nome prodotto"><input value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>}
                     <Field label="Quantità"><input type="number" min="1" value={row.qty} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value) } : x))} /></Field>
                     <Field label="Unità"><select value={row.unit} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
                     {row.mode === 'new' ? <Field label="Categoria"><select value={row.category} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, category: e.target.value } : x))}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field> : null}
+                    <Field label="Destinazione"><select value={row.location || inventoryDestination} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, location: e.target.value as PantryLocation } : x))}><option value="pantry">Dispensa</option><option value="fridge">Frigo</option><option value="freezer">Freezer</option></select></Field>
                     <Field label="Scadenza" hint="Solo se visibile/certa"><input type="date" value={row.expiryDate || ''} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, expiryDate: e.target.value } : x))} /></Field>
                     {['opened','possibly_opened'].includes(row.detectedPackageState) && !row.confirmedClosed ? <div className="open-package-check field--wide">
                       <div className="open-package-check__head">
