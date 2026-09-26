@@ -53,71 +53,84 @@ function textPart(result: any) {
 }
 
 async function callGeminiWithTimeout(
-  apiKey: string,
+  apiKeys: string[],
   models: string[],
   body: string,
   label: string
 ) {
   let result: any = null;
   let usedModel = "";
+  let usedKeyIndex = -1;
   let lastStatus = 0;
   let lastMessage = "";
   const attemptTimeouts = [14000, 9000, 7000];
   const candidates = models.slice(0, attemptTimeouts.length);
 
-  for (let index = 0; index < candidates.length; index += 1) {
-    const model = candidates[index];
-    const timeoutMs = attemptTimeouts[index];
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex += 1) {
+    const apiKey = apiKeys[keyIndex];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const model = candidates[index];
+      const timeoutMs = attemptTimeouts[index];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey
-          },
-          body,
-          signal: controller.signal
+      try {
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": apiKey
+            },
+            body,
+            signal: controller.signal
+          }
+        );
+
+        const candidate = await response.json().catch(() => ({}));
+        if (response.ok) {
+          result = candidate;
+          usedModel = model;
+          usedKeyIndex = keyIndex;
+          return { result, usedModel, usedKeyIndex, lastStatus: response.status, lastMessage: "" };
         }
-      );
 
-      const candidate = await response.json().catch(() => ({}));
-      if (response.ok) {
-        result = candidate;
-        usedModel = model;
-        return { result, usedModel, lastStatus: response.status, lastMessage: "" };
+        lastStatus = response.status;
+        lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
+        console.warn("gemini_attempt_failed", {
+          label,
+          keyIndex,
+          model,
+          status: response.status,
+          message: lastMessage.slice(0, 240)
+        });
+
+        // A denied/forbidden project cannot be fixed by trying more models on
+        // the same key. Move immediately to the next configured Gemini project.
+        if (response.status === 403 || /denied access|permission_denied|forbidden/i.test(lastMessage)) {
+          break;
+        }
+      } catch (error) {
+        const timedOut = controller.signal.aborted;
+        lastStatus = 0;
+        lastMessage = timedOut
+          ? `gemini_timeout_${timeoutMs}ms`
+          : String(error instanceof Error ? error.message : error);
+        console.warn("gemini_attempt_failed", {
+          label,
+          keyIndex,
+          model,
+          status: timedOut ? "timeout" : "network_error",
+          message: lastMessage.slice(0, 240)
+        });
+      } finally {
+        clearTimeout(timer);
       }
-
-      lastStatus = response.status;
-      lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
-      console.warn("gemini_attempt_failed", {
-        label,
-        model,
-        status: response.status,
-        message: lastMessage.slice(0, 240)
-      });
-    } catch (error) {
-      const timedOut = controller.signal.aborted;
-      lastStatus = 0;
-      lastMessage = timedOut
-        ? `gemini_timeout_${timeoutMs}ms`
-        : String(error instanceof Error ? error.message : error);
-      console.warn("gemini_attempt_failed", {
-        label,
-        model,
-        status: timedOut ? "timeout" : "network_error",
-        message: lastMessage.slice(0, 240)
-      });
-    } finally {
-      clearTimeout(timer);
     }
   }
 
-  return { result, usedModel, lastStatus, lastMessage };
+  return { result, usedModel, usedKeyIndex, lastStatus, lastMessage };
 }
 
 Deno.serve(async (req) => {
@@ -127,7 +140,12 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const geminiKey = Deno.env.get("GEMINI_API_KEY") || "";
+    const geminiKeys = [...new Set([
+      Deno.env.get("GEMINI_API_KEY") || "",
+      Deno.env.get("GEMINI_API_KEY_SECONDARY") || "",
+      Deno.env.get("GEMINI_API_KEY_TERTIARY") || ""
+    ].filter(Boolean))];
+    const geminiKey = geminiKeys[0] || "";
     const configuredModel = Deno.env.get("GEMINI_MODEL") || "";
     const geminiModels = [...new Set([
       "gemini-3.6-flash",
@@ -163,12 +181,18 @@ Deno.serve(async (req) => {
     if (memberError || !membership) return json({ ok: false, error: "forbidden" }, 403);
 
     if (body?.action === "status") {
-      return json({ ok: true, configured: !!geminiKey, model: geminiKey ? geminiModel : null, fallbackModels: geminiKey ? geminiModels : [] });
+      return json({
+        ok: true,
+        configured: geminiKeys.length > 0,
+        model: geminiKeys.length ? geminiModel : null,
+        fallbackModels: geminiKeys.length ? geminiModels : [],
+        configuredKeys: geminiKeys.length
+      });
     }
 
     const action = String(body?.action || "");
     if (!["analyze", "analyze-receipt", "analyze-receipt-text", "estimate-residual"].includes(action)) return json({ ok: false, error: "unknown_action" }, 400);
-    if (!geminiKey) return json({ ok: false, error: "vision_not_configured" }, 503);
+    if (!geminiKeys.length) return json({ ok: false, error: "vision_not_configured" }, 503);
 
     const allowed = await rateLimit(
       client,
@@ -277,7 +301,7 @@ Restituisci esclusivamente JSON conforme allo schema.`;
         contents: [{ role: "user", parts: [{ text: receiptPrompt }] }],
         generationConfig: { responseMimeType: "application/json" }
       });
-      const geminiCall = await callGeminiWithTimeout(geminiKey, geminiModels, requestBody, "receipt_text");
+      const geminiCall = await callGeminiWithTimeout(geminiKeys, geminiModels, requestBody, "receipt_text");
       const result = geminiCall.result;
       const usedModel = geminiCall.usedModel;
       const lastStatus = geminiCall.lastStatus;
@@ -375,7 +399,7 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
           responseSchema: residualSchema
         }
       });
-      const residualCall = await callGeminiWithTimeout(geminiKey, geminiModels, residualRequest, "residual");
+      const residualCall = await callGeminiWithTimeout(geminiKeys, geminiModels, residualRequest, "residual");
       const residualResult = residualCall.result;
       const residualModel = residualCall.usedModel;
       const residualLastStatus = residualCall.lastStatus;
@@ -522,7 +546,7 @@ Restituisci esclusivamente JSON conforme allo schema.`;
           responseMimeType: "application/json"
         }
       });
-      const receiptCall = await callGeminiWithTimeout(geminiKey, geminiModels, receiptRequest, "receipt_image");
+      const receiptCall = await callGeminiWithTimeout(geminiKeys, geminiModels, receiptRequest, "receipt_image");
       const receiptResult = receiptCall.result;
       const receiptModel = receiptCall.usedModel;
       const receiptLastStatus = receiptCall.lastStatus;
@@ -649,7 +673,7 @@ Restituisci esclusivamente JSON conforme allo schema.`;
         responseSchema: schema
       }
     });
-      const geminiCall = await callGeminiWithTimeout(geminiKey, geminiModels, requestBody, "pantry_photo");
+      const geminiCall = await callGeminiWithTimeout(geminiKeys, geminiModels, requestBody, "pantry_photo");
       const result = geminiCall.result;
       const usedModel = geminiCall.usedModel;
       const lastStatus = geminiCall.lastStatus;
