@@ -597,9 +597,14 @@ export default function ShoppingPantryPage() {
             .sort((a, b) => b.score - a.score)
             .slice(0, 5)
           const top = suggestions[0]
-          const confidentExisting = !!exact || (!!top && top.score >= .78)
-          const chosenName = exact || (confidentExisting ? top.name : String(item.detectedName || '').trim())
-          const category = data.categories.includes(item.category) ? item.category : 'Generico'
+          const confidentName = !!exact || (!!top && top.score >= .78)
+          const chosenName = exact || (confidentName ? top.name : String(item.detectedName || '').trim())
+          const detectedBrand = String(item.brand || '').trim()
+          const detectedVariant = String(item.variant || '').trim()
+          const detectedPackage = String(item.packageSize || '').trim()
+          const detectedBarcode = String(item.barcode || '').replace(/\D/g, '')
+          const matchedPantry = findExistingPantryProduct(chosenName, detectedBrand, detectedBarcode, detectedVariant, detectedPackage)
+          const category = matchedPantry?.category || (data.categories.includes(item.category) ? item.category : 'Generico')
           return {
             id: `photo-${photo.id}-${index}`,
             sourcePhotoId: photo.id,
@@ -607,10 +612,11 @@ export default function ShoppingPantryPage() {
             sourcePhotoName: photo.name || `Foto ${photoIndex + 1}`,
             raw: String(item.detectedName || '').trim(),
             observedText: String(item.observedText || '').trim(),
-            brand: String(item.brand || '').trim(),
-            variant: String(item.variant || '').trim(),
-            packageSize: String(item.packageSize || '').trim(),
-            barcode: String(item.barcode || '').replace(/\D/g, ''),
+            brand: matchedPantry?.brand || matchedPantry?.productInfo?.brand || detectedBrand,
+            variant: matchedPantry?.variant || detectedVariant,
+            packageSize: matchedPantry?.packageSize || matchedPantry?.productInfo?.packageQuantity || detectedPackage,
+            barcode: matchedPantry?.barcode || matchedPantry?.productInfo?.barcode || detectedBarcode,
+            productInfo: matchedPantry?.productInfo,
             detectedPackageState: ['sealed','opened','possibly_opened','unknown'].includes(String(item.packageState || '')) ? String(item.packageState) : 'unknown',
             packageState: ['opened','possibly_opened'].includes(String(item.packageState || '')) ? 'opened' : 'sealed',
             openReason: String(item.openReason || '').trim(),
@@ -622,12 +628,13 @@ export default function ShoppingPantryPage() {
             notes: String(item.notes || '').trim(),
             confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
             include: true,
-            mode: confidentExisting ? 'existing' : 'new',
-            name: chosenName,
+            mode: matchedPantry ? 'existing' : 'new',
+            existingPantryId: matchedPantry?.id,
+            name: matchedPantry?.name || chosenName,
             qty: Math.max(1, Number(item.qty) || 1),
-            unit: item.unit || 'pz',
+            unit: matchedPantry?.unit || item.unit || 'pz',
             category,
-            location: ['pantry','fridge','freezer'].includes(String(item.location || '')) ? item.location : inventoryDestination,
+            location: matchedPantry?.location || (['pantry','fridge','freezer'].includes(String(item.location || '')) ? item.location : inventoryDestination),
             expiryDate: String(item.expiryDate || ''),
             suggestions
           }
@@ -847,10 +854,15 @@ export default function ShoppingPantryPage() {
         if (normalize(current.name) !== normalize(row.name)) return false
         if ((current.unit || 'pz') !== (row.unit || 'pz')) return false
         if ((current.location || 'pantry') !== (row.location || 'pantry')) return false
-        if (current.mode === 'existing' || row.mode === 'existing') return true
+        if (current.mode === 'existing' || row.mode === 'existing') {
+          const currentId = Number(current.existingPantryId || 0)
+          const rowId = Number(row.existingPantryId || 0)
+          return currentId > 0 && rowId > 0 && currentId === rowId
+        }
         return compatible(current.brand, row.brand)
           && compatible(current.variant, row.variant)
           && compatible(current.packageSize, row.packageSize)
+          && compatible(current.barcode, row.barcode)
       })
 
       if (currentIndex < 0) {
@@ -901,9 +913,13 @@ export default function ShoppingPantryPage() {
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
       const top = suggestions[0]
-      const confidentExisting = !!exact || (!!top && top.score >= 0.8)
-      const chosenName = exact || (confidentExisting ? top.name : String(item.detectedName || '').trim())
-      const matchedPantry = data.pantry.find(entry => normalize(entry.name) === normalize(chosenName))
+      const confidentName = !!exact || (!!top && top.score >= 0.8)
+      const chosenName = exact || (confidentName ? top.name : String(item.detectedName || '').trim())
+      const detectedBrand = String(item.brand || '').trim()
+      const detectedVariant = String(item.variant || '').trim()
+      const detectedPackage = String(item.packageSize || '').trim()
+      const detectedBarcode = String(item.barcode || '').replace(/\D/g, '')
+      const matchedPantry = findExistingPantryProduct(chosenName, detectedBrand, detectedBarcode, detectedVariant, detectedPackage)
       const category = matchedPantry?.category || (data.categories.includes(item.category) ? item.category : 'Generico')
       const requestedLocation = ['pantry','fridge','freezer'].includes(String(item.location || ''))
         ? item.location as PantryLocation
@@ -918,15 +934,18 @@ export default function ShoppingPantryPage() {
         id: `vision-receipt-${Date.now()}-${index}`,
         raw: String(item.detectedName || '').trim(),
         observedText: String(item.observedText || '').trim(),
-        brand: String(item.brand || '').trim(),
-        variant: String(item.variant || '').trim(),
-        packageSize: String(item.packageSize || '').trim(),
+        brand: matchedPantry?.brand || matchedPantry?.productInfo?.brand || detectedBrand,
+        variant: matchedPantry?.variant || detectedVariant,
+        packageSize: matchedPantry?.packageSize || matchedPantry?.productInfo?.packageQuantity || detectedPackage,
+        barcode: matchedPantry?.barcode || matchedPantry?.productInfo?.barcode || detectedBarcode,
+        productInfo: matchedPantry?.productInfo,
         confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
         include: true,
-        mode: confidentExisting ? 'existing' : 'new',
-        name: chosenName,
+        mode: matchedPantry ? 'existing' : 'new',
+        existingPantryId: matchedPantry?.id,
+        name: matchedPantry?.name || chosenName,
         qty,
-        unit: ['pz','g','kg','ml','l'].includes(item.unit) ? item.unit : 'pz',
+        unit: matchedPantry?.unit || (['pz','g','kg','ml','l'].includes(item.unit) ? item.unit : 'pz'),
         category,
         location,
         totalPrice,
@@ -1298,17 +1317,23 @@ export default function ShoppingPantryPage() {
         .slice(0, 5)
       const top = suggestions[0]
       const confident = !!top && top.score >= 0.72
-      const matchedPantry = confident ? data.pantry.find(item => normalize(item.name) === normalize(top.name)) : undefined
+      const chosenName = confident ? top.name : raw
+      const matchedPantry = confident ? findExistingPantryProduct(chosenName) : undefined
       const detail = inspection.details.get(normalize(raw))
       const qty = Math.max(0, Number(detail?.qty || 1))
       const totalPrice = detail?.price
-      const chosenName = confident ? top.name : raw
       return {
         id: `${Date.now()}-${index}`,
         raw,
         include: true,
-        mode: confident ? 'existing' : 'new',
-        name: chosenName,
+        mode: matchedPantry ? 'existing' : 'new',
+        existingPantryId: matchedPantry?.id,
+        name: matchedPantry?.name || chosenName,
+        brand: matchedPantry?.brand || matchedPantry?.productInfo?.brand || '',
+        variant: matchedPantry?.variant || '',
+        packageSize: matchedPantry?.packageSize || matchedPantry?.productInfo?.packageQuantity || '',
+        barcode: matchedPantry?.barcode || matchedPantry?.productInfo?.barcode || '',
+        productInfo: matchedPantry?.productInfo,
         qty,
         unit: matchedPantry?.unit || 'pz',
         category: matchedPantry?.category || 'Generico',
@@ -1343,6 +1368,8 @@ export default function ShoppingPantryPage() {
       brand: x.brand || '',
       variant: x.variant || '',
       packageSize: x.packageSize || '',
+      barcode: x.barcode || '',
+      productInfo: x.productInfo,
       observedText: x.observedText || x.raw || x.name
     }))
     if (!selected.length) return
