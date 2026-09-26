@@ -362,8 +362,10 @@ export default function ChoresPage() {
                   <IconButton label="Rifiuta e riapri" onClick={() => rejectChore(chore.id)}><XCircle size={17} /></IconButton>
                 </div> : null}
 
-                {!isChild && isApproved ? <Button size="sm" variant="soft" onClick={() => undoApprovedChore(chore)}>Annulla conferma</Button> : null}
-                {!isChild && !isPending ? <IconButton label="Elimina" onClick={() => deleteChore(chore.id)}><Trash2 size={17} /></IconButton> : null}
+                {!isChild && isApproved ? <div className="chore-approved-actions">
+                  <Button size="sm" variant="soft" onClick={() => undoApprovedChore(chore)}>Annulla conferma</Button>
+                </div> : null}
+                {!isChild && !isPending && !isApproved ? <IconButton label="Elimina" onClick={() => deleteChore(chore.id)}><Trash2 size={17} /></IconButton> : null}
               </div>
             })}
         </div> : <EmptyState
