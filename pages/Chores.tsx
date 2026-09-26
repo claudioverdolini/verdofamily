@@ -204,6 +204,17 @@ export default function ChoresPage() {
     setRecurringCompletion(null)
   }
 
+  function undoApprovedChore(chore: any) {
+    if (isChild || !chore?.done) return
+    const user = data.users.find(item => item.id === chore.userId)
+    const name = user?.name || 'il ragazzo'
+    const ok = window.confirm(
+      `Annullare la conferma di “${chore.title}” per ${name}?\n\nL’accredito di ${money(chore.amount, currency)} verrà annullato e il compito tornerà da completare.`
+    )
+    if (!ok) return
+    toggleChore(chore.id)
+  }
+
   function submitPayment() {
     if (isChild) return
     const amount = parseDecimalInput(payment?.amount)
@@ -236,7 +247,7 @@ export default function ChoresPage() {
       title="Compiti & paghette"
       description={isChild
         ? 'Segna i tuoi compiti come fatti. La paghetta viene accreditata dopo la conferma di un genitore.'
-        : 'I ragazzi segnalano i compiti completati; un adulto li verifica e approva prima dell’accredito.'}
+        : 'I ragazzi segnalano i compiti completati; un adulto li verifica e approva. Le conferme errate possono essere annullate direttamente dalla riga del compito.'}
       actions={introAction}
     />
 
@@ -315,12 +326,12 @@ export default function ChoresPage() {
                   onClick={() => {
                     if (isChild) {
                       if (canChildToggle) toggleChore(chore.id)
-                    } else if (!isPending) {
+                    } else if (!isPending && !isApproved) {
                       toggleChore(chore.id)
                     }
                   }}
                   disabled={isChild ? !canChildToggle : isPending}
-                  title={isChild ? childActionText : isPending ? 'Usa Conferma o Rifiuta' : isApproved ? 'Riapri compito' : 'Segna e approva'}
+                  title={isChild ? childActionText : isPending ? 'Usa Conferma o Rifiuta' : isApproved ? 'Compito approvato' : 'Segna e approva'}
                 >
                   {isApproved ? <CheckCircle2 size={16} /> : isPending ? <Clock3 size={15} /> : null}
                 </button>
@@ -351,6 +362,7 @@ export default function ChoresPage() {
                   <IconButton label="Rifiuta e riapri" onClick={() => rejectChore(chore.id)}><XCircle size={17} /></IconButton>
                 </div> : null}
 
+                {!isChild && isApproved ? <Button size="sm" variant="soft" onClick={() => undoApprovedChore(chore)}>Annulla conferma</Button> : null}
                 {!isChild && !isPending ? <IconButton label="Elimina" onClick={() => deleteChore(chore.id)}><Trash2 size={17} /></IconButton> : null}
               </div>
             })}
