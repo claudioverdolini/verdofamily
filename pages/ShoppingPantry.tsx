@@ -1710,31 +1710,32 @@ export default function ShoppingPantryPage() {
                     {row.include ? (
                       <div className="receipt-match__grid">
                         <Field label="Associazione">
-                          <select value={row.mode} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, mode: e.target.value } : x))}>
+                          <select value={row.mode} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? updateRowAssociation(x, e.target.value) : x))}>
                             <option value="existing">Prodotto esistente</option>
                             <option value="new">Crea nuovo prodotto</option>
                           </select>
                         </Field>
                         {row.mode === 'existing' ? (
-                          <Field label="Prodotto">
-                            <select value={row.name} onChange={e => {
-                              const name = e.target.value
-                              const existing = data.pantry.find(item => normalize(item.name) === normalize(name))
-                              setReceiptRows(prev => prev.map(x => x.id === row.id ? {
-                                ...x,
-                                name,
-                                category: existing?.category || x.category,
-                                unit: existing?.unit || x.unit,
-                                location: existing?.location || inferredStorageLocation(name)
-                              } : x))
+                          <Field label="Prodotto" hint="Marca e formato sono mostrati per distinguere prodotti con lo stesso nome.">
+                            <select value={row.existingPantryId ? String(row.existingPantryId) : ''} onChange={e => {
+                              const existing = data.pantry.find(item => item.id === Number(e.target.value))
+                              if (!existing) {
+                                setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, existingPantryId: undefined } : x))
+                                return
+                              }
+                              setReceiptRows(prev => prev.map(x => x.id === row.id ? rowWithExistingPantry(x, existing) : x))
                             }}>
-                              {row.suggestions.length ? row.suggestions.map((s: any) => <option key={s.name} value={s.name}>{s.name} · {Math.round(s.score * 100)}%</option>) : <option value={row.name}>{row.name}</option>}
-                              {catalogNames().filter(n => !row.suggestions.some((s: any) => s.name === n)).map(name => <option key={name} value={name}>{name}</option>)}
+                              <option value="">Seleziona il prodotto corretto…</option>
+                              {data.pantry
+                                .slice()
+                                .sort((a, b) => pantryIdentityLabel(a).localeCompare(pantryIdentityLabel(b), 'it'))
+                                .map(item => <option key={item.id} value={item.id}>{pantryIdentityLabel(item)}</option>)}
                             </select>
                           </Field>
                         ) : (
                           <Field label="Nome nuovo prodotto"><input value={row.name} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>
                         )}
+                        {productIdentityEditor(row, patch => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, ...patch } : x)))}
                         <Field label="Quantità"><input type="number" min="0" value={row.qty} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value), unitPrice: x.totalPrice !== undefined && Number(e.target.value) > 0 ? Math.round(x.totalPrice / Number(e.target.value) * 100) / 100 : x.unitPrice } : x))} /></Field>
                         <Field label="Prezzo riga €" hint="Facoltativo"><input type="number" min="0" step="0.01" value={row.totalPrice ?? ''} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, totalPrice: e.target.value === '' ? undefined : Number(e.target.value), unitPrice: e.target.value !== '' && Number(x.qty) > 0 ? Math.round(Number(e.target.value) / Number(x.qty) * 100) / 100 : undefined } : x))} /></Field>
                         <Field label="Unità"><select value={row.unit} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
@@ -1811,18 +1812,16 @@ export default function ShoppingPantryPage() {
                       : <button type="button" onClick={() => excludeDuplicateRow(row.id)}>Escludi</button>}
                   </div> : null}
                   {row.include ? <div className="receipt-match__grid">
-                    <Field label="Associazione"><select value={row.mode} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, mode: e.target.value } : x))}><option value="existing">Prodotto esistente</option><option value="new">Crea nuovo prodotto</option></select></Field>
-                    {row.mode === 'existing' ? <Field label="Prodotto"><select value={row.name} onChange={e => {
-                      const name = e.target.value
-                      const existing = data.pantry.find(item => normalize(item.name) === normalize(name))
-                      setPhotoRows(prev => prev.map(x => x.id === row.id ? {
-                        ...x,
-                        name,
-                        category: existing?.category || x.category,
-                        unit: existing?.unit || x.unit,
-                        location: existing?.location || x.location || inferredStorageLocation(name)
-                      } : x))
-                    }}>{row.suggestions.length ? row.suggestions.map((suggestion: any) => <option key={suggestion.name} value={suggestion.name}>{suggestion.name} · {Math.round(suggestion.score * 100)}%</option>) : <option value={row.name}>{row.name}</option>}{catalogNames().filter(name => !row.suggestions.some((suggestion: any) => suggestion.name === name)).map(name => <option key={name} value={name}>{name}</option>)}</select></Field> : <Field label="Nome prodotto"><input value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>}
+                    <Field label="Associazione"><select value={row.mode} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? updateRowAssociation(x, e.target.value) : x))}><option value="existing">Prodotto esistente</option><option value="new">Crea nuovo prodotto</option></select></Field>
+                    {row.mode === 'existing' ? <Field label="Prodotto" hint="Marca e formato distinguono prodotti omonimi."><select value={row.existingPantryId ? String(row.existingPantryId) : ''} onChange={e => {
+                      const existing = data.pantry.find(item => item.id === Number(e.target.value))
+                      if (!existing) {
+                        setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, existingPantryId: undefined } : x))
+                        return
+                      }
+                      setPhotoRows(prev => prev.map(x => x.id === row.id ? rowWithExistingPantry(x, existing) : x))
+                    }}><option value="">Seleziona il prodotto corretto…</option>{data.pantry.slice().sort((a, b) => pantryIdentityLabel(a).localeCompare(pantryIdentityLabel(b), 'it')).map(item => <option key={item.id} value={item.id}>{pantryIdentityLabel(item)}</option>)}</select></Field> : <Field label="Nome prodotto"><input value={row.name} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, name: e.target.value } : x))} /></Field>}
+                    {productIdentityEditor(row, patch => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, ...patch } : x)))}
                     <Field label="Quantità"><input type="number" min="1" value={row.qty} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, qty: Number(e.target.value) } : x))} /></Field>
                     <Field label="Unità"><select value={row.unit} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, unit: e.target.value } : x))}><option value="pz">pz</option><option value="g">g</option><option value="kg">kg</option><option value="ml">ml</option><option value="l">l</option></select></Field>
                     {row.mode === 'new' ? <Field label="Categoria"><select value={row.category} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, category: e.target.value } : x))}>{data.categories.map(cat => <option key={cat}>{cat}</option>)}</select></Field> : null}
