@@ -12,7 +12,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   headers: { "Content-Type": "application/json", ...cors }
 });
 
-const MAX_BASE64_CHARS = 12_500_000;
+const MAX_BASE64_CHARS = 26_000_000;
 const SUPPORTED_MIME = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 async function rateLimit(client: any, scope: string, subjectKey: string, limit: number, windowSeconds: number) {
@@ -98,14 +98,14 @@ Deno.serve(async (req) => {
     }
 
     const action = String(body?.action || "");
-    if (!["analyze", "estimate-residual"].includes(action)) return json({ ok: false, error: "unknown_action" }, 400);
+    if (!["analyze", "analyze-receipt", "analyze-receipt-text", "estimate-residual"].includes(action)) return json({ ok: false, error: "unknown_action" }, 400);
     if (!geminiKey) return json({ ok: false, error: "vision_not_configured" }, 503);
 
     const allowed = await rateLimit(
       client,
-      action === "estimate-residual" ? "pantry_vision_residual" : "pantry_vision_analyze",
+      action === "estimate-residual" ? "pantry_vision_residual" : action === "analyze-receipt" ? "receipt_vision_analyze" : action === "analyze-receipt-text" ? "receipt_text_analyze" : "pantry_vision_analyze",
       `${user.id}:${familyId}`,
-      action === "estimate-residual" ? 30 : 20,
+      action === "estimate-residual" ? 30 : action === "analyze-receipt" ? 30 : action === "analyze-receipt-text" ? 40 : 20,
       3600
     );
     if (!allowed) {
@@ -117,6 +117,162 @@ Deno.serve(async (req) => {
         severity: "warning"
       });
       return json({ ok: false, error: "rate_limited" }, 429);
+    }
+
+
+    if (action === "analyze-receipt-text") {
+      const receiptText = String(body?.receiptText || "").trim().slice(0, 20000);
+      if (!receiptText) return json({ ok: false, error: "receipt_text_required" }, 400);
+
+      const { data: receiptDoc, error: receiptDocError } = await client
+        .from("family_documents")
+        .select("data")
+        .eq("family_id", familyId)
+        .single();
+      if (receiptDocError) return json({ ok: false, error: "family_data_unavailable" }, 500);
+
+      const familyData = (receiptDoc?.data || {}) as any;
+      const pantry = Array.isArray(familyData?.pantry) ? familyData.pantry : [];
+      const categories = Array.isArray(familyData?.categories) ? familyData.categories : ["Generico"];
+      const existing = pantry.slice(0, 350).map((item: any) => ({
+        name: String(item?.name || ""),
+        brand: String(item?.brand || item?.productInfo?.brand || ""),
+        category: String(item?.category || "Generico"),
+        unit: String(item?.unit || "pz"),
+        location: ["pantry","fridge","freezer"].includes(String(item?.location || "")) ? String(item.location) : "pantry"
+      })).filter((item: any) => item.name);
+
+      const receiptPrompt = `Sei il correttore intelligente OCR degli scontrini di VerdoFamily.
+Hai a disposizione SOLO testo OCR rumoroso estratto da uno scontrino. Devi trasformarlo in dati utili senza inventare prodotti.
+
+Regole:
+- Ricostruisci solo prodotti che riesci a identificare con sufficiente affidabilità dal testo.
+- Elimina righe fiscali, indirizzi, intestazioni, IVA, pagamenti, sconti generici, punti, carte, subtotali e totale.
+- Se una sequenza è incomprensibile NON trasformarla in un nome prodotto: omettila.
+- detectedName deve essere breve e umano, per esempio "Banane", "Yogurt greco", "Pasta spaghetti".
+- observedText conserva la breve dicitura OCR da cui hai ricavato il prodotto.
+- matchName deve essere ESATTAMENTE uno dei nomi del catalogo solo se chiaramente compatibile; altrimenti stringa vuota.
+- qty è la quantità acquistata; se non deducibile usa 1.
+- unit tra pz, g, kg, ml, l.
+- totalPrice è il totale della riga se leggibile, altrimenti 0.
+- unitPrice è il prezzo unitario se deducibile, altrimenti 0.
+- category deve preferibilmente essere una categoria disponibile.
+- location: freezer per surgelati/gelati; fridge per alimenti freschi e refrigerati; pantry per prodotti a temperatura ambiente e prodotti casa.
+- Se il prodotto esiste già, preferisci categoria, unità e location del catalogo.
+- confidence tra 0 e 1; ometti prodotti sotto 0,45.
+- merchant, date (YYYY-MM-DD) e total vanno estratti solo se sufficientemente leggibili.
+- rawText deve essere una versione ripulita e leggibile del testo, senza spazzatura OCR.
+
+Categorie: ${JSON.stringify(categories)}
+Catalogo esistente: ${JSON.stringify(existing)}
+
+TESTO OCR:
+${receiptText}
+
+Restituisci esclusivamente JSON conforme allo schema.`;
+
+      const receiptSchema = {
+        type: "OBJECT",
+        properties: {
+          merchant: { type: "STRING" },
+          date: { type: "STRING" },
+          total: { type: "NUMBER" },
+          rawText: { type: "STRING" },
+          items: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                detectedName: { type: "STRING" },
+                matchName: { type: "STRING" },
+                qty: { type: "NUMBER" },
+                unit: { type: "STRING", enum: ["pz","g","kg","ml","l"] },
+                category: { type: "STRING" },
+                location: { type: "STRING", enum: ["pantry","fridge","freezer"] },
+                totalPrice: { type: "NUMBER" },
+                unitPrice: { type: "NUMBER" },
+                confidence: { type: "NUMBER" },
+                observedText: { type: "STRING" },
+                brand: { type: "STRING" },
+                variant: { type: "STRING" },
+                packageSize: { type: "STRING" }
+              },
+              required: ["detectedName","matchName","qty","unit","category","location","totalPrice","unitPrice","confidence","observedText","brand","variant","packageSize"]
+            }
+          }
+        },
+        required: ["merchant","date","total","rawText","items"]
+      };
+
+      const requestBody = JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: receiptPrompt }] }],
+        generationConfig: { responseMimeType: "application/json" }
+      });
+
+      let result: any = null;
+      let usedModel = "";
+      let lastStatus = 0;
+      let lastMessage = "";
+
+      for (const model of geminiModels) {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+          body: requestBody
+        });
+        const candidate = await response.json().catch(() => ({}));
+        if (response.ok) { result = candidate; usedModel = model; break; }
+        lastStatus = response.status;
+        lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
+        const lower = lastMessage.toLowerCase();
+        const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
+          || lower.includes("high demand") || lower.includes("overloaded")
+          || lower.includes("temporarily") || lower.includes("unavailable");
+        if (!retryable) return json({ ok: false, error: lastMessage }, response.status >= 500 ? 502 : 400);
+      }
+
+      if (!result || !usedModel) {
+        return json({ ok: false, error: "Correzione OCR intelligente non disponibile.", code: "ai_temporarily_unavailable", lastStatus, lastMessage }, 503);
+      }
+
+      const output = textPart(result);
+      if (!output) return json({ ok: false, error: "empty_receipt_text_response" }, 502);
+
+      let parsed: any;
+      try { parsed = JSON.parse(output); } catch { return json({ ok: false, error: "invalid_receipt_text_response" }, 502); }
+
+      const normalizedItems = (Array.isArray(parsed?.items) ? parsed.items : []).slice(0, 120).map((item: any) => ({
+        detectedName: String(item?.detectedName || "").trim().slice(0, 180),
+        matchName: String(item?.matchName || "").trim().slice(0, 180),
+        qty: Math.max(0.01, Math.min(999, Number(item?.qty) || 1)),
+        unit: ["pz","g","kg","ml","l"].includes(String(item?.unit || "")) ? String(item.unit) : "pz",
+        category: String(item?.category || "Generico").trim() || "Generico",
+        location: ["pantry","fridge","freezer"].includes(String(item?.location || "")) ? String(item.location) : "pantry",
+        totalPrice: Math.max(0, Number(item?.totalPrice) || 0),
+        unitPrice: Math.max(0, Number(item?.unitPrice) || 0),
+        confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+        observedText: String(item?.observedText || "").trim().slice(0, 220),
+        brand: String(item?.brand || "").trim().slice(0, 120),
+        variant: String(item?.variant || "").trim().slice(0, 120),
+        packageSize: String(item?.packageSize || "").trim().slice(0, 100)
+      })).filter((item: any) => item.detectedName && item.confidence >= 0.45);
+
+      await audit(client, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "receipt_text_analyzed",
+        metadata: { model: usedModel, items: normalizedItems.length }
+      });
+
+      return json({
+        ok: true,
+        model: usedModel,
+        merchant: String(parsed?.merchant || "").trim().slice(0, 160),
+        date: /^\d{4}-\d{2}-\d{2}$/.test(String(parsed?.date || "")) ? String(parsed.date) : "",
+        total: Math.max(0, Number(parsed?.total) || 0),
+        rawText: String(parsed?.rawText || "").trim().slice(0, 12000),
+        items: normalizedItems
+      });
     }
 
     const imageData = String(body?.imageData || "").replace(/^data:[^;]+;base64,/, "");
@@ -191,7 +347,7 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
         residualLastStatus = response.status;
         residualLastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
         const lower = residualLastMessage.toLowerCase();
-        const retryable = [404, 429, 500, 502, 503, 504].includes(response.status)
+        const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
           || lower.includes("high demand")
           || lower.includes("overloaded")
           || lower.includes("temporarily")
@@ -239,6 +395,194 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
       });
     }
 
+
+    if (action === "analyze-receipt") {
+      const { data: receiptDoc, error: receiptDocError } = await client
+        .from("family_documents")
+        .select("data")
+        .eq("family_id", familyId)
+        .single();
+      if (receiptDocError) return json({ ok: false, error: "family_data_unavailable" }, 500);
+
+      const familyData = (receiptDoc?.data || {}) as any;
+      const pantry = Array.isArray(familyData?.pantry) ? familyData.pantry : [];
+      const categories = Array.isArray(familyData?.categories) ? familyData.categories : ["Generico"];
+      const existing = pantry.slice(0, 350).map((item: any) => ({
+        name: String(item?.name || ""),
+        brand: String(item?.brand || item?.productInfo?.brand || ""),
+        category: String(item?.category || "Generico"),
+        unit: String(item?.unit || "pz"),
+        location: ["pantry","fridge","freezer"].includes(String(item?.location || "")) ? String(item.location) : "pantry"
+      })).filter((item: any) => item.name);
+
+      const receiptPrompt = `Sei il motore di lettura scontrini di VerdoFamily. Analizza la FOTO dello scontrino direttamente: non limitarti a trascrivere OCR rumoroso.
+
+Obiettivo:
+1) riconoscere esercente, data e totale;
+2) individuare SOLO le righe che rappresentano veri prodotti acquistati;
+3) ricostruire per ogni riga un nome prodotto breve e sensato in italiano, anche quando le abbreviazioni dello scontrino sono difficili;
+4) associare, quando sei davvero sicuro, un prodotto già presente nel catalogo;
+5) decidere automaticamente dove va conservato l'articolo.
+
+Regole importanti:
+- NON usare frammenti illeggibili o sequenze OCR senza senso come nome prodotto.
+- Se una riga non è abbastanza comprensibile per identificare almeno il tipo di prodotto, omettila invece di inventare.
+- Escludi totale, subtotale, sconti generici, IVA, pagamenti, carte, punti, cauzioni, righe fiscali, intestazioni e messaggi promozionali.
+- detectedName deve essere un nome umano e conciso (es. "Yogurt greco", "Banane", "Pasta spaghetti", "Detersivo piatti").
+- observedText può contenere la breve dicitura effettivamente letta sullo scontrino.
+- matchName deve essere ESATTAMENTE uno dei nomi del catalogo esistente solo se è chiaramente lo stesso prodotto; altrimenti stringa vuota.
+- qty: quantità acquistata. Se non è deducibile usa 1.
+- unit: pz per confezioni; usa g/kg/ml/l solo se lo scontrino indica davvero una quantità venduta a peso/volume.
+- totalPrice: prezzo totale della riga dopo eventuale quantità, se leggibile; altrimenti 0.
+- unitPrice: prezzo unitario se deducibile, altrimenti 0.
+- category: preferisci una categoria già censita; se non è possibile usa Generico.
+- location deve essere:
+  * freezer per surgelati, gelati e prodotti chiaramente congelati;
+  * fridge per carne/pesce freschi, salumi, latticini freschi, yogurt, formaggi, pasta fresca e prodotti normalmente refrigerati;
+  * pantry per pasta/riso/conserve/bevande a lunga conservazione, snack, prodotti casa/igiene e tutto ciò che normalmente si conserva a temperatura ambiente.
+- Se matchName corrisponde a un prodotto esistente, usa preferibilmente la sua location già censita.
+- confidence da 0 a 1. Sotto 0,45 sii molto prudente e ometti la riga se il prodotto non è identificabile.
+- rawText: restituisci una ricostruzione leggibile e sintetica dello scontrino, non rumore OCR.
+- date: YYYY-MM-DD se leggibile, altrimenti stringa vuota.
+- total: totale pagato se leggibile, altrimenti 0.
+
+Categorie disponibili: ${JSON.stringify(categories)}
+Catalogo esistente: ${JSON.stringify(existing)}
+
+Restituisci esclusivamente JSON conforme allo schema.`;
+
+      const receiptSchema = {
+        type: "OBJECT",
+        properties: {
+          merchant: { type: "STRING" },
+          date: { type: "STRING" },
+          total: { type: "NUMBER" },
+          rawText: { type: "STRING" },
+          items: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                detectedName: { type: "STRING" },
+                matchName: { type: "STRING" },
+                qty: { type: "NUMBER" },
+                unit: { type: "STRING", enum: ["pz","g","kg","ml","l"] },
+                category: { type: "STRING" },
+                location: { type: "STRING", enum: ["pantry","fridge","freezer"] },
+                totalPrice: { type: "NUMBER" },
+                unitPrice: { type: "NUMBER" },
+                confidence: { type: "NUMBER" },
+                observedText: { type: "STRING" },
+                brand: { type: "STRING" },
+                variant: { type: "STRING" },
+                packageSize: { type: "STRING" }
+              },
+              required: ["detectedName","matchName","qty","unit","category","location","totalPrice","unitPrice","confidence","observedText","brand","variant","packageSize"]
+            }
+          }
+        },
+        required: ["merchant","date","total","rawText","items"]
+      };
+
+      const receiptRequest = JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType, data: imageData } },
+            { text: receiptPrompt }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      });
+
+      let receiptResult: any = null;
+      let receiptModel = "";
+      let receiptLastStatus = 0;
+      let receiptLastMessage = "";
+
+      for (const model of geminiModels) {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": geminiKey
+          },
+          body: receiptRequest
+        });
+        const candidate = await response.json().catch(() => ({}));
+        if (response.ok) {
+          receiptResult = candidate;
+          receiptModel = model;
+          break;
+        }
+        receiptLastStatus = response.status;
+        receiptLastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
+        const lower = receiptLastMessage.toLowerCase();
+        const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
+          || lower.includes("high demand")
+          || lower.includes("overloaded")
+          || lower.includes("temporarily")
+          || lower.includes("unavailable");
+        if (!retryable) return json({ ok: false, error: receiptLastMessage }, response.status >= 500 ? 502 : 400);
+      }
+
+      if (!receiptResult || !receiptModel) {
+        return json({
+          ok: false,
+          error: "Il riconoscimento intelligente dello scontrino non è disponibile in questo momento.",
+          code: "ai_temporarily_unavailable",
+          lastStatus: receiptLastStatus,
+          lastMessage: receiptLastMessage
+        }, 503);
+      }
+
+      const receiptOutput = textPart(receiptResult);
+      if (!receiptOutput) return json({ ok: false, error: "empty_receipt_response" }, 502);
+
+      let parsed: any;
+      try { parsed = JSON.parse(receiptOutput); } catch { return json({ ok: false, error: "invalid_receipt_response" }, 502); }
+
+      const normalizedItems = (Array.isArray(parsed?.items) ? parsed.items : []).slice(0, 120).map((item: any) => ({
+        detectedName: String(item?.detectedName || "").trim().slice(0, 180),
+        matchName: String(item?.matchName || "").trim().slice(0, 180),
+        qty: Math.max(0.01, Math.min(999, Number(item?.qty) || 1)),
+        unit: ["pz","g","kg","ml","l"].includes(String(item?.unit || "")) ? String(item.unit) : "pz",
+        category: String(item?.category || "Generico").trim() || "Generico",
+        location: ["pantry","fridge","freezer"].includes(String(item?.location || "")) ? String(item.location) : "pantry",
+        totalPrice: Math.max(0, Number(item?.totalPrice) || 0),
+        unitPrice: Math.max(0, Number(item?.unitPrice) || 0),
+        confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
+        observedText: String(item?.observedText || "").trim().slice(0, 220),
+        brand: String(item?.brand || "").trim().slice(0, 120),
+        variant: String(item?.variant || "").trim().slice(0, 120),
+        packageSize: String(item?.packageSize || "").trim().slice(0, 100)
+      })).filter((item: any) => item.detectedName && item.confidence >= 0.35);
+
+      const merchant = String(parsed?.merchant || "").trim().slice(0, 160);
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed?.date || "")) ? String(parsed.date) : "";
+      const total = Math.max(0, Number(parsed?.total) || 0);
+      const rawText = String(parsed?.rawText || "").trim().slice(0, 12000);
+
+      await audit(client, {
+        actorUserId: user.id,
+        familyId,
+        eventType: "receipt_vision_analyzed",
+        metadata: { model: receiptModel, items: normalizedItems.length, merchant: merchant.slice(0, 60) }
+      });
+
+      return json({
+        ok: true,
+        model: receiptModel,
+        merchant,
+        date,
+        total,
+        rawText,
+        items: normalizedItems
+      });
+    }
+
     const { data: doc, error: docError } = await client
       .from("family_documents")
       .select("data")
@@ -273,6 +617,7 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
               qty: { type: "NUMBER" },
               unit: { type: "STRING", enum: ["pz", "g", "kg", "ml", "l"] },
               category: { type: "STRING" },
+              location: { type: "STRING", enum: ["pantry", "fridge", "freezer"] },
               confidence: { type: "NUMBER" },
               observedText: { type: "STRING" },
               brand: { type: "STRING" },
@@ -284,7 +629,7 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
               expiryDate: { type: "STRING" },
               notes: { type: "STRING" }
             },
-            required: ["detectedName", "matchName", "qty", "unit", "category", "confidence", "observedText", "brand", "variant", "packageSize", "barcode", "packageState", "openReason", "expiryDate", "notes"]
+            required: ["detectedName", "matchName", "qty", "unit", "category", "location", "confidence", "observedText", "brand", "variant", "packageSize", "barcode", "packageState", "openReason", "expiryDate", "notes"]
           }
         }
       },
@@ -330,7 +675,7 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
       lastStatus = response.status;
       lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
       const lower = lastMessage.toLowerCase();
-      const retryable = [404, 429, 500, 502, 503, 504].includes(response.status)
+      const retryable = [400, 404, 429, 500, 502, 503, 504].includes(response.status)
         || lower.includes("high demand")
         || lower.includes("overloaded")
         || lower.includes("temporarily")
@@ -364,6 +709,7 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
       qty: Math.max(1, Math.min(99, Number(item?.qty) || 1)),
       unit: ["pz", "g", "kg", "ml", "l"].includes(item?.unit) ? item.unit : "pz",
       category: String(item?.category || "Generico").trim() || "Generico",
+      location: ["pantry","fridge","freezer"].includes(String(item?.location || "")) ? String(item.location) : locationHint,
       confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
       observedText: String(item?.observedText || "").trim(),
       brand: String(item?.brand || "").trim().slice(0, 100),
