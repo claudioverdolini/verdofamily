@@ -195,7 +195,7 @@ export default function ChoresPage() {
 
   const tabs = isChild
     ? [
-        { value: 'chores', label: `Da fare · ${data.chores.filter(c => c.userId === authUser?.id && !c.done).length}` },
+        { value: 'chores', label: `Da fare · ${data.chores.filter(c => c.userId === authUser?.id && !c.done && c.completionStatus !== 'pending').length}` },
         { value: 'wallets', label: 'Paghetta' }
       ]
     : [
