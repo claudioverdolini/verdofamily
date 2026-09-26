@@ -364,3 +364,25 @@
 .settings-profile-photo-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-5px 0 14px}
 .board-card__author .avatar{box-shadow:0 0 0 2px color-mix(in srgb,var(--surface) 80%,transparent),0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
 .board-card__author strong{font-size:9px!important}
+
+
+/* Approved chore correction action */
+.chore-approved-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  flex:0 0 auto;
+}
+.chore-approved-actions .button{
+  white-space:nowrap;
+}
+@media(max-width:620px){
+  .chore-item--approved{
+    grid-template-columns:auto minmax(0,1fr);
+  }
+  .chore-item--approved .chore-approved-actions{
+    grid-column:2;
+    justify-content:flex-start;
+    margin-top:4px;
+  }
+}
