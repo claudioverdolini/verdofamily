@@ -261,6 +261,16 @@ type AppNotification = {
   label?: string
 }
 
+function notificationStateFingerprint(value: string) {
+  let hash = 2166136261
+  const input = String(value || '')
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
 function NotificationCenter() {
   const { data, authUser, familyId, activePage, setActivePage, cloudStatus, updateCurrentPrefs } = useFamily()
   const [open, setOpen] = useState(false)
@@ -346,8 +356,8 @@ function NotificationCenter() {
     const createdAt = new Date().toISOString()
     const newItems = sources
       .filter(source => previousHashes.current?.[source.key] !== changeHashes[source.key] && activePage !== source.page)
-      .map((source, index): AppNotification => ({
-        id: `update-${source.key}-${Date.now()}-${index}`,
+      .map((source): AppNotification => ({
+        id: `update-${source.key}-${localDateISO()}-${notificationStateFingerprint(changeHashes[source.key])}`,
         title: source.title,
         detail: source.detail,
         page: source.page,
@@ -358,7 +368,12 @@ function NotificationCenter() {
       }))
 
     previousHashes.current = changeHashes
-    if (newItems.length) setLiveUpdates(prev => [...newItems, ...prev].slice(0, 40))
+    if (newItems.length) {
+      setLiveUpdates(prev => {
+        const incomingIds = new Set(newItems.map(item => item.id))
+        return [...newItems, ...prev.filter(item => !incomingIds.has(item.id))].slice(0, 40)
+      })
+    }
   }, [changeHashes, activePage])
 
   const notifications = useMemo(() => {
@@ -640,6 +655,16 @@ function NotificationCenter() {
   function markRead(id: string) {
     if (!readIds.includes(id)) saveReadIds([id])
   }
+
+  useEffect(() => {
+    if (!open || !unread.length) return
+    const ids = unread.map(item => item.id)
+    const timer = window.setTimeout(() => {
+      saveReadIds(ids)
+      setOnlyUnread(false)
+    }, 500)
+    return () => window.clearTimeout(timer)
+  }, [open, unread.map(item => item.id).join('|')])
 
   function openNotification(item: AppNotification) {
     markRead(item.id)
