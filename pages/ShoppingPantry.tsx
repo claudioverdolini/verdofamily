@@ -380,11 +380,14 @@ export default function ShoppingPantryPage() {
   async function preparePantryPhoto(file: File) {
     if (!file.type.startsWith('image/')) throw new Error('Seleziona una foto valida.')
     const original = await readFileAsDataUrl(file)
-    const supportedRaw = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif'].includes(file.type.toLowerCase())
+    const mime = file.type.toLowerCase()
+    const passThroughMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(mime)
+    const supportedRaw = [...passThroughMime ? [mime] : [], 'image/heic', 'image/heif'].includes(mime)
 
-    // Keep small files untouched; for normal phone photos resize to reduce latency/data usage.
-    if (file.size <= 2_800_000 && supportedRaw) {
-      return { preview: original, imageData: original.split(',')[1] || '', mimeType: file.type.toLowerCase() }
+    // Gemini is much more reliable with JPEG/PNG/WEBP. iPhone photos can arrive
+    // as HEIC/HEIF even when they look normal in Safari, so always transcode those.
+    if (file.size <= 2_800_000 && passThroughMime) {
+      return { preview: original, imageData: original.split(',')[1] || '', mimeType: mime }
     }
 
     try {
@@ -408,7 +411,12 @@ export default function ShoppingPantryPage() {
       return { preview: compressed, imageData: compressed.split(',')[1] || '', mimeType: 'image/jpeg' }
     } catch {
       if (!supportedRaw || file.size > 18_000_000) throw new Error('La foto è troppo grande o in un formato non supportato. Prova con JPG/PNG oppure riduci la dimensione.')
-      return { preview: original, imageData: original.split(',')[1] || '', mimeType: file.type.toLowerCase() }
+      // Never send HEIC/HEIF directly to the AI backend: if Safari cannot
+      // transcode it, fall back to local OCR instead of generating a bad AI request.
+      if (mime === 'image/heic' || mime === 'image/heif') {
+        throw new Error('conversione_iphone_non_disponibile')
+      }
+      return { preview: original, imageData: original.split(',')[1] || '', mimeType: mime }
     }
   }
 
@@ -1025,7 +1033,9 @@ export default function ShoppingPantryPage() {
       }
 
       analyzeReceipt(text)
-      if (aiError) setOcrError('Il riconoscimento intelligente non era disponibile: ho usato la lettura OCR locale. Controlla le righe prima di importare.')
+      if (aiError) setOcrError(aiError.includes('conversione_iphone_non_disponibile')
+        ? 'La foto iPhone non è stata convertita correttamente per il riconoscimento intelligente: ho usato l’OCR locale. Prova a scattare una nuova foto direttamente dall’app.'
+        : 'Il riconoscimento intelligente non era disponibile: ho usato la lettura OCR locale. Controlla le righe prima di importare.')
     } catch {
       setOcrError(aiError || 'Non sono riuscito a leggere bene lo scontrino. Prova una foto più nitida oppure usa “Foto dispensa” per riconoscere direttamente i prodotti.')
     } finally {
