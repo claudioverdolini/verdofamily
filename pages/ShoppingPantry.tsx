@@ -959,6 +959,141 @@ export default function ShoppingPantryPage() {
     return priceHits >= 3 || keywordHits >= 2 || (keywordHits >= 1 && priceHits >= 1 && usefulLines >= 5)
   }
 
+  function strictReceiptCandidateLines(text: string) {
+    const catalog = catalogNames()
+    const fiscalTerms = [
+      'documento commerciale','scontrino','descrizione','partita iva','p iva','codice fiscale',
+      'pagamento','contanti','carta','bancomat','totale','subtotale','resto','iva','aliquota',
+      'lotteria','cassa','operatore','numero documento','data ora','esercente','telefono',
+      'www','registro','matricola','transazione','autorizzazione','pos','fattura'
+    ]
+    const addressTerms = ['via ','viale ','piazza ','corso ','strada ','loc ','localita ','cap ','provincia ']
+    const seen = new Set<string>()
+    const rows: Array<{ raw: string; name: string; score: number; price?: number; qty: number }> = []
+
+    String(text || '').split(/\r?\n/).forEach(rawLine => {
+      const raw = rawLine.trim()
+      if (!raw) return
+      const cleaned = cleanReceiptLine(raw)
+      if (!cleaned) return
+      const n = normalize(cleaned)
+      if (!n || seen.has(n)) return
+      if (fiscalTerms.some(term => n === term || n.startsWith(term + ' ') || n.includes(' ' + term + ' '))) return
+      if (addressTerms.some(term => n.startsWith(term))) return
+      if (/^(tel|fax|pec|www|http|mail)\b/i.test(cleaned)) return
+      if (/^[\d\W_]+$/.test(cleaned)) return
+
+      const alphaTokens = n.split(/\s+/).filter(token => /[a-z]/i.test(token) && token.length >= 2)
+      const hasPackage = /\b\d+(?:[,.]\d+)?\s*(?:mg|g|kg|ml|cl|dl|l|pz|pezzi?)\b/i.test(cleaned)
+      const price = receiptMoney(raw)
+      const hasPrice = price !== undefined
+      const localBest = catalog
+        .map(name => ({ name, score: similarity(cleaned, name) }))
+        .sort((a, b) => b.score - a.score)[0]
+      const catalogHit = Number(localBest?.score || 0) >= .74
+
+      let score = 0
+      if (alphaTokens.length >= 2) score += 1
+      if (alphaTokens.length >= 3) score += 1
+      if (hasPackage) score += 3
+      if (hasPrice) score += 3
+      if (catalogHit) score += 4
+      if (/\b(?:ravioli|pasta|latte|yogurt|formaggio|carne|pollo|pesce|pane|biscotti|acqua|vino|birra|olio|riso|sugo|pomodoro|verdura|frutta|detersivo|sapone|shampoo|caffe|caffè|uova|farina|zucchero|sale)\b/i.test(cleaned)) score += 2
+
+      if (score < 3) return
+
+      let name = cleaned
+        .replace(/^[-–—_*#.:;\s]+/, '')
+        .replace(/\b(?:EUR|EURO)\b/ig, '')
+        .replace(/\s+\d{1,6}[,.]\d{2}\s*[A-Z]?\s*$/i, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+      if (name.length < 3 || name.length > 140) return
+
+      const qtyMatch = raw.match(/^\s*(\d+(?:[,.]\d+)?)\s*[xX]\s*/)
+      const qty = qtyMatch ? Math.max(0.01, Number(qtyMatch[1].replace(',', '.')) || 1) : 1
+      seen.add(n)
+      rows.push({ raw, name, score, price, qty })
+    })
+
+    return rows.slice(0, 20)
+  }
+
+  async function recoverReceiptWithoutVision(text: string) {
+    const candidates = strictReceiptCandidateLines(text)
+    if (!candidates.length) return 0
+
+    const catalog = catalogNames()
+    let onlineByKey = new Map<string, any>()
+
+    if (cloudAuthenticated && familyId && supabase) {
+      try {
+        const response = await callProductEnrichment('batch', {
+          items: candidates.map((candidate, index) => ({
+            key: String(index),
+            name: candidate.name,
+            observedText: candidate.raw,
+            brand: '',
+            barcode: ''
+          }))
+        })
+        onlineByKey = new Map((response?.results || []).map((row: any) => [String(row.key), row]))
+      } catch {}
+    }
+
+    const items = candidates.map((candidate, index) => {
+      const localMatches = catalog
+        .map(name => ({ name, score: similarity(candidate.name, name) }))
+        .sort((a, b) => b.score - a.score)
+      const local = localMatches[0]
+      const online = onlineByKey.get(String(index))
+      const onlineConfidence = Math.max(0, Math.min(1, Number(online?.confidence) || 0))
+      const onlineMatch = online?.match && onlineConfidence >= .58 ? online.match : null
+      const localConfident = !!local && local.score >= .78
+      const detectedName = String(
+        localConfident
+          ? local.name
+          : onlineMatch?.displayName || candidate.name
+      ).trim()
+
+      if (!detectedName) return null
+
+      return {
+        detectedName,
+        matchName: localConfident ? local.name : '',
+        qty: candidate.qty,
+        unit: 'pz',
+        category: 'Generico',
+        location: inferredStorageLocation(detectedName, localConfident ? local.name : undefined),
+        totalPrice: candidate.price || 0,
+        unitPrice: candidate.price && candidate.qty > 0 ? Math.round(candidate.price / candidate.qty * 100) / 100 : 0,
+        confidence: Math.max(localConfident ? local.score : 0, onlineConfidence, Math.min(.86, .42 + candidate.score * .07)),
+        observedText: candidate.raw,
+        brand: String(onlineMatch?.brand || '').trim(),
+        variant: '',
+        packageSize: String(onlineMatch?.packageQuantity || '').trim()
+      }
+    }).filter(Boolean)
+
+    if (!items.length) return 0
+
+    const inspection = inspectReceiptText(text)
+    const recoveredText = items.map((item: any) => item.detectedName).join('\n')
+    const count = applyReceiptVision({
+      merchant: inspection.merchant,
+      date: inspection.date,
+      total: inspection.total,
+      rawText: recoveredText,
+      items
+    })
+
+    if (count) {
+      setOcrProgress(1)
+      setEnrichmentMessage(`Riconoscimento alternativo completato: ${count} ${count === 1 ? 'prodotto recuperato' : 'prodotti recuperati'} senza dipendere dal servizio AI principale.`)
+    }
+    return count
+  }
+
   async function runOcr(file: File) {
     setOcrBusy(true)
     setOcrProgress(0)
@@ -1033,19 +1168,35 @@ export default function ShoppingPantryPage() {
         }
       }
 
-      // Last-resort local OCR: never dump the whole noisy OCR transcript in the
-      // main UI. Show only lines that our receipt parser considers product-like.
-      const fallbackLines = parseReceiptLines(text)
+      // Provider-independent recovery: validate likely product lines against
+      // the family catalog and Open Food Facts before showing local OCR.
+      try {
+        const recovered = await recoverReceiptWithoutVision(text)
+        if (recovered) {
+          const providerDenied = /denied access|403|forbidden/i.test(`${aiError} ${textAiError}`)
+          setOcrError(providerDenied
+            ? 'Il servizio AI principale non è autorizzato sul progetto. Ho usato il riconoscimento alternativo e ho recuperato i prodotti senza dipendere da quel servizio.'
+            : 'Il servizio AI principale non era disponibile. Ho recuperato i prodotti con il riconoscimento alternativo.')
+          return
+        }
+      } catch {}
+
+      // Absolute last resort: use only strict product-like OCR lines. Never show
+      // headers, addresses and fiscal noise as products.
+      const fallbackLines = strictReceiptCandidateLines(text).map(row => row.name)
       setReceiptText(fallbackLines.join('\n'))
-      analyzeReceipt(text)
+      analyzeReceipt(fallbackLines.join('\n'))
 
       if (aiError) {
         const timedOut = /timeout|timed out|tempo/i.test(`${aiError} ${textAiError}`)
+        const providerDenied = /denied access|403|forbidden/i.test(`${aiError} ${textAiError}`)
         setOcrError(aiError.includes('conversione_iphone_non_disponibile')
           ? 'La foto iPhone non è stata convertita correttamente per il riconoscimento intelligente: ho usato l’OCR locale. Prova a scattare una nuova foto direttamente dall’app.'
-          : timedOut
-            ? 'Il riconoscimento intelligente non ha risposto nei tempi previsti. Ho mostrato solo le righe dello scontrino che sembrano prodotti.'
-            : 'Il riconoscimento intelligente non era disponibile. Ho mostrato solo le righe dello scontrino che sembrano prodotti.')
+          : providerDenied
+            ? 'Il servizio AI principale non è autorizzato sul progetto. Ho filtrato l’OCR locale mostrando soltanto le righe che sembrano prodotti.'
+            : timedOut
+              ? 'Il riconoscimento intelligente non ha risposto nei tempi previsti. Ho mostrato solo le righe dello scontrino che sembrano prodotti.'
+              : 'Il riconoscimento intelligente non era disponibile. Ho mostrato solo le righe dello scontrino che sembrano prodotti.')
       }
     } catch {
       setOcrError(aiError || 'Non sono riuscito a leggere bene lo scontrino. Prova una foto più nitida oppure usa “Foto dispensa” per riconoscere direttamente i prodotti.')
