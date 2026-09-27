@@ -577,14 +577,22 @@ export default function ShoppingPantryPage() {
       const allRows: any[] = []
 
       // Sequential analysis avoids bursts against the vision backend and makes
-      // multi-photo sessions predictable on mobile networks.
+      // multi-photo sessions predictable on mobile networks. A temporary failure
+      // on one image must not discard useful results already obtained from others.
+      const failedPhotos: string[] = []
       for (let photoIndex = 0; photoIndex < photos.length; photoIndex += 1) {
         const photo = photos[photoIndex]
-        const result = await callPantryVision('analyze', {
-          imageData: photo.imageData,
-          mimeType: photo.mimeType,
-          locationHint: inventoryDestination
-        })
+        let result: any = null
+        try {
+          result = await callPantryVision('analyze', {
+            imageData: photo.imageData,
+            mimeType: photo.mimeType,
+            locationHint: inventoryDestination
+          })
+        } catch (error: any) {
+          failedPhotos.push(photo.name || `Foto ${photoIndex + 1}`)
+          continue
+        }
 
         const rows = (result?.items || []).map((item: any, index: number) => {
           const exact = item.matchName && catalog.some(name => normalize(name) === normalize(item.matchName))
@@ -654,8 +662,12 @@ export default function ShoppingPantryPage() {
 
       const strongCount = deduped.filter(row => row.duplicateKind === 'strong').length
       const possibleCount = deduped.filter(row => row.duplicateKind === 'possible').length
-      if (!deduped.length) {
+      if (!deduped.length && failedPhotos.length) {
+        setPhotoError('Il servizio AI è temporaneamente molto richiesto. Nessuna delle foto ha completato l’analisi: riprova tra poco, le foto restano selezionate.')
+      } else if (!deduped.length) {
         setPhotoError('Non ho riconosciuto prodotti con sufficiente affidabilità. Prova foto più vicine e ben illuminate.')
+      } else if (failedPhotos.length) {
+        setPhotoError(`Analisi parziale completata: ho letto ${photos.length - failedPhotos.length} foto su ${photos.length}. Non ho perso i risultati già trovati; puoi riprovare per completare ${failedPhotos.length === 1 ? 'la foto rimasta' : 'le foto rimaste'}.`)
       } else if (strongCount || possibleCount) {
         setPhotoError(
           strongCount
