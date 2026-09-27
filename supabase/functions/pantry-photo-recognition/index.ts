@@ -479,8 +479,10 @@ Regole importanti:
 - Se una riga non è abbastanza comprensibile per identificare almeno il tipo di prodotto, omettila invece di inventare.
 - Escludi totale, subtotale, sconti generici, IVA, pagamenti, carte, punti, cauzioni, righe fiscali, intestazioni e messaggi promozionali.
 - detectedName deve essere un nome umano e conciso (es. "Yogurt greco", "Banane", "Pasta spaghetti", "Detersivo piatti").
-- observedText può contenere la breve dicitura effettivamente letta sullo scontrino.
-- matchName deve essere ESATTAMENTE uno dei nomi del catalogo esistente solo se è chiaramente lo stesso prodotto; altrimenti stringa vuota.
+- observedText deve contenere la breve dicitura effettivamente letta sullo scontrino e deve restare la fonte primaria dell'identificazione.
+- brand va valorizzata SOLO se la marca è realmente leggibile nella riga/testo dello scontrino; non dedurla mai dal catalogo.
+- Il catalogo è solo un aiuto successivo: NON deve modificare detectedName, brand, variant o packageSize ricavati dalla foto.
+- matchName deve essere ESATTAMENTE uno dei nomi del catalogo esistente solo se è chiaramente lo stesso prodotto E non esiste alcun conflitto con marca/variante/formato letti; altrimenti stringa vuota.
 - qty: quantità acquistata. Se non è deducibile usa 1.
 - unit: pz per confezioni; usa g/kg/ml/l solo se lo scontrino indica davvero una quantità venduta a peso/volume.
 - totalPrice: prezzo totale della riga dopo eventuale quantità, se leggibile; altrimenti 0.
@@ -626,7 +628,33 @@ Restituisci esclusivamente JSON conforme allo schema.`;
     })).filter((item: any) => item.name);
 
     const locationHint = ["pantry", "fridge", "freezer"].includes(String(body?.locationHint || "")) ? String(body.locationHint) : "pantry";
-    const prompt = `Sei il riconoscimento fotografico dell'inventario di VerdoFamily. Analizza SOLO ciò che è realmente visibile nella foto (scaffale, dispensa, frigorifero o prodotti appoggiati).\n\nObiettivo: individuare prodotti alimentari e prodotti domestici acquistabili che l'utente può voler caricare nell'inventario. Non elencare mobili, contenitori generici, piatti, elettrodomestici o oggetti non pertinenti. Non inventare prodotti nascosti o non leggibili.\n\nRegole:\n- Per ogni prodotto restituisci un nome breve in italiano. Includi marca/variante solo se chiaramente visibile e utile. Il testo letto sulle confezioni è solo un indizio: NON restituire lunghi frammenti OCR come nome prodotto.\n- Riconosci anche frutta e verdura sfusa quando è visivamente identificabile. Se una bilancia/etichetta leggibile indica chiaramente il peso, puoi usare g o kg; altrimenti usa pz.\n- Stima la quantità di confezioni effettivamente visibili. Se è dubbia usa 1 e abbassa la confidenza. Ignora prodotti quasi completamente nascosti.\n- unit deve essere una tra pz, g, kg, ml, l; normalmente usa pz per confezioni intere.\n- confidence è tra 0 e 1.\n- observedText contiene poche parole realmente lette sulla confezione, se disponibili.\n- brand contiene la marca solo se chiaramente visibile, altrimenti stringa vuota.\n- variant contiene solo la variante/linea utile a distinguere il prodotto (es. "Integrale", "Zero", "Classico", "Limone"), solo se leggibile; altrimenti stringa vuota.\n- packageSize contiene il formato dichiarato sulla confezione (es. "500 g", "1 L", "6 x 1,5 L"), solo se leggibile; altrimenti stringa vuota.\n- barcode contiene esclusivamente le cifre del codice EAN/UPC se è chiaramente leggibile nella foto; se non sei sicuro usa stringa vuota. Non inventare mai un barcode.\n- matchName deve essere ESATTAMENTE uno dei nomi del catalogo esistente solo quando ritieni che sia lo stesso prodotto; altrimenti stringa vuota.\n- category deve essere preferibilmente una delle categorie disponibili; se non sei sicuro usa Generico.\n- Raggruppa confezioni identiche in una sola riga con qty maggiore di 1.\n\nCategorie disponibili: ${JSON.stringify(categories)}\nCatalogo esistente: ${JSON.stringify(existing)}\n\nRestituisci esclusivamente il JSON conforme allo schema.`;
+    const prompt = `Sei il riconoscimento fotografico dell'inventario di VerdoFamily. Analizza SOLO ciò che è realmente visibile nella foto (scaffale, dispensa, frigorifero o prodotti appoggiati).
+
+OBIETTIVO PRINCIPALE: leggere l'identità REALE delle confezioni dalla foto senza farti influenzare da prodotti già presenti nell'app.
+
+Regole:
+- Individua prodotti alimentari e domestici realmente visibili. Ignora mobili, contenitori generici, piatti, elettrodomestici e prodotti troppo nascosti.
+- Prima leggi ciò che è stampato sulla confezione; solo dopo classifica il prodotto.
+- detectedName deve descrivere il prodotto/variante SENZA inventare la marca. Esempio: per una confezione con marchio "DIVELLA" e scritta "Penne Ziti 32", usa detectedName "Penne Ziti 32" e brand "Divella".
+- brand deve contenere ESCLUSIVAMENTE la marca realmente visibile sulla confezione. Non sostituirla con marchi simili o più noti. Se non è leggibile, usa stringa vuota.
+- Se valorizzi brand, observedText DEVE contenere anche la parola/logo di marca che hai effettivamente letto, insieme alle altre parole utili.
+- variant contiene solo la variante/linea realmente leggibile (es. "Integrale", "Zero", "32", "Classico"), senza ripetere la marca.
+- packageSize contiene il formato dichiarato e leggibile (es. "500 g", "1 L", "6 x 1,5 L"); se non leggibile usa stringa vuota.
+- barcode contiene solo un EAN/UPC chiaramente leggibile; non inventarlo mai.
+- matchName deve essere SEMPRE stringa vuota in questa fase. L'associazione con il catalogo esistente viene eseguita dopo dall'app, usando marca, variante, formato ed EAN. Questo evita che il catalogo condizioni la lettura della foto.
+- Stima qty come numero di confezioni effettivamente visibili; se dubbia usa 1 e abbassa confidence.
+- unit deve essere pz per confezioni intere; usa g/kg/ml/l solo per prodotti sfusi o quantità realmente vendute a peso/volume.
+- category deve essere preferibilmente una delle categorie disponibili; se non sei sicuro usa Generico.
+- location: freezer per surgelati/gelati; fridge per freschi/refrigerati; pantry per prodotti a temperatura ambiente.
+- packageState: sealed, opened, possibly_opened o unknown in base a ciò che è realmente visibile.
+- expiryDate solo se una data di scadenza è chiaramente leggibile, altrimenti stringa vuota.
+- confidence è tra 0 e 1 e deve riflettere la certezza della lettura effettiva, non la somiglianza con prodotti noti.
+- Raggruppa confezioni identiche in una sola riga con qty maggiore di 1.
+- NON correggere una marca leggibile con una marca diversa. Se leggi "DIVELLA", il risultato non può diventare "Rummo", "Barilla" o altro marchio.
+
+Categorie disponibili: ${JSON.stringify(categories)}
+
+Restituisci esclusivamente il JSON conforme allo schema.`;
 
     const schema = {
       type: "OBJECT",
@@ -696,16 +724,22 @@ Restituisci esclusivamente JSON conforme allo schema.`;
     try { parsed = JSON.parse(output); } catch { return json({ ok: false, error: "invalid_vision_response" }, 502); }
     const items = Array.isArray(parsed?.items) ? parsed.items.slice(0, 80) : [];
 
-    const normalizedItems = items.map((item: any) => ({
+    const normalizedItems = items.map((item: any) => {
+      const observedText = String(item?.observedText || "").trim();
+      const rawBrand = String(item?.brand || "").trim().slice(0, 100);
+      const brandTokens = rawBrand.toLocaleLowerCase("it-IT").split(/[^a-z0-9à-ÿ]+/i).filter((token: string) => token.length >= 3);
+      const observedNormalized = observedText.toLocaleLowerCase("it-IT");
+      const supportedBrand = !rawBrand || brandTokens.some((token: string) => observedNormalized.includes(token));
+      return {
       detectedName: String(item?.detectedName || "").trim(),
-      matchName: String(item?.matchName || "").trim(),
+      matchName: "",
       qty: Math.max(1, Math.min(99, Number(item?.qty) || 1)),
       unit: ["pz", "g", "kg", "ml", "l"].includes(item?.unit) ? item.unit : "pz",
       category: String(item?.category || "Generico").trim() || "Generico",
       location: ["pantry","fridge","freezer"].includes(String(item?.location || "")) ? String(item.location) : locationHint,
       confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
-      observedText: String(item?.observedText || "").trim(),
-      brand: String(item?.brand || "").trim().slice(0, 100),
+      observedText,
+      brand: supportedBrand ? rawBrand : "",
       variant: String(item?.variant || "").trim().slice(0, 120),
       packageSize: String(item?.packageSize || "").trim().slice(0, 80),
       barcode: /^\d{8,14}$/.test(String(item?.barcode || "").replace(/\D/g, "")) ? String(item.barcode).replace(/\D/g, "") : "",
@@ -713,7 +747,8 @@ Restituisci esclusivamente JSON conforme allo schema.`;
       openReason: String(item?.openReason || "").trim().slice(0, 240),
       expiryDate: /^\d{4}-\d{2}-\d{2}$/.test(String(item?.expiryDate || "")) ? String(item.expiryDate) : "",
       notes: String(item?.notes || "").trim()
-    })).filter((item: any) => item.detectedName);
+      };
+    }).filter((item: any) => item.detectedName);
 
     await audit(client, {
       actorUserId: user.id,
