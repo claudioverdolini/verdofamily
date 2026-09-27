@@ -372,7 +372,7 @@ export default function MealsPage() {
                     {list.map(plan => {
                       const dish = data.dishes.find(d => d.id === plan.dishId)
                       const user = data.users.find(u => u.id === plan.userId)
-                      return <button key={plan.id} className="meal-plan-pill" onClick={() => openPlan(date, slot, plan)} style={{ '--meal-color': user?.color || '#5B5BD6' } as React.CSSProperties}><strong>{dish?.name || 'Piatto'}</strong>{dish?.sourceUrl ? <span>🔗 {dish.sourceLabel || 'Ricetta online'}</span> : (plan.variant || dish?.variant) ? <span>{plan.variant || dish?.variant}</span> : null}</button>
+                      return <button key={plan.id} className="meal-plan-pill" onClick={() => openPlan(date, slot, plan)} style={{ '--meal-color': user?.color || '#5B5BD6' } as React.CSSProperties}><strong>{dish?.name || 'Piatto'}</strong>{plan.variant ? <span>{plan.variant}</span> : dish?.sourceUrl ? <span>🔗 {dish.sourceLabel || 'Ricetta online'}</span> : null}</button>
                     })}
                     <button className="meal-add" onClick={() => openPlan(date, slot)}>+</button>
                   </div>
@@ -426,7 +426,7 @@ export default function MealsPage() {
                           <span className="meal-mobile-plan__dot" />
                           <span className="meal-mobile-plan__copy">
                             <strong>{dish?.name || 'Piatto'}</strong>
-                            <small>{plan.variant || dish?.variant || dish?.sourceLabel || user?.name || 'Pasto pianificato'}</small>
+                            <small>{plan.variant || dish?.sourceLabel || user?.name || 'Pasto pianificato'}</small>
                           </span>
                           {user ? <Avatar user={user} size="xs" /> : <ChevronRight size={17} />}
                         </button>
