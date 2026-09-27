@@ -107,7 +107,7 @@ export default function Dashboard() {
       const dish = data.dishes.find(d => d.id === plan.dishId)
       if (!dish) continue
       map[plan.date].push({
-        name: dish.variant ? `${dish.name} · ${dish.variant}` : dish.name,
+        name: plan.variant ? `${dish.name} · ${plan.variant}` : dish.name,
         slot: plan.slot,
         userId: plan.userId
       })
