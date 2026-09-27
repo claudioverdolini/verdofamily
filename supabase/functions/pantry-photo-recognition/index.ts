@@ -66,67 +66,102 @@ async function callGeminiWithTimeout(
   const attemptTimeouts = [14000, 9000, 7000];
   const candidates = models.slice(0, attemptTimeouts.length);
 
+  const attempt = async (apiKey: string, keyIndex: number, model: string, timeoutMs: number) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey
+          },
+          body,
+          signal: controller.signal
+        }
+      );
+
+      const candidate = await response.json().catch(() => ({}));
+      if (response.ok) {
+        console.info("gemini_attempt_succeeded", { label, keyIndex, model, status: response.status });
+        return { ok: true, candidate, status: response.status, message: "" };
+      }
+
+      const message = String(candidate?.error?.message || `gemini_http_${response.status}`);
+      console.warn("gemini_attempt_failed", {
+        label,
+        keyIndex,
+        model,
+        status: response.status,
+        message: message.slice(0, 240)
+      });
+      return { ok: false, candidate: null, status: response.status, message };
+    } catch (error) {
+      const timedOut = controller.signal.aborted;
+      const message = timedOut
+        ? `gemini_timeout_${timeoutMs}ms`
+        : String(error instanceof Error ? error.message : error);
+      console.warn("gemini_attempt_failed", {
+        label,
+        keyIndex,
+        model,
+        status: timedOut ? "timeout" : "network_error",
+        message: message.slice(0, 240)
+      });
+      return { ok: false, candidate: null, status: 0, message };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex += 1) {
     const apiKey = apiKeys[keyIndex];
+    let sawTransientCapacityIssue = false;
+
     for (let index = 0; index < candidates.length; index += 1) {
       const model = candidates[index];
-      const timeoutMs = attemptTimeouts[index];
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const response = await attempt(apiKey, keyIndex, model, attemptTimeouts[index]);
 
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": apiKey
-            },
-            body,
-            signal: controller.signal
-          }
-        );
-
-        const candidate = await response.json().catch(() => ({}));
-        if (response.ok) {
-          result = candidate;
-          usedModel = model;
-          usedKeyIndex = keyIndex;
-          return { result, usedModel, usedKeyIndex, lastStatus: response.status, lastMessage: "" };
-        }
-
-        lastStatus = response.status;
-        lastMessage = String(candidate?.error?.message || `gemini_http_${response.status}`);
-        console.warn("gemini_attempt_failed", {
-          label,
-          keyIndex,
-          model,
-          status: response.status,
-          message: lastMessage.slice(0, 240)
-        });
-
-        // A denied/forbidden project cannot be fixed by trying more models on
-        // the same key. Move immediately to the next configured Gemini project.
-        if (response.status === 403 || /denied access|permission_denied|forbidden/i.test(lastMessage)) {
-          break;
-        }
-      } catch (error) {
-        const timedOut = controller.signal.aborted;
-        lastStatus = 0;
-        lastMessage = timedOut
-          ? `gemini_timeout_${timeoutMs}ms`
-          : String(error instanceof Error ? error.message : error);
-        console.warn("gemini_attempt_failed", {
-          label,
-          keyIndex,
-          model,
-          status: timedOut ? "timeout" : "network_error",
-          message: lastMessage.slice(0, 240)
-        });
-      } finally {
-        clearTimeout(timer);
+      if (response.ok) {
+        result = response.candidate;
+        usedModel = model;
+        usedKeyIndex = keyIndex;
+        return { result, usedModel, usedKeyIndex, lastStatus: response.status, lastMessage: "" };
       }
+
+      lastStatus = response.status;
+      lastMessage = response.message;
+      const denied = response.status === 403 || /denied access|permission_denied|forbidden/i.test(lastMessage);
+      if (denied) break;
+
+      if (
+        response.status === 429
+        || response.status === 500
+        || response.status === 502
+        || response.status === 503
+        || response.status === 504
+        || response.status === 0
+        || /high demand|temporar|timeout|overloaded|unavailable/i.test(lastMessage)
+      ) {
+        sawTransientCapacityIssue = true;
+      }
+    }
+
+    // A provider 503 is usually short-lived. After trying the regular fallback
+    // models, wait briefly and retry the primary candidate once before failing.
+    if (sawTransientCapacityIssue && candidates[0]) {
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      const retry = await attempt(apiKey, keyIndex, candidates[0], 10000);
+      if (retry.ok) {
+        result = retry.candidate;
+        usedModel = candidates[0];
+        usedKeyIndex = keyIndex;
+        return { result, usedModel, usedKeyIndex, lastStatus: retry.status, lastMessage: "" };
+      }
+      lastStatus = retry.status;
+      lastMessage = retry.message;
     }
   }
 
@@ -141,9 +176,9 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRole = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const geminiKeys = [...new Set([
-      Deno.env.get("GEMINI_API_KEY") || "",
       Deno.env.get("GEMINI_API_KEY_SECONDARY") || "",
-      Deno.env.get("GEMINI_API_KEY_TERTIARY") || ""
+      Deno.env.get("GEMINI_API_KEY_TERTIARY") || "",
+      Deno.env.get("GEMINI_API_KEY") || ""
     ].filter(Boolean))];
     const geminiKey = geminiKeys[0] || "";
     const configuredModel = Deno.env.get("GEMINI_MODEL") || "";
