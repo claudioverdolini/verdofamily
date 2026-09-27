@@ -137,6 +137,7 @@ export default function ShoppingPantryPage() {
   const [photoPayload, setPhotoPayload] = useState<{ imageData: string; mimeType: string } | null>(null)
   const [photoBatch, setPhotoBatch] = useState<Array<{ id: string; preview: string; imageData: string; mimeType: string; name: string }>>([])
   const [photoRows, setPhotoRows] = useState<any[]>([])
+  const [expandedImportRows, setExpandedImportRows] = useState<Record<string, boolean>>({})
   const [enrichmentBusy, setEnrichmentBusy] = useState(false)
   const [enrichmentMessage, setEnrichmentMessage] = useState('')
   const [residualBusyId, setResidualBusyId] = useState<string | null>(null)
@@ -152,6 +153,20 @@ export default function ShoppingPantryPage() {
     if (scanMode !== 'pantry-photo' || !cloudAuthenticated || !familyId || !supabase) return
     void refreshVisionStatus()
   }, [scanMode, cloudAuthenticated, familyId])
+
+  function importRowExpanded(id: string, force = false) {
+    return force || !!expandedImportRows[id]
+  }
+
+  function toggleImportRow(id: string) {
+    setExpandedImportRows(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  function compactProductSummary(row: any) {
+    const identity = [row.brand, row.variant, row.packageSize].map((value: any) => String(value || '').trim()).filter(Boolean)
+    const qty = `${Number(row.qty) || 1} ${row.unit || 'pz'}`
+    return [identity.join(' · '), qty, locationLabel(row.location)].filter(Boolean).join(' · ')
+  }
 
   async function callPantryVision(action: string, extra: Record<string, any> = {}) {
     if (!supabase || !familyId) throw new Error('Cloud non disponibile.')
@@ -559,6 +574,7 @@ export default function ShoppingPantryPage() {
     setPhotoBusy(false)
     setPhotoError('')
     setPhotoRows([])
+    setExpandedImportRows({})
     setPhotoBatch([])
     setPhotoPreview('')
     setPhotoPayload(null)
@@ -627,6 +643,8 @@ export default function ShoppingPantryPage() {
             raw: detectedName,
             observedText: String(item.observedText || '').trim(),
             brand: matchedPantry?.brand || matchedPantry?.productInfo?.brand || detectedBrand,
+            brandEvidence: matchedPantry ? '' : String(item.brandEvidence || '').trim(),
+            brandConfidence: matchedPantry ? 1 : Math.max(0, Math.min(1, Number(item.brandConfidence) || 0)),
             variant: matchedPantry?.variant || detectedVariant,
             packageSize: matchedPantry?.packageSize || matchedPantry?.productInfo?.packageQuantity || detectedPackage,
             barcode: matchedPantry?.barcode || matchedPantry?.productInfo?.barcode || detectedBarcode,
@@ -659,6 +677,7 @@ export default function ShoppingPantryPage() {
 
       const deduped = flagPhotoDuplicates(allRows)
       setPhotoRows(deduped)
+      setExpandedImportRows({})
 
       const strongCount = deduped.filter(row => row.duplicateKind === 'strong').length
       const possibleCount = deduped.filter(row => row.duplicateKind === 'possible').length
@@ -994,6 +1013,7 @@ export default function ShoppingPantryPage() {
       sourceRef: receiptFingerprint(rawText || JSON.stringify(result?.items || []))
     })
     setReceiptRows(rows)
+    setExpandedImportRows({})
     return rows.length
   }
 
@@ -1724,14 +1744,17 @@ export default function ShoppingPantryPage() {
               <div className="receipt-matches">
                 {receiptRows.map(row => (
                   <div key={row.id} className="receipt-match">
-                    <div className="receipt-match__head">
-                      <label><input type="checkbox" checked={row.include} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}</span></label>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div className="receipt-match__head receipt-match__head--compact">
+                      <label><input type="checkbox" checked={row.include} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} />
+                        <span className="receipt-match__summary"><strong>{row.name || row.raw}</strong><small>{compactProductSummary(row)}</small></span>
+                      </label>
+                      <div className="receipt-match__compact-actions">
                         {Number.isFinite(Number(row.confidence)) ? <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge> : null}
                         {row.mode === 'existing' ? <Badge tone="success">Associato</Badge> : <Badge tone="warning">Da verificare</Badge>}
+                        {row.include ? <button type="button" className="receipt-match__toggle" onClick={() => toggleImportRow(row.id)}>{importRowExpanded(row.id) ? 'Chiudi' : 'Modifica'}</button> : null}
                       </div>
                     </div>
-                    {row.include ? (
+                    {row.include && importRowExpanded(row.id) ? (
                       <div className="receipt-match__grid">
                         <Field label="Associazione">
                           <select value={row.mode} onChange={e => setReceiptRows(prev => prev.map(x => x.id === row.id ? updateRowAssociation(x, e.target.value) : x))}>
@@ -1821,9 +1844,18 @@ export default function ShoppingPantryPage() {
               {photoBusy ? <div className="vision-loading"><ScanLine size={28} /><strong>Sto guardando la foto…</strong><span>Leggo confezioni, etichette e quantità visibili.</span></div> : photoRows.length ? <div className="receipt-matches">
                 <div className="vision-summary"><strong>{photoRows.filter(row => row.include).length} da importare · {photoRows.length} riconosciuti</strong><span>{photoRows.some(row => row.duplicateKind) ? 'I doppioni tra foto sono evidenziati e quelli più sicuri vengono esclusi automaticamente.' : 'Controlla soprattutto le righe con confidenza più bassa.'}</span></div>
                 {photoRows.map(row => <div key={row.id} className="receipt-match">
-                  <div className="receipt-match__head">
-                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} /><span>{row.raw}{row.brand ? <small> · {row.brand}</small> : null}{row.variant ? <small> · {row.variant}</small> : null}{row.packageSize ? <small> · {row.packageSize}</small> : null}{row.barcode ? <small> · EAN {row.barcode}</small> : row.observedText ? <small> · letto: {row.observedText}</small> : null}<small> · Foto {(row.sourcePhotoIndex ?? 0) + 1}</small></span></label>
-                    <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge>
+                  <div className="receipt-match__head receipt-match__head--compact">
+                    <label><input type="checkbox" checked={row.include} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? { ...x, include: e.target.checked } : x))} />
+                      <span className="receipt-match__summary">
+                        <strong>{row.name || row.raw}</strong>
+                        <small>{compactProductSummary(row)} · Foto {(row.sourcePhotoIndex ?? 0) + 1}</small>
+                      </span>
+                    </label>
+                    <div className="receipt-match__compact-actions">
+                      <Badge tone={row.confidence >= .8 ? 'success' : row.confidence >= .55 ? 'warning' : 'danger'}>{Math.round(row.confidence * 100)}%</Badge>
+                      {row.brand ? <Badge tone={Number(row.brandConfidence || 0) >= .85 ? 'success' : 'warning'}>{row.brand}</Badge> : <Badge tone="warning">Marca da verificare</Badge>}
+                      {row.include ? <button type="button" className="receipt-match__toggle" onClick={() => toggleImportRow(row.id)}>{importRowExpanded(row.id, rowNeedsResidual(row)) ? 'Chiudi' : 'Modifica'}</button> : null}
+                    </div>
                   </div>
                   {row.duplicateKind ? <div className={`photo-duplicate-warning photo-duplicate-warning--${row.duplicateKind}`}>
                     <AlertTriangle size={17} />
@@ -1835,7 +1867,7 @@ export default function ShoppingPantryPage() {
                       ? <button type="button" onClick={() => keepDuplicateRow(row.id)}>Tieni comunque</button>
                       : <button type="button" onClick={() => excludeDuplicateRow(row.id)}>Escludi</button>}
                   </div> : null}
-                  {row.include ? <div className="receipt-match__grid">
+                  {row.include && importRowExpanded(row.id, rowNeedsResidual(row)) ? <div className="receipt-match__grid">
                     <Field label="Associazione"><select value={row.mode} onChange={e => setPhotoRows(prev => prev.map(x => x.id === row.id ? updateRowAssociation(x, e.target.value) : x))}><option value="existing">Prodotto esistente</option><option value="new">Crea nuovo prodotto</option></select></Field>
                     {row.mode === 'existing' ? <Field label="Prodotto" hint="Marca e formato distinguono prodotti omonimi."><select value={row.existingPantryId ? String(row.existingPantryId) : ''} onChange={e => {
                       const existing = data.pantry.find(item => item.id === Number(e.target.value))
