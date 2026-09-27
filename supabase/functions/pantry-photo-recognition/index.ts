@@ -672,6 +672,8 @@ Regole:
 - Prima leggi ciò che è stampato sulla confezione; solo dopo classifica il prodotto.
 - detectedName deve descrivere il prodotto/variante SENZA inventare la marca. Esempio: per una confezione con marchio "DIVELLA" e scritta "Penne Ziti 32", usa detectedName "Penne Ziti 32" e brand "Divella".
 - brand deve contenere ESCLUSIVAMENTE la marca realmente visibile sulla confezione. Non sostituirla con marchi simili o più noti. Se non è leggibile, usa stringa vuota.
+- brandEvidence deve contenere ESATTAMENTE la parola/logo di marca che riesci a leggere sulla confezione, senza correggerla o completarla per intuito. Se la marca non è leggibile, usa stringa vuota.
+- brandConfidence è la certezza della lettura della MARCA, separata dalla confidence generale del prodotto. Usa valori alti (>=0,85) solo quando il marchio è davvero leggibile.
 - Se valorizzi brand, observedText DEVE contenere anche la parola/logo di marca che hai effettivamente letto, insieme alle altre parole utili.
 - variant contiene solo la variante/linea realmente leggibile (es. "Integrale", "Zero", "32", "Classico"), senza ripetere la marca.
 - packageSize contiene il formato dichiarato e leggibile (es. "500 g", "1 L", "6 x 1,5 L"); se non leggibile usa stringa vuota.
@@ -708,6 +710,8 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
               confidence: { type: "NUMBER" },
               observedText: { type: "STRING" },
               brand: { type: "STRING" },
+              brandEvidence: { type: "STRING" },
+              brandConfidence: { type: "NUMBER" },
               variant: { type: "STRING" },
               packageSize: { type: "STRING" },
               barcode: { type: "STRING" },
@@ -716,7 +720,7 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
               expiryDate: { type: "STRING" },
               notes: { type: "STRING" }
             },
-            required: ["detectedName", "matchName", "qty", "unit", "category", "location", "confidence", "observedText", "brand", "variant", "packageSize", "barcode", "packageState", "openReason", "expiryDate", "notes"]
+            required: ["detectedName", "matchName", "qty", "unit", "category", "location", "confidence", "observedText", "brand", "brandEvidence", "brandConfidence", "variant", "packageSize", "barcode", "packageState", "openReason", "expiryDate", "notes"]
           }
         }
       },
@@ -762,9 +766,14 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
     const normalizedItems = items.map((item: any) => {
       const observedText = String(item?.observedText || "").trim();
       const rawBrand = String(item?.brand || "").trim().slice(0, 100);
+      const brandEvidence = String(item?.brandEvidence || "").trim().slice(0, 100);
+      const brandConfidence = Math.max(0, Math.min(1, Number(item?.brandConfidence) || 0));
       const brandTokens = rawBrand.toLocaleLowerCase("it-IT").split(/[^a-z0-9à-ÿ]+/i).filter((token: string) => token.length >= 3);
+      const evidenceNormalized = brandEvidence.toLocaleLowerCase("it-IT");
       const observedNormalized = observedText.toLocaleLowerCase("it-IT");
-      const supportedBrand = !rawBrand || brandTokens.some((token: string) => observedNormalized.includes(token));
+      const exactEvidence = !!rawBrand && brandTokens.length > 0 && brandTokens.every((token: string) => evidenceNormalized.includes(token));
+      const observedSupports = !!rawBrand && brandTokens.some((token: string) => observedNormalized.includes(token));
+      const supportedBrand = !rawBrand || (brandConfidence >= 0.85 && exactEvidence && observedSupports);
       return {
       detectedName: String(item?.detectedName || "").trim(),
       matchName: "",
@@ -775,6 +784,8 @@ Restituisci esclusivamente il JSON conforme allo schema.`;
       confidence: Math.max(0, Math.min(1, Number(item?.confidence) || 0)),
       observedText,
       brand: supportedBrand ? rawBrand : "",
+      brandEvidence: supportedBrand ? brandEvidence : "",
+      brandConfidence: supportedBrand ? brandConfidence : 0,
       variant: String(item?.variant || "").trim().slice(0, 120),
       packageSize: String(item?.packageSize || "").trim().slice(0, 80),
       barcode: /^\d{8,14}$/.test(String(item?.barcode || "").replace(/\D/g, "")) ? String(item.barcode).replace(/\D/g, "") : "",
