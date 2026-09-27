@@ -597,20 +597,26 @@ export default function ShoppingPantryPage() {
             .sort((a, b) => b.score - a.score)
             .slice(0, 5)
           const top = suggestions[0]
-          const confidentName = !!exact || (!!top && top.score >= .78)
-          const chosenName = exact || (confidentName ? top.name : String(item.detectedName || '').trim())
+          const detectedName = String(item.detectedName || '').trim()
           const detectedBrand = String(item.brand || '').trim()
           const detectedVariant = String(item.variant || '').trim()
           const detectedPackage = String(item.packageSize || '').trim()
           const detectedBarcode = String(item.barcode || '').replace(/\D/g, '')
-          const matchedPantry = findExistingPantryProduct(chosenName, detectedBrand, detectedBarcode, detectedVariant, detectedPackage)
+          const candidateNames = [
+            exact || '',
+            top && top.score >= .78 ? top.name : ''
+          ].filter(Boolean)
+          const matchedPantry = candidateNames
+            .map(candidateName => findExistingPantryProduct(candidateName, detectedBrand, detectedBarcode, detectedVariant, detectedPackage))
+            .find(Boolean)
+          const chosenName = matchedPantry?.name || detectedName || candidateNames[0] || ''
           const category = matchedPantry?.category || (data.categories.includes(item.category) ? item.category : 'Generico')
           return {
             id: `photo-${photo.id}-${index}`,
             sourcePhotoId: photo.id,
             sourcePhotoIndex: photoIndex,
             sourcePhotoName: photo.name || `Foto ${photoIndex + 1}`,
-            raw: String(item.detectedName || '').trim(),
+            raw: detectedName,
             observedText: String(item.observedText || '').trim(),
             brand: matchedPantry?.brand || matchedPantry?.productInfo?.brand || detectedBrand,
             variant: matchedPantry?.variant || detectedVariant,
@@ -913,13 +919,19 @@ export default function ShoppingPantryPage() {
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
       const top = suggestions[0]
-      const confidentName = !!exact || (!!top && top.score >= 0.8)
-      const chosenName = exact || (confidentName ? top.name : String(item.detectedName || '').trim())
+      const detectedName = String(item.detectedName || '').trim()
       const detectedBrand = String(item.brand || '').trim()
       const detectedVariant = String(item.variant || '').trim()
       const detectedPackage = String(item.packageSize || '').trim()
       const detectedBarcode = String(item.barcode || '').replace(/\D/g, '')
-      const matchedPantry = findExistingPantryProduct(chosenName, detectedBrand, detectedBarcode, detectedVariant, detectedPackage)
+      const candidateNames = [
+        exact || '',
+        top && top.score >= 0.8 ? top.name : ''
+      ].filter(Boolean)
+      const matchedPantry = candidateNames
+        .map(candidateName => findExistingPantryProduct(candidateName, detectedBrand, detectedBarcode, detectedVariant, detectedPackage))
+        .find(Boolean)
+      const chosenName = matchedPantry?.name || detectedName || candidateNames[0] || ''
       const category = matchedPantry?.category || (data.categories.includes(item.category) ? item.category : 'Generico')
       const requestedLocation = ['pantry','fridge','freezer'].includes(String(item.location || ''))
         ? item.location as PantryLocation
@@ -932,7 +944,7 @@ export default function ShoppingPantryPage() {
         : totalPrice !== undefined && qty > 0 ? Math.round(totalPrice / qty * 100) / 100 : undefined
       return {
         id: `vision-receipt-${Date.now()}-${index}`,
-        raw: String(item.detectedName || '').trim(),
+        raw: detectedName,
         observedText: String(item.observedText || '').trim(),
         brand: matchedPantry?.brand || matchedPantry?.productInfo?.brand || detectedBrand,
         variant: matchedPantry?.variant || detectedVariant,
