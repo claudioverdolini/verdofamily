@@ -84,6 +84,31 @@ function inspectReceiptText(text: string) {
   return { merchant, date, total, sourceRef: receiptFingerprint(text), details }
 }
 
+function safeReceiptMerchant(value: string) {
+  const text = String(value || '').replace(/\s{2,}/g, ' ').trim()
+  if (!text || text.length < 2 || text.length > 70) return ''
+  if (/\d{1,6}[,.]\d{2}|\b\d+%|\b(?:gr|kg|ml|cl|lt|l)\b/i.test(text)) return ''
+  if (/[|#@<>_=]{2,}/.test(text)) return ''
+  const letters = (text.match(/[a-zà-ù]/gi) || []).length
+  const visible = text.replace(/\s/g, '').length
+  if (!visible || letters / visible < .62) return ''
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length > 8) return ''
+  return text
+}
+
+function explicitReceiptTotal(text: string) {
+  const lines = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const n = normalize(lines[i])
+    if ((n.includes('totale') && !n.includes('subtotale')) || n.startsWith('importo')) {
+      const amount = receiptMoney(lines[i])
+      if (amount !== undefined && amount > 0) return amount
+    }
+  }
+  return 0
+}
+
 export default function ShoppingPantryPage() {
   const {
     data,
@@ -1059,15 +1084,24 @@ export default function ShoppingPantryPage() {
         .sort((a, b) => b.score - a.score)[0]
       const catalogHit = Number(localBest?.score || 0) >= .74
 
+      const commonProduct = /\b(?:ravioli|pasta|latte|yogurt|formaggio|carne|pollo|pesce|pane|biscotti|acqua|vino|birra|olio|riso|sugo|pomodoro|verdura|frutta|mele?|pere?|banane?|detersivo|sapone|shampoo|caffe|caffè|uova|farina|zucchero|sale)\b/i.test(cleaned)
+      const weirdChars = (raw.match(/[|#@<>_=]/g) || []).length
+      const visibleChars = raw.replace(/\s/g, '').length
+      const weirdRatio = visibleChars ? weirdChars / visibleChars : 0
+
       let score = 0
       if (alphaTokens.length >= 2) score += 1
       if (alphaTokens.length >= 3) score += 1
       if (hasPackage) score += 3
       if (hasPrice) score += 3
       if (catalogHit) score += 4
-      if (/\b(?:ravioli|pasta|latte|yogurt|formaggio|carne|pollo|pesce|pane|biscotti|acqua|vino|birra|olio|riso|sugo|pomodoro|verdura|frutta|detersivo|sapone|shampoo|caffe|caffè|uova|farina|zucchero|sale)\b/i.test(cleaned)) score += 2
+      if (commonProduct) score += 2
 
-      if (score < 3) return
+      // OCR fallback must be conservative: a random line ending in a price is
+      // not enough to become a pantry product.
+      if (weirdRatio > .12) return
+      if (alphaTokens.length < 2) return
+      if (score < 4) return
 
       let name = cleaned
         .replace(/^[-–—_*#.:;\s]+/, '')
@@ -1115,8 +1149,11 @@ export default function ShoppingPantryPage() {
       const local = localMatches[0]
       const online = onlineByKey.get(String(index))
       const onlineConfidence = Math.max(0, Math.min(1, Number(online?.confidence) || 0))
-      const onlineMatch = online?.match && onlineConfidence >= .58 ? online.match : null
-      const localConfident = !!local && local.score >= .78
+      const onlineMatch = online?.match && onlineConfidence >= .64 ? online.match : null
+      const localConfident = !!local && local.score >= .80
+      const strongGeneric = candidate.score >= 7
+      if (!onlineMatch && !localConfident && !strongGeneric) return null
+
       const detectedName = String(
         localConfident
           ? local.name
@@ -1146,17 +1183,29 @@ export default function ShoppingPantryPage() {
 
     const inspection = inspectReceiptText(text)
     const recoveredText = items.map((item: any) => item.detectedName).join('\n')
+    const merchant = safeReceiptMerchant(inspection.merchant)
+    const total = explicitReceiptTotal(text)
     const count = applyReceiptVision({
-      merchant: inspection.merchant,
+      merchant,
       date: inspection.date,
-      total: inspection.total,
+      total,
       rawText: recoveredText,
       items
     })
 
     if (count) {
+      // Never leave the noisy raw OCR visible after a successful alternative
+      // recovery: show only the product lines that actually passed validation.
+      setReceiptText(recoveredText)
+      setReceiptMeta(prev => ({
+        ...prev,
+        merchant,
+        date: inspection.date,
+        total,
+        sourceRef: receiptFingerprint(recoveredText)
+      }))
       setOcrProgress(1)
-      setEnrichmentMessage(`Riconoscimento alternativo completato: ${count} ${count === 1 ? 'prodotto recuperato' : 'prodotti recuperati'} senza dipendere dal servizio AI principale.`)
+      setEnrichmentMessage(`Riconoscimento alternativo completato: ${count} ${count === 1 ? 'prodotto recuperato' : 'prodotti recuperati'}. Ho scartato automaticamente le righe OCR non affidabili.`)
     }
     return count
   }
@@ -1242,8 +1291,8 @@ export default function ShoppingPantryPage() {
         if (recovered) {
           const providerDenied = /denied access|403|forbidden/i.test(`${aiError} ${textAiError}`)
           setOcrError(providerDenied
-            ? 'Il servizio AI principale non è autorizzato sul progetto. Ho usato il riconoscimento alternativo e ho recuperato i prodotti senza dipendere da quel servizio.'
-            : 'Il servizio AI principale non era disponibile. Ho recuperato i prodotti con il riconoscimento alternativo.')
+            ? 'Il servizio AI principale non è autorizzato sul progetto. Ho mantenuto solo le righe OCR sufficientemente affidabili; il testo confuso è stato scartato.'
+            : 'Il servizio AI principale non era disponibile. Ho recuperato solo le righe sufficientemente affidabili e ho scartato il testo OCR confuso.')
           return
         }
       } catch {}
