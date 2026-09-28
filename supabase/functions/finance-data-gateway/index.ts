@@ -658,6 +658,82 @@ Deno.serve(async (req) => {
       return json({ ok: true, role, ...data });
     }
 
+    if (action === "delete-chore") {
+      if (!["admin","adult"].includes(role)) return json({ ok: false, error: "forbidden" }, 403);
+
+      const choreId = n(body?.choreId);
+      if (choreId <= 0) return json({ ok: false, error: "invalid_chore_id" }, 400);
+
+      const { data: chore, error: choreError } = await admin
+        .from("finance_chores")
+        .select("id,legacy_id,person_id,title,amount,status,credited_transaction_id")
+        .eq("family_id", familyId)
+        .eq("legacy_id", choreId)
+        .maybeSingle();
+      dbError(choreError, "read chore for delete");
+
+      if (chore) {
+        if (chore.status === "approved") {
+          if (chore.credited_transaction_id) {
+            const { error: txError } = await admin
+              .from("finance_transactions")
+              .update({ reversed: true, updated_at: new Date().toISOString() })
+              .eq("family_id", familyId)
+              .eq("id", chore.credited_transaction_id);
+            dbError(txError, "reverse chore credit");
+          }
+
+          const { data: wallet, error: walletError } = await admin
+            .from("finance_wallets")
+            .select("id,balance")
+            .eq("family_id", familyId)
+            .eq("person_id", chore.person_id)
+            .maybeSingle();
+          dbError(walletError, "read wallet for chore delete");
+
+          if (wallet) {
+            const nextBalance = Math.max(0, Number(wallet.balance || 0) - Number(chore.amount || 0));
+            const { error: balanceError } = await admin
+              .from("finance_wallets")
+              .update({ balance: nextBalance, updated_at: new Date().toISOString() })
+              .eq("id", wallet.id);
+            dbError(balanceError, "adjust wallet after chore delete");
+          }
+        }
+
+        const { error: deleteError } = await admin
+          .from("finance_chores")
+          .delete()
+          .eq("family_id", familyId)
+          .eq("id", chore.id);
+        dbError(deleteError, "delete completed chore");
+
+        await audit(admin, {
+          actorUserId: user.id,
+          familyId,
+          eventType: "finance_chore_deleted",
+          targetType: "chore",
+          targetId: String(chore.legacy_id),
+          metadata: {
+            title: String(chore.title || "").slice(0, 120),
+            status: chore.status,
+            amount: Number(chore.amount || 0),
+            creditReversed: chore.status === "approved"
+          }
+        });
+      }
+
+      const data = await readFinance(userClient, familyId);
+      await notifyFamilyPush(admin, supabaseUrl, familyId, ["chores"], user.id, [{
+        category: "chores",
+        kind: "chore",
+        id: choreId,
+        title: chore?.title || "Compito",
+        status: "deleted"
+      }]);
+      return json({ ok: true, role, ...data });
+    }
+
     if (action === "sync") {
       const expectedRevision = body?.expectedRevision;
       if (expectedRevision !== undefined && expectedRevision !== null) {
@@ -728,7 +804,8 @@ Deno.serve(async (req) => {
       "forbidden_approved_chore_change",
       "forbidden_chore_completion",
       "finance_payload_limit",
-      "finance_payload_too_large"
+      "finance_payload_too_large",
+      "invalid_chore_id"
     ]);
     return json({ ok: false, error: clientErrors.has(message) ? message : "server_error" }, clientErrors.has(message) ? 403 : 500);
   }
