@@ -360,12 +360,14 @@ export default function ChoresPage() {
                 {!isChild && isPending ? <div className="chore-approval-actions">
                   <Button size="sm" variant="soft" onClick={() => approveChore(chore.id)}>Conferma</Button>
                   <IconButton label="Rifiuta e riapri" onClick={() => rejectChore(chore.id)}><XCircle size={17} /></IconButton>
+                  <IconButton label="Elimina completamento" onClick={() => void deleteChore(chore.id)}><Trash2 size={17} /></IconButton>
                 </div> : null}
 
                 {!isChild && isApproved ? <div className="chore-approved-actions">
                   <Button size="sm" variant="soft" onClick={() => undoApprovedChore(chore)}>Annulla conferma</Button>
+                  <Button size="sm" variant="danger" icon={<Trash2 size={15} />} onClick={() => void deleteChore(chore.id)}>Elimina</Button>
                 </div> : null}
-                {!isChild && !isPending && !isApproved ? <IconButton label="Elimina" onClick={() => deleteChore(chore.id)}><Trash2 size={17} /></IconButton> : null}
+                {!isChild && !isPending && !isApproved ? <IconButton label="Elimina" onClick={() => void deleteChore(chore.id)}><Trash2 size={17} /></IconButton> : null}
               </div>
             })}
         </div> : <EmptyState
@@ -441,7 +443,7 @@ export default function ChoresPage() {
       <Card>
         <CardHeader
           title={isChild ? 'I miei movimenti' : 'Movimenti'}
-          subtitle={isChild ? 'Accrediti approvati e pagamenti registrati.' : 'I pagamenti errati possono essere annullati.'}
+          subtitle={isChild ? 'Accrediti approvati e pagamenti registrati.' : 'Da qui puoi annullare pagamenti o eliminare un compito accreditato per errore.'}
         />
         {data.transactions.filter(tx => !isChild || tx.userId === authUser?.id).length ? <div className="transaction-list">
           {data.transactions
@@ -450,15 +452,18 @@ export default function ChoresPage() {
             .sort((a, b) => b.id - a.id)
             .map(tx => {
               const user = data.users.find(u => u.id === tx.userId)
+              const linkedChore = data.chores.find(chore => chore.creditedTransactionId === tx.id)
               return <div key={tx.id} className={`transaction-row ${tx.reversed ? 'is-reversed' : ''}`}>
                 <Avatar user={user} size="xs" />
                 <div><strong>{tx.note}</strong><span>{tx.date} · {user?.name}</span></div>
                 <Badge tone={tx.type === 'credit' ? 'success' : tx.type === 'payment' ? 'warning' : 'neutral'}>
                   {tx.type === 'credit' ? '+' : '-'}{money(tx.amount, currency)}
                 </Badge>
-                {!isChild && tx.type === 'payment' && !tx.reversed
-                  ? <IconButton label="Annulla pagamento" onClick={() => undoTransaction(tx.id)}><RotateCcw size={17} /></IconButton>
-                  : tx.reversed ? <Badge>Annullato</Badge> : null}
+                {!isChild && tx.type === 'credit' && !tx.reversed && linkedChore
+                  ? <IconButton label="Elimina compito e annulla accredito" onClick={() => void deleteChore(linkedChore.id)}><Trash2 size={17} /></IconButton>
+                  : !isChild && tx.type === 'payment' && !tx.reversed
+                    ? <IconButton label="Annulla pagamento" onClick={() => undoTransaction(tx.id)}><RotateCcw size={17} /></IconButton>
+                    : tx.reversed ? <Badge>Annullato</Badge> : null}
               </div>
             })}
         </div> : <EmptyState icon={<WalletCards size={28} />} title="Nessun movimento" text="Qui appariranno accrediti e pagamenti." />}
