@@ -434,7 +434,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     return result
   }
 
-  async function callFinanceGateway(action: 'read' | 'sync', targetFamilyId: string, extra: Record<string, any> = {}) {
+  async function callFinanceGateway(action: 'read' | 'sync' | 'delete-chore', targetFamilyId: string, extra: Record<string, any> = {}) {
     if (!supabase) throw new Error('Cloud non disponibile.')
     const { data: result, error } = await supabase.functions.invoke('finance-data-gateway', {
       body: { action, familyId: targetFamilyId, ...extra }
@@ -2227,9 +2227,58 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (authUser?.role === 'bimbo') return
     const chore = data.chores.find(item => item.id === id)
     if (!chore) return
-    if (!confirmDeletion('il compito “' + chore.title + '”')) return
-    if (!await archiveDeletedItem('chores', chore.title, { kind: 'chore', item: chore })) return
-    setData(prev => ({ ...prev, chores: prev.chores.filter(c => c.id !== id) }))
+
+    const status = chore.done ? 'approved' : (chore.completionStatus || 'open')
+    const detail = status === 'approved'
+      ? `L’accredito di ${money(chore.amount, data.currency)} verrà annullato e il compito sarà eliminato definitivamente dall’elenco.`
+      : status === 'pending'
+        ? 'La segnalazione di completamento verrà eliminata e non resterà in attesa di approvazione.'
+        : 'Il compito verrà eliminato.'
+
+    if (!confirmDeletion('il compito “' + chore.title + '”', detail)) return
+    const linkedTransaction = chore.creditedTransactionId
+      ? data.transactions.find(tx => tx.id === chore.creditedTransactionId)
+      : undefined
+    if (!await archiveDeletedItem('chores', chore.title, {
+      kind: 'chore',
+      item: chore,
+      transaction: linkedTransaction
+    })) return
+
+    if (supabase && familyIdRef.current && cloudUserId) {
+      try {
+        const result = await callFinanceGateway('delete-chore', familyIdRef.current, { choreId: id })
+        setData(prev => mergeFinanceData(prev, result))
+        return
+      } catch (error) {
+        console.error('delete completed chore', error)
+        if (typeof window !== 'undefined') {
+          window.alert('Non sono riuscito a eliminare il compito dal cloud. Non è stata fatta alcuna modifica alla paghetta.')
+        }
+        return
+      }
+    }
+
+    // Offline/local fallback: preserve the financial audit trail by reversing
+    // the credit instead of deleting it silently.
+    setData(prev => {
+      const current = prev.chores.find(item => item.id === id)
+      if (!current) return prev
+      const txId = current.creditedTransactionId
+      const wasApproved = current.done || current.completionStatus === 'approved'
+      return {
+        ...prev,
+        chores: prev.chores.filter(item => item.id !== id),
+        users: wasApproved
+          ? prev.users.map(user => user.id === current.userId
+              ? { ...user, balance: Math.max(0, Number(user.balance || 0) - Number(current.amount || 0)) }
+              : user)
+          : prev.users,
+        transactions: txId
+          ? prev.transactions.map(tx => tx.id === txId ? { ...tx, reversed: true } : tx)
+          : prev.transactions
+      }
+    })
   }
 
   function payUser(userId: number, amount: number, note = 'Pagamento paghetta') {
