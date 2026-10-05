@@ -579,3 +579,21 @@
     padding:10px;
   }
 }
+
+
+.variant-ingredients-callout{
+  display:grid;
+  gap:3px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:color-mix(in srgb,var(--accent) 7%,var(--surface));
+  border:1px solid color-mix(in srgb,var(--accent) 18%,var(--border));
+}
+.variant-ingredients-callout strong{
+  font-size:12.5px;
+}
+.variant-ingredients-callout span{
+  color:var(--muted);
+  font-size:10.5px;
+  line-height:1.35;
+}
