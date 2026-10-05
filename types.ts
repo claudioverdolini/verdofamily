@@ -233,7 +233,10 @@ export type Dish = {
   name: string
   type: string
   variant: string
+  /** Ingredients used by every variant of the dish. */
   ingredients: Ingredient[]
+  /** Extra ingredients keyed by the exact variant label (e.g. "Carbonara"). */
+  variantIngredients?: Record<string, Ingredient[]>
   prepMinutes?: number
   preferredByUserIds?: number[]
   sourceUrl?: string
