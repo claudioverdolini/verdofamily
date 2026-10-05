@@ -1,4 +1,4 @@
-import type { BoardPost, CalendarEvent, Chore, CurrencyCode, Deadline, FamilyData, FamilyUser, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
+import type { BoardPost, CalendarEvent, Chore, CurrencyCode, Deadline, Dish, FamilyData, FamilyUser, Ingredient, MedicinePackage, PantryItem, PantryMovement, RecurringChore, Routine, RoutineCompletion, SchoolItem, SchoolSubject, SchoolTimetableEntry, TherapyMedicine, UserPrefs } from './types'
 import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 
 export const MEAL_TYPES = ['Antipasto', 'Primo', 'Secondo', 'Contorno', 'Piatto veloce/unico', 'Dolce', 'Altro']
@@ -586,6 +586,27 @@ export function ingredientsToText(items: Array<{ name: string; qty: number; unit
   return (items || []).map(i => `${i.name}=${i.qty}=${i.unit}`).join(';')
 }
 
+export function dishIngredientsForVariant(
+  dish?: Pick<Dish, 'ingredients' | 'variantIngredients'> | null,
+  variant?: string
+): Ingredient[] {
+  if (!dish) return []
+  const common = Array.isArray(dish.ingredients) ? dish.ingredients : []
+  const groups = dish.variantIngredients && typeof dish.variantIngredients === 'object'
+    ? dish.variantIngredients
+    : {}
+  const keys = Object.keys(groups)
+  let key = ''
+  if (variant) {
+    key = keys.find(candidate => normalize(candidate) === normalize(variant)) || ''
+  } else if (keys.length === 1) {
+    // Backward-friendly behaviour for dishes that only have one variant.
+    key = keys[0]
+  }
+  const specific = key && Array.isArray(groups[key]) ? groups[key] : []
+  return [...common, ...specific]
+}
+
 export const DEFAULT_PREFS: UserPrefs = {
   theme: 'system',
   accent: '#635BFF',
@@ -885,6 +906,18 @@ export function migrateData(raw: any, fallback: FamilyData): FamilyData {
         qty: Math.max(0, Number(ing?.qty || 0)),
         unit: String(ing?.unit || 'pz')
       })).filter((ing: any) => ing.name) : [],
+      variantIngredients: dish.variantIngredients && typeof dish.variantIngredients === 'object'
+        ? Object.fromEntries(Object.entries(dish.variantIngredients)
+            .map(([variant, items]: [string, any]) => [
+              String(variant || '').trim(),
+              Array.isArray(items) ? items.map((ing: any) => ({
+                name: String(ing?.name || ''),
+                qty: Math.max(0, Number(ing?.qty || 0)),
+                unit: String(ing?.unit || 'pz')
+              })).filter((ing: any) => ing.name) : []
+            ])
+            .filter(([variant, items]: [string, any]) => variant && items.length))
+        : undefined,
       prepMinutes: dish.prepMinutes === undefined || dish.prepMinutes === null ? undefined : Math.max(0, Number(dish.prepMinutes) || 0),
       preferredByUserIds: Array.from(new Set((Array.isArray(dish.preferredByUserIds) ? dish.preferredByUserIds : []).map(Number).filter((id: number) => id > 0))),
       sourceUrl: /^https?:\/\//i.test(String(dish.sourceUrl || '')) ? String(dish.sourceUrl).trim() : undefined,
