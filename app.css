@@ -547,3 +547,35 @@
     border-top:1px solid var(--border);
   }
 }
+
+
+/* Dish editor: ingredients by variant */
+.variant-ingredients-editor{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:var(--surface2);
+}
+.variant-ingredients-editor__head{
+  grid-column:1 / -1;
+  display:grid;
+  gap:3px;
+  margin-bottom:2px;
+}
+.variant-ingredients-editor__head strong{
+  font-size:13px;
+}
+.variant-ingredients-editor__head span{
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.4;
+}
+@media(max-width:620px){
+  .variant-ingredients-editor{
+    grid-template-columns:minmax(0,1fr);
+    padding:10px;
+  }
+}
