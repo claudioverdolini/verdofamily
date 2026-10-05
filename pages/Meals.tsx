@@ -3,7 +3,7 @@ import { BookOpen, ChevronLeft, ChevronRight, Clock3, ExternalLink, Filter, Link
 import { useFamily } from '../store'
 import MultiAssigneePicker from '../components/MultiAssigneePicker'
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, Field, IconButton, Modal, PageIntro, Segmented } from '../ui'
-import { addDays, dayLabel, ingredientsToText, localDateISO, MEAL_SLOTS, MEAL_TYPES, normalize, parseIngredients, weekDates } from '../utils'
+import { addDays, dayLabel, dishIngredientsForVariant, ingredientsToText, localDateISO, MEAL_SLOTS, MEAL_TYPES, normalize, parseIngredients, weekDates } from '../utils'
 
 function ingredientAvailability(name: string, unit: string, pantry: any[]) {
   return pantry
@@ -47,6 +47,24 @@ function dishVariantOptions(value?: string) {
       .map(item => item.trim())
       .filter(Boolean)
   ))
+}
+
+function variantIngredientsToTextMap(dish?: any) {
+  const groups = dish?.variantIngredients && typeof dish.variantIngredients === 'object'
+    ? dish.variantIngredients
+    : {}
+  return Object.fromEntries(
+    Object.entries(groups).map(([variant, items]: [string, any]) => [
+      variant,
+      ingredientsToText(Array.isArray(items) ? items : [])
+    ])
+  )
+}
+
+function variantTextFromMap(map: Record<string, string> | undefined, variant: string) {
+  if (!map) return ''
+  const key = Object.keys(map).find(candidate => normalize(candidate) === normalize(variant))
+  return key ? String(map[key] || '') : ''
 }
 
 export default function MealsPage() {
@@ -112,7 +130,7 @@ export default function MealsPage() {
   const smartSuggestions = useMemo(() => {
     const recentStart = addDays(today, -10)
     return data.dishes.map(dish => {
-      const ingredients = dish.ingredients || []
+      const ingredients = dishIngredientsForVariant(dish)
       let coverageScore = 0
       let expiryBoost = 0
       const missing: Array<{ name: string; qty: number; unit: string }> = []
@@ -185,15 +203,45 @@ export default function MealsPage() {
   function openDish(dish?: any) {
     setDishEditorKind('dish')
     setEditingDish(dish
-      ? { ...dish, ingredientsText: ingredientsToText(dish.ingredients), preferredByUserIds: [...(dish.preferredByUserIds || [])] }
-      : { id: undefined, name: '', type: 'Primo', variant: '', ingredientsText: '', prepMinutes: 30, preferredByUserIds: [], sourceUrl: '', sourceLabel: '', notes: '' })
+      ? {
+          ...dish,
+          ingredientsText: ingredientsToText(dish.ingredients),
+          variantIngredientsText: variantIngredientsToTextMap(dish),
+          preferredByUserIds: [...(dish.preferredByUserIds || [])]
+        }
+      : { id: undefined, name: '', type: 'Primo', variant: '', ingredientsText: '', variantIngredientsText: {}, prepMinutes: 30, preferredByUserIds: [], sourceUrl: '', sourceLabel: '', notes: '' })
   }
 
   function openRecipe(dish?: any) {
     setDishEditorKind('recipe')
     setEditingDish(dish
-      ? { ...dish, ingredientsText: ingredientsToText(dish.ingredients), preferredByUserIds: [...(dish.preferredByUserIds || [])] }
-      : { id: undefined, name: '', type: '', variant: '', ingredientsText: '', prepMinutes: 30, preferredByUserIds: [], sourceUrl: '', sourceLabel: '', notes: '' })
+      ? {
+          ...dish,
+          ingredientsText: ingredientsToText(dish.ingredients),
+          variantIngredientsText: variantIngredientsToTextMap(dish),
+          preferredByUserIds: [...(dish.preferredByUserIds || [])]
+        }
+      : { id: undefined, name: '', type: '', variant: '', ingredientsText: '', variantIngredientsText: {}, prepMinutes: 30, preferredByUserIds: [], sourceUrl: '', sourceLabel: '', notes: '' })
+  }
+
+  function updateEditingDishVariants(value: string) {
+    if (!editingDish) return
+    const previousVariants = dishVariantOptions(editingDish.variant)
+    const nextVariants = dishVariantOptions(value)
+    const currentMap: Record<string, string> = editingDish.variantIngredientsText || {}
+    const nextMap: Record<string, string> = {}
+
+    nextVariants.forEach((variant, index) => {
+      const exact = variantTextFromMap(currentMap, variant)
+      if (exact) {
+        nextMap[variant] = exact
+        return
+      }
+      const previousVariant = previousVariants[index]
+      nextMap[variant] = previousVariant ? variantTextFromMap(currentMap, previousVariant) : ''
+    })
+
+    setEditingDish({ ...editingDish, variant: value, variantIngredientsText: nextMap })
   }
 
   function saveDish() {
@@ -207,12 +255,20 @@ export default function MealsPage() {
       alert('Seleziona una tipologia di piatto.')
       return
     }
+    const variants = dishVariantOptions(editingDish.variant)
+    const variantIngredients = Object.fromEntries(
+      variants
+        .map(variant => [variant, parseIngredients(variantTextFromMap(editingDish.variantIngredientsText, variant))])
+        .filter(([, items]: [string, any]) => items.length)
+    )
+
     upsertDish({
       id: editingDish.id,
       name: editingDish.name.trim(),
       type: editingDish.type,
       variant: editingDish.variant.trim(),
       ingredients: parseIngredients(editingDish.ingredientsText || ''),
+      variantIngredients: Object.keys(variantIngredients).length ? variantIngredients : undefined,
       prepMinutes: Math.max(0, Number(editingDish.prepMinutes) || 0) || undefined,
       preferredByUserIds: (editingDish.preferredByUserIds || []).map(Number),
       sourceUrl: sourceUrl || undefined,
@@ -222,16 +278,20 @@ export default function MealsPage() {
     setEditingDish(null)
   }
 
-  function missingIngredientsForPlan(dishId: number, planId?: number) {
+  function missingIngredientsForPlan(dishId: number, variant?: string, planId?: number) {
     const dish = data.dishes.find(item => item.id === Number(dishId))
     if (!dish) return []
     const previousPlan = planId ? data.mealPlans.find(item => item.id === planId) : undefined
     const previousDish = previousPlan ? data.dishes.find(item => item.id === previousPlan.dishId) : undefined
+    const ingredients = dishIngredientsForVariant(dish, variant)
+    const previousIngredients = previousDish
+      ? dishIngredientsForVariant(previousDish, previousPlan?.variant)
+      : []
 
-    return (dish.ingredients || []).map(ing => {
+    return ingredients.map(ing => {
       let available = ingredientAvailability(ing.name, ing.unit, data.pantry)
-      if (previousDish) {
-        available += (previousDish.ingredients || [])
+      if (previousIngredients.length) {
+        available += previousIngredients
           .filter(item => normalize(item.name) === normalize(ing.name) && normalize(item.unit) === normalize(ing.unit))
           .reduce((sum, item) => sum + Number(item.qty || 0), 0)
       }
@@ -307,7 +367,7 @@ export default function MealsPage() {
             .filter((id: number) => id > 0)
         ))
     if (!userIds.length) return
-    const missing = shouldAddMissing ? missingIngredientsForPlan(Number(plan.dishId), plan.id ? Number(plan.id) : undefined) : []
+    const missing = shouldAddMissing ? missingIngredientsForPlan(Number(plan.dishId), plan.variant, plan.id ? Number(plan.id) : undefined) : []
     userIds.forEach((userId: number, index: number) => upsertMealPlan({
       ...plan,
       id: editingPlan.id && index === 0 ? editingPlan.id : undefined,
@@ -570,7 +630,7 @@ export default function MealsPage() {
               {MEAL_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
             </select>
           </Field>
-          <Field label="Variante/i" hint="Se il piatto ha più varianti, separale con una virgola: es. Pomodoro, Carbonara, Pesto."><input value={editingDish.variant} onChange={e => setEditingDish({ ...editingDish, variant: e.target.value })} placeholder="Es. Pomodoro, Carbonara, Pesto" /></Field>
+          <Field label="Variante/i" hint="Se il piatto ha più varianti, separale con una virgola: es. Pomodoro, Carbonara, Pesto."><input value={editingDish.variant} onChange={e => updateEditingDishVariants(e.target.value)} placeholder="Es. Pomodoro, Carbonara, Pesto" /></Field>
           <Field label="Tempo di preparazione"><input type="number" min="0" step="5" value={editingDish.prepMinutes || ''} onChange={e => setEditingDish({ ...editingDish, prepMinutes: Number(e.target.value) })} placeholder="30" /></Field>
           <Field label="Preferito da" className="field--wide" hint="Facoltativo: aiuta VerdoFamily a personalizzare i suggerimenti.">
             <div className="meal-preference-picker">{data.users.map(user => {
@@ -578,7 +638,42 @@ export default function MealsPage() {
               return <button type="button" key={user.id} className={selected ? 'is-active' : ''} onClick={() => togglePreferredUser(user.id)}><Avatar user={user} size="xs" /> {user.name}</button>
             })}</div>
           </Field>
-          <Field label="Ingredienti" className="field--wide" hint={dishEditorKind === 'recipe' ? 'Servono per confrontare la ricetta con dispensa e lista spesa. Formato: nome=quantità=unità; ...' : 'Formato: nome=quantità=unità; nome=quantità=unità'}><textarea rows={5} value={editingDish.ingredientsText} onChange={e => setEditingDish({ ...editingDish, ingredientsText: e.target.value })} placeholder="Pasta=80=g; Passata=100=g" /></Field>
+          {(() => {
+            const variants = dishVariantOptions(editingDish.variant)
+            return <>
+              <Field
+                label={variants.length ? 'Ingredienti comuni' : 'Ingredienti'}
+                className="field--wide"
+                hint={variants.length
+                  ? 'Inserisci qui solo gli ingredienti uguali per tutte le varianti. Formato: nome=quantità=unità; ...'
+                  : dishEditorKind === 'recipe'
+                    ? 'Servono per confrontare la ricetta con dispensa e lista spesa. Formato: nome=quantità=unità; ...'
+                    : 'Formato: nome=quantità=unità; nome=quantità=unità'}
+              >
+                <textarea rows={variants.length ? 3 : 5} value={editingDish.ingredientsText} onChange={e => setEditingDish({ ...editingDish, ingredientsText: e.target.value })} placeholder="Pasta=80=g; Passata=100=g" />
+              </Field>
+              {variants.length ? <div className="variant-ingredients-editor field--wide">
+                <div className="variant-ingredients-editor__head">
+                  <strong>Ingredienti per variante</strong>
+                  <span>Questi ingredienti vengono usati solo quando scegli quella variante nel planner. Se ripeti un ingrediente comune, la quantità della variante sostituisce quella comune.</span>
+                </div>
+                {variants.map(variant => <Field key={variant} label={`Variante · ${variant}`} hint="Lascia vuoto se questa variante usa soltanto gli ingredienti comuni.">
+                  <textarea
+                    rows={3}
+                    value={variantTextFromMap(editingDish.variantIngredientsText, variant)}
+                    onChange={e => setEditingDish({
+                      ...editingDish,
+                      variantIngredientsText: {
+                        ...(editingDish.variantIngredientsText || {}),
+                        [variant]: e.target.value
+                      }
+                    })}
+                    placeholder={`Ingredienti specifici per ${variant}`}
+                  />
+                </Field>)}
+              </div> : null}
+            </>
+          })()}
         </div> : null}
       </Modal>
 
