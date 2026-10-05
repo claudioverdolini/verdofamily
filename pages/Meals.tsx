@@ -631,13 +631,10 @@ export default function MealsPage() {
             </select>
           </Field>
           <Field label="Variante/i" hint="Se il piatto ha più varianti, separale con una virgola: es. Pomodoro, Carbonara, Pesto."><input value={editingDish.variant} onChange={e => updateEditingDishVariants(e.target.value)} placeholder="Es. Pomodoro, Carbonara, Pesto" /></Field>
-          <Field label="Tempo di preparazione"><input type="number" min="0" step="5" value={editingDish.prepMinutes || ''} onChange={e => setEditingDish({ ...editingDish, prepMinutes: Number(e.target.value) })} placeholder="30" /></Field>
-          <Field label="Preferito da" className="field--wide" hint="Facoltativo: aiuta VerdoFamily a personalizzare i suggerimenti.">
-            <div className="meal-preference-picker">{data.users.map(user => {
-              const selected = (editingDish.preferredByUserIds || []).includes(user.id)
-              return <button type="button" key={user.id} className={selected ? 'is-active' : ''} onClick={() => togglePreferredUser(user.id)}><Avatar user={user} size="xs" /> {user.name}</button>
-            })}</div>
-          </Field>
+          <div className="variant-ingredients-callout field--wide">
+            <strong>Ingredienti collegati alle varianti</strong>
+            <span>Compila gli ingredienti comuni e, sotto, quelli specifici di ciascuna variante.</span>
+          </div>
           {(() => {
             const variants = dishVariantOptions(editingDish.variant)
             return <>
@@ -674,6 +671,14 @@ export default function MealsPage() {
               </div> : null}
             </>
           })()}
+          <Field label="Tempo di preparazione"><input type="number" min="0" step="5" value={editingDish.prepMinutes || ''} onChange={e => setEditingDish({ ...editingDish, prepMinutes: Number(e.target.value) })} placeholder="30" /></Field>
+          <Field label="Preferito da" className="field--wide" hint="Facoltativo: aiuta VerdoFamily a personalizzare i suggerimenti.">
+            <div className="meal-preference-picker">{data.users.map(user => {
+              const selected = (editingDish.preferredByUserIds || []).includes(user.id)
+              return <button type="button" key={user.id} className={selected ? 'is-active' : ''} onClick={() => togglePreferredUser(user.id)}><Avatar user={user} size="xs" /> {user.name}</button>
+            })}</div>
+          </Field>
+
         </div> : null}
       </Modal>
 
