@@ -432,7 +432,13 @@ export default function MealsPage() {
                     {list.map(plan => {
                       const dish = data.dishes.find(d => d.id === plan.dishId)
                       const user = data.users.find(u => u.id === plan.userId)
-                      return <button key={plan.id} className="meal-plan-pill" onClick={() => openPlan(date, slot, plan)} style={{ '--meal-color': user?.color || '#5B5BD6' } as React.CSSProperties}><strong>{dish?.name || 'Piatto'}</strong>{plan.variant ? <span>{plan.variant}</span> : dish?.sourceUrl ? <span>🔗 {dish.sourceLabel || 'Ricetta online'}</span> : null}</button>
+                      return <button key={plan.id} className="meal-plan-pill" onClick={() => openPlan(date, slot, plan)} style={{ '--meal-color': user?.color || '#5B5BD6' } as React.CSSProperties}>
+                        <strong>{dish?.name || 'Piatto'}</strong>
+                        {plan.variant ? <span>{plan.variant}</span> : dish?.sourceUrl ? <span>🔗 {dish.sourceLabel || 'Ricetta online'}</span> : null}
+                        <span className="meal-plan-pill__assignee">
+                          {user ? <><Avatar user={user} size="xs" /><b>Per {user.name}</b></> : <b>Destinatario non disponibile</b>}
+                        </span>
+                      </button>
                     })}
                     <button className="meal-add" onClick={() => openPlan(date, slot)}>+</button>
                   </div>
@@ -486,9 +492,12 @@ export default function MealsPage() {
                           <span className="meal-mobile-plan__dot" />
                           <span className="meal-mobile-plan__copy">
                             <strong>{dish?.name || 'Piatto'}</strong>
-                            <small>{plan.variant || dish?.sourceLabel || user?.name || 'Pasto pianificato'}</small>
+                            {plan.variant || dish?.sourceLabel ? <small>{plan.variant || dish?.sourceLabel}</small> : null}
+                            <span className="meal-mobile-plan__assignee">
+                              {user ? <><Avatar user={user} size="xs" /><b>Per {user.name}</b></> : <b>Destinatario non disponibile</b>}
+                            </span>
                           </span>
-                          {user ? <Avatar user={user} size="xs" /> : <ChevronRight size={17} />}
+                          <ChevronRight size={17} />
                         </button>
                       }) : <button className="meal-mobile-empty" onClick={() => openPlan(selectedMobileDate, slot)}>
                         <Plus size={17} />
