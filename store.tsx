@@ -29,7 +29,7 @@ import type {
   UserPrefs
 } from './types'
 import { initialData } from './data'
-import { localDateISO, mergePrefs, migrateData, nextId, normalize, recurringChoreDueOn } from './utils'
+import { dishIngredientsForVariant, localDateISO, mergePrefs, migrateData, nextId, normalize, recurringChoreDueOn } from './utils'
 import { isExpenseCategory, isExpenseSubcategory, subcategoryBelongsToCategory } from './expenseCategories'
 import { isSupabaseConfigured, supabase } from './supabaseClient'
 import type { PushTopics } from './pushNotifications'
@@ -1897,12 +1897,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     })
   }
 
-  function adjustIngredients(prev: FamilyData, dishId: number, factor: number) {
+  function adjustIngredients(prev: FamilyData, dishId: number, variant: string | undefined, factor: number) {
     const dish = prev.dishes.find(d => d.id === dishId)
     if (!dish) return { pantry: prev.pantry, pantryMovements: prev.pantryMovements }
     const pantry = [...prev.pantry]
     let pantryMovements = [...prev.pantryMovements]
-    for (const ing of dish.ingredients) {
+    for (const ing of dishIngredientsForVariant(dish, variant)) {
       const candidates = pantry
         .map((item, index) => ({ item, index }))
         .filter(({ item }) => normalize(item.name) === normalize(ing.name))
@@ -1939,12 +1939,12 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
       if (plan.id) {
         const old = prev.mealPlans.find(p => p.id === plan.id)
         if (old) {
-          const restored = adjustIngredients({ ...prev, pantry }, old.dishId, +1)
+          const restored = adjustIngredients({ ...prev, pantry }, old.dishId, old.variant, +1)
           pantry = restored.pantry
           prev = { ...prev, pantryMovements: restored.pantryMovements }
         }
       }
-      const consumed = adjustIngredients({ ...prev, pantry }, plan.dishId, -1)
+      const consumed = adjustIngredients({ ...prev, pantry }, plan.dishId, plan.variant, -1)
       pantry = consumed.pantry
       const mealPlans = plan.id ? prev.mealPlans.map(p => p.id === plan.id ? { ...p, ...plan, id: p.id } : p) : [...prev.mealPlans, { ...plan, id: nextId(prev.mealPlans) }]
       return { ...prev, pantry, pantryMovements: consumed.pantryMovements, mealPlans }
@@ -1959,7 +1959,7 @@ export function FamilyProvider({ children }: { children: React.ReactNode }) {
     if (!await archiveDeletedItem('meals', dish?.name || 'Pasto pianificato', { kind: 'mealPlan', item: plan })) return
     setData(prev => {
       const current = prev.mealPlans.find(p => p.id === id)
-      const restored = current ? adjustIngredients(prev, current.dishId, +1) : { pantry: prev.pantry, pantryMovements: prev.pantryMovements }
+      const restored = current ? adjustIngredients(prev, current.dishId, current.variant, +1) : { pantry: prev.pantry, pantryMovements: prev.pantryMovements }
       return { ...prev, pantry: restored.pantry, pantryMovements: restored.pantryMovements, mealPlans: prev.mealPlans.filter(p => p.id !== id) }
     })
   }
