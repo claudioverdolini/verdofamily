@@ -597,3 +597,39 @@
   font-size:10.5px;
   line-height:1.35;
 }
+
+
+/* Meal planner assignee visibility */
+.meal-plan-pill__assignee,
+.meal-mobile-plan__assignee{
+  display:flex;
+  align-items:center;
+  gap:5px;
+  min-width:0;
+}
+.meal-plan-pill__assignee{
+  margin-top:5px;
+  padding-top:5px;
+  border-top:1px solid color-mix(in srgb,var(--meal-color) 18%,var(--border));
+}
+.meal-plan-pill__assignee b{
+  font-size:7.5px;
+  color:var(--text);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.meal-plan-pill__assignee .avatar{
+  flex:0 0 auto;
+}
+.meal-mobile-plan__assignee{
+  margin-top:4px;
+}
+.meal-mobile-plan__assignee b{
+  font-size:9px;
+  color:var(--text);
+  font-weight:850;
+}
+.meal-mobile-plan__assignee .avatar{
+  flex:0 0 auto;
+}
