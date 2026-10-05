@@ -604,7 +604,15 @@ export function dishIngredientsForVariant(
     key = keys[0]
   }
   const specific = key && Array.isArray(groups[key]) ? groups[key] : []
-  return [...common, ...specific]
+  if (!specific.length) return [...common]
+
+  // Variant rows override a common ingredient with the same name+unit. This
+  // makes it possible to vary quantities without double-counting them.
+  const specificKeys = new Set(specific.map(item => `${normalize(item.name)}|${normalize(item.unit || 'pz')}`))
+  return [
+    ...common.filter(item => !specificKeys.has(`${normalize(item.name)}|${normalize(item.unit || 'pz')}`)),
+    ...specific
+  ]
 }
 
 export const DEFAULT_PREFS: UserPrefs = {
