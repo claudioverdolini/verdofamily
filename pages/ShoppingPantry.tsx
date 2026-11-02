@@ -138,6 +138,9 @@ export default function ShoppingPantryPage() {
   const [shopUnit, setShopUnit] = useState('pz')
   const [query, setQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('Tutte')
+  const [pantryView, setPantryView] = useState<'compact' | 'cards'>('compact')
+  const [pantrySort, setPantrySort] = useState<'name' | 'expiry' | 'quantity' | 'location'>('name')
+  const [pantryAlert, setPantryAlert] = useState<'all' | 'expiring' | 'low' | 'opened'>('all')
   const [locationFilter, setLocationFilter] = useState<'all' | PantryLocation>('all')
   const [inventoryDestination, setInventoryDestination] = useState<PantryLocation>('pantry')
   const [editingPantry, setEditingPantry] = useState<any>(null)
@@ -773,28 +776,6 @@ export default function ShoppingPantryPage() {
   const pending = data.shopping.filter(x => !x.taken)
   const taken = data.shopping.filter(x => x.taken)
 
-  const pantryFiltered = useMemo(() => {
-    const q = normalize(query)
-    return data.pantry.filter(item => {
-      if (categoryFilter !== 'Tutte' && item.category !== categoryFilter) return false
-      if (locationFilter !== 'all' && (item.location || 'pantry') !== locationFilter) return false
-      if (q) {
-        const searchable = normalize([
-          item.name,
-          item.brand,
-          item.variant,
-          item.packageSize,
-          item.barcode,
-          item.productInfo?.brand,
-          item.productInfo?.displayName,
-          item.productInfo?.barcode
-        ].filter(Boolean).join(' '))
-        if (!searchable.includes(q)) return false
-      }
-      return true
-    }).sort((a, b) => `${a.location || 'pantry'}${a.category}${a.name}`.localeCompare(`${b.location || 'pantry'}${b.category}${b.name}`))
-  }, [data.pantry, query, categoryFilter, locationFilter])
-
   const inventoryStatus = useMemo(() => data.pantry.map(item => {
     const averageDailyUse = pantryAverageDailyUse(item.id, data.pantryMovements)
     const daysRemaining = pantryDaysRemaining(item, data.pantryMovements)
@@ -802,6 +783,40 @@ export default function ShoppingPantryPage() {
     const needsRestock = pantryNeedsRestock(item, data.pantryMovements)
     return { item, averageDailyUse, daysRemaining, expiryDays, needsRestock }
   }), [data.pantry, data.pantryMovements])
+
+  const statusById = useMemo(
+    () => new Map(inventoryStatus.map(entry => [entry.item.id, entry])),
+    [inventoryStatus]
+  )
+
+  const pantryFiltered = useMemo(() => {
+    const q = normalize(query)
+    return data.pantry.filter(item => {
+      if (categoryFilter !== 'Tutte' && item.category !== categoryFilter) return false
+      if (locationFilter !== 'all' && (item.location || 'pantry') !== locationFilter) return false
+      const status = statusById.get(item.id)
+      if (pantryAlert === 'expiring' && !(status?.expiryDays !== null && status?.expiryDays !== undefined && status.expiryDays <= 7)) return false
+      if (pantryAlert === 'low' && !status?.needsRestock) return false
+      if (pantryAlert === 'opened' && item.packageState !== 'opened') return false
+      if (!q) return true
+      return normalize([
+        item.name, item.brand, item.variant, item.packageSize, item.barcode,
+        item.productInfo?.brand, item.productInfo?.displayName, item.productInfo?.barcode
+      ].filter(Boolean).join(' ')).includes(q)
+    }).sort((a, b) => {
+      if (pantrySort === 'expiry') {
+        const diff = (statusById.get(a.id)?.expiryDays ?? Number.POSITIVE_INFINITY)
+          - (statusById.get(b.id)?.expiryDays ?? Number.POSITIVE_INFINITY)
+        if (diff !== 0) return diff
+      }
+      if (pantrySort === 'quantity' && a.qty !== b.qty) return a.qty - b.qty
+      if (pantrySort === 'location') {
+        const location = (a.location || 'pantry').localeCompare(b.location || 'pantry')
+        if (location !== 0) return location
+      }
+      return a.name.localeCompare(b.name, 'it', { sensitivity: 'base' })
+    })
+  }, [data.pantry, query, categoryFilter, locationFilter, pantrySort, pantryAlert, statusById])
 
   const restockSuggestions = inventoryStatus
     .filter(entry => entry.needsRestock)
@@ -1638,18 +1653,83 @@ export default function ShoppingPantryPage() {
             <button className={locationFilter === 'fridge' ? 'is-active' : ''} onClick={() => setLocationFilter('fridge')}><Refrigerator size={18} /><span><strong>{locations.fridge}</strong><small>Frigo</small></span></button>
             <button className={locationFilter === 'freezer' ? 'is-active' : ''} onClick={() => setLocationFilter('freezer')}><Snowflake size={18} /><span><strong>{locations.freezer}</strong><small>Freezer</small></span></button>
           </div>
-          <div className="pantry-toolbar">
-            <div className="search-box"><Search size={18} /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca nell’inventario…" /></div>
-            <div className="chip-scroll">
-              {['Tutte', ...data.categories].map(cat => <button key={cat} className={`chip ${categoryFilter === cat ? 'is-active' : ''}`} onClick={() => setCategoryFilter(cat)}>{cat}</button>)}
+          <div className="pantry-v2-controls" aria-label="Filtri inventario">
+            <div className="search-box pantry-v2-search">
+              <Search size={18} />
+              <input aria-label="Cerca prodotti" value={query} onChange={e => setQuery(e.target.value)} placeholder="Cerca prodotto, marca, formato…" />
             </div>
-            <Button variant="ghost" onClick={() => setCategoryModal(true)}>Categorie</Button>
+            <select aria-label="Categoria" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+              <option value="Tutte">Tutte le categorie</option>
+              {data.categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
+            <select aria-label="Mostra prodotti" value={pantryAlert} onChange={e => setPantryAlert(e.target.value as typeof pantryAlert)}>
+              <option value="all">Tutti i prodotti</option>
+              <option value="expiring">In scadenza</option>
+              <option value="low">Da ricomprare</option>
+              <option value="opened">Confezioni aperte</option>
+            </select>
+            <select aria-label="Ordina prodotti" value={pantrySort} onChange={e => setPantrySort(e.target.value as typeof pantrySort)}>
+              <option value="name">Ordina: A–Z</option>
+              <option value="expiry">Ordina: scadenza</option>
+              <option value="quantity">Ordina: quantità</option>
+              <option value="location">Ordina: posizione</option>
+            </select>
+            <div className="pantry-v2-view" role="group" aria-label="Visualizzazione inventario">
+              <button type="button" className={pantryView === 'compact' ? 'is-active' : ''} aria-pressed={pantryView === 'compact'} onClick={() => setPantryView('compact')}>Elenco</button>
+              <button type="button" className={pantryView === 'cards' ? 'is-active' : ''} aria-pressed={pantryView === 'cards'} onClick={() => setPantryView('cards')}>Schede</button>
+            </div>
+            <button type="button" className="pantry-v2-category-action" onClick={() => setCategoryModal(true)}>Categorie</button>
+          </div>
+          <div className="pantry-v2-summary" aria-live="polite">
+            <span><strong>{pantryFiltered.length}</strong> {pantryFiltered.length === 1 ? 'prodotto' : 'prodotti'} visualizzati</span>
+            <span className="pantry-v2-summary__alerts">{restockSuggestions.length} da ricomprare · {expiringSoon.length} in scadenza</span>
+            {(query || categoryFilter !== 'Tutte' || locationFilter !== 'all' || pantryAlert !== 'all') ? (
+              <button type="button" onClick={() => { setQuery(''); setCategoryFilter('Tutte'); setLocationFilter('all'); setPantryAlert('all') }}>Azzera filtri</button>
+            ) : null}
           </div>
 
           {pantryFiltered.length ? (
+            pantryView === 'compact' ? (
+              <div className="pantry-v2-list">
+                {pantryFiltered.map(item => {
+                  const status = statusById.get(item.id)
+                  const low = !!status?.needsRestock
+                  const expiryDays = status?.expiryDays
+                  const expiring = expiryDays !== null && expiryDays !== undefined && expiryDays <= 7
+                  const identity = [item.brand || item.productInfo?.brand, item.variant, item.packageSize || item.productInfo?.packageQuantity].filter(Boolean).join(' · ')
+                  return (
+                    <div key={item.id} className="pantry-v2-row">
+                      <button type="button" className="pantry-v2-row__main" onClick={() => { setEnrichmentMessage(''); setEditingPantry({ ...item }) }} aria-label={'Apri scheda ' + item.name}>
+                        <span className="pantry-v2-row__photo">
+                          {item.productInfo?.imageUrl ? <img src={item.productInfo.imageUrl} loading="lazy" alt="" /> : <PackageOpen size={21} aria-hidden="true" />}
+                        </span>
+                        <span className="pantry-v2-row__copy">
+                          <strong>{item.name}</strong>
+                          <span className="pantry-v2-row__identity">{identity || item.category} <span>· {locationLabel(item.location)}</span></span>
+                          {(expiring || low || item.packageState === 'opened' || item.expiryDate) ? (
+                            <span className="pantry-v2-row__flags">
+                              {expiring ? <span className="is-urgent">{expiryDays! < 0 ? 'Scaduto' : expiryDays === 0 ? 'Scade oggi' : 'Scade tra ' + expiryDays + 'g'}</span> : null}
+                              {low ? <span className="is-low">Da ricomprare</span> : null}
+                              {item.packageState === 'opened' ? <span>{'Aperto' + (residualLabel(item) ? ' · ' + residualLabel(item) : '')}</span> : null}
+                              {item.expiryDate && !expiring ? <span>Scad. {item.expiryDate.slice(8,10)}/{item.expiryDate.slice(5,7)}</span> : null}
+                            </span>
+                          ) : null}
+                        </span>
+                        <ChevronRight size={16} className="pantry-v2-row__chevron" aria-hidden="true" />
+                      </button>
+                      <div className="pantry-v2-row__stock" aria-label={'Quantità di ' + item.name}>
+                        <button type="button" aria-label={'Riduci quantità ' + item.name} onClick={() => changePantryQty(item.id, -1)}>−</button>
+                        <span className="pantry-v2-row__qty"><strong>{item.qty}</strong><small>{item.unit}</small></span>
+                        <button type="button" aria-label={'Aumenta quantità ' + item.name} onClick={() => changePantryQty(item.id, 1)}>+</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
             <div className="pantry-grid">
               {pantryFiltered.map(item => {
-                const status = inventoryStatus.find(entry => entry.item.id === item.id)
+                const status = statusById.get(item.id)
                 const low = !!status?.needsRestock
                 const expiryDays = status?.expiryDays
                 const expiring = expiryDays !== null && expiryDays !== undefined && expiryDays <= 7
@@ -1681,8 +1761,9 @@ export default function ShoppingPantryPage() {
                 )
               })}
             </div>
+            )
           ) : (
-            <Card><EmptyState icon={<PackageOpen size={30} />} title="Nessun prodotto" text="Aggiungi il primo articolo oppure importa gli acquisti da uno scontrino." action={<Button onClick={openNewPantry}>Aggiungi prodotto</Button>} /></Card>
+            <Card><EmptyState icon={<PackageOpen size={30} />} title={data.pantry.length ? 'Nessun risultato' : 'Nessun prodotto'} text={data.pantry.length ? 'Prova a cambiare ricerca o filtri per ritrovare i prodotti.' : 'Aggiungi il primo articolo oppure importa gli acquisti da uno scontrino.'} action={data.pantry.length ? <Button onClick={() => { setQuery(''); setCategoryFilter('Tutte'); setLocationFilter('all'); setPantryAlert('all') }}>Azzera filtri</Button> : <Button onClick={openNewPantry}>Aggiungi prodotto</Button>} /></Card>
           )}
         </div>
       ) : null}
